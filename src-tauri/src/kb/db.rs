@@ -5,7 +5,8 @@ use std::path::Path;
 
 use rusqlite::{params, Connection, OpenFlags, OptionalExtension, Transaction};
 
-use super::index::SessionRecord;
+use super::index::messages::MsgOp;
+use super::index::{tokenize, SessionRecord};
 use super::Source;
 
 /// Migration N upgrades schema version N-1 to N. Append only; never edit a
@@ -61,6 +62,26 @@ const MIGRATIONS: &[&str] = &[
       trigger       TEXT NOT NULL,
       summary_json  TEXT,
       ok            INTEGER
+    );
+    ",
+    // v2: message rows and the full-text index over them (derived data).
+    "
+    CREATE TABLE messages (
+      id         INTEGER PRIMARY KEY,
+      file_id    INTEGER NOT NULL REFERENCES files(id) ON DELETE CASCADE,
+      seq        INTEGER NOT NULL,
+      kind       TEXT NOT NULL CHECK (kind IN ('user','assistant','tool_use','tool_result','tool_error')),
+      ts         TEXT,
+      byte_off   INTEGER NOT NULL,
+      msg_key    TEXT,
+      text       TEXT NOT NULL,
+      truncated  INTEGER NOT NULL DEFAULT 0,
+      UNIQUE (file_id, seq)
+    );
+    CREATE VIRTUAL TABLE messages_fts USING fts5(
+      body, tool,
+      content='', contentless_delete=1,
+      tokenize='unicode61 remove_diacritics 0'
     );
     ",
 ];
@@ -300,6 +321,88 @@ pub fn load_indexer_state(
     )
     .optional()
     .map_err(|e| err("load indexer state", e))
+}
+
+/// Apply the message changes of one file inside the caller's transaction.
+/// `replace_all` first drops every stored row of the file (the extractor
+/// started from byte 0, or the file was rewritten).
+pub fn apply_message_ops(
+    tx: &Transaction<'_>,
+    file_id: i64,
+    replace_all: bool,
+    ops: &[MsgOp],
+) -> Result<(), String> {
+    if replace_all {
+        purge_messages(tx, file_id)?;
+    }
+    for op in ops {
+        match op {
+            MsgOp::Remove(seq) => remove_message(tx, file_id, *seq)?,
+            MsgOp::Insert(row) => {
+                remove_message(tx, file_id, row.seq)?;
+                tx.prepare_cached(
+                    "INSERT INTO messages (file_id, seq, kind, ts, byte_off, msg_key, text, truncated) \
+                     VALUES (?1,?2,?3,?4,?5,?6,?7,?8)",
+                )
+                .and_then(|mut st| {
+                    st.execute(params![
+                        file_id,
+                        i64::try_from(row.seq).unwrap_or(i64::MAX),
+                        row.kind.as_str(),
+                        row.ts,
+                        i64::try_from(row.byte_off).unwrap_or(i64::MAX),
+                        row.msg_key,
+                        row.text,
+                        i64::from(row.truncated)
+                    ])
+                })
+                .map_err(|e| err("insert message", e))?;
+                let id = tx.last_insert_rowid();
+                let words = tokenize::index_text(&row.text);
+                let (body, tool) = if row.kind.is_body() {
+                    (words.as_str(), "")
+                } else {
+                    ("", words.as_str())
+                };
+                tx.prepare_cached("INSERT INTO messages_fts (rowid, body, tool) VALUES (?1,?2,?3)")
+                    .and_then(|mut st| st.execute(params![id, body, tool]))
+                    .map_err(|e| err("index message", e))?;
+            }
+        }
+    }
+    Ok(())
+}
+
+fn remove_message(tx: &Transaction<'_>, file_id: i64, seq: u64) -> Result<(), String> {
+    let seq = i64::try_from(seq).unwrap_or(i64::MAX);
+    let id: Option<i64> = tx
+        .query_row(
+            "SELECT id FROM messages WHERE file_id=?1 AND seq=?2",
+            params![file_id, seq],
+            |r| r.get(0),
+        )
+        .optional()
+        .map_err(|e| err("find message", e))?;
+    if let Some(id) = id {
+        tx.execute("DELETE FROM messages_fts WHERE rowid=?1", [id])
+            .map_err(|e| err("unindex message", e))?;
+        tx.execute("DELETE FROM messages WHERE id=?1", [id])
+            .map_err(|e| err("delete message", e))?;
+    }
+    Ok(())
+}
+
+/// Drop every message (and its index entry) of one file. The full-text table
+/// is a virtual table, so the cascade of `files` cannot reach it.
+pub fn purge_messages(tx: &Transaction<'_>, file_id: i64) -> Result<(), String> {
+    tx.execute(
+        "DELETE FROM messages_fts WHERE rowid IN (SELECT id FROM messages WHERE file_id=?1)",
+        [file_id],
+    )
+    .map_err(|e| err("unindex file messages", e))?;
+    tx.execute("DELETE FROM messages WHERE file_id=?1", [file_id])
+        .map_err(|e| err("delete file messages", e))?;
+    Ok(())
 }
 
 /// Insert or replace the session row of a file. Returns true when it was new.

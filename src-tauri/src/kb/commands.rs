@@ -10,6 +10,7 @@ use tauri::Emitter;
 use super::backup::{self, BackupSummary};
 use super::config::{self, ConfigState, KbConfig, SourceRoots};
 use super::migrate_dir::{self, MigrateCheck, MigrationReport};
+use super::paths::DataPaths;
 use super::probe::{self, DataDirReport, MirrorReport, ScheduleEnvReport, SourceProbe};
 use super::progress::ProgressSink;
 use super::schedule::{self, ScheduleStatus};
@@ -17,6 +18,7 @@ use super::status::{self, Facets, KbSession, KbStatus, SessionFilter};
 use super::sync::{self, KbEnv, Summary};
 use super::volume::{self, MacQuery, Presence, VolumeInfo};
 use super::{db, AGENTKB_VERSION};
+use super::{search, skill};
 
 pub const PROGRESS_EVENT: &str = "kb-progress";
 pub const BACKUP_DONE_EVENT: &str = "kb-backup-done";
@@ -777,4 +779,130 @@ mod tests {
         assert_eq!(out.schedule_error.as_deref(), Some("launchctl exploded"));
         assert_eq!(KbConfig::load_from(&rig.file).unwrap().interval_secs, 120);
     }
+}
+
+// ---------------------------------------------------------------------------
+// Search
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Serialize)]
+#[serde(tag = "state", rename_all = "snake_case")]
+pub enum SearchOutcome {
+    Ok {
+        response: Box<search::SearchResponse>,
+    },
+    /// The index is still being built.
+    NotReady { message: String },
+    /// No knowledge base yet.
+    NoData { message: String },
+}
+
+#[tauri::command]
+pub async fn kb_search(params: search::SearchParams) -> Res<SearchOutcome> {
+    blocking(move || {
+        let data = DataPaths::new(KbConfig::load()?.data_dir);
+        Ok(match search::search_in(&data, &params) {
+            Ok(response) => SearchOutcome::Ok {
+                response: Box::new(response),
+            },
+            Err(search::SearchError::NotReady(message)) => SearchOutcome::NotReady { message },
+            Err(search::SearchError::NoData(message)) => SearchOutcome::NoData { message },
+            Err(search::SearchError::Other(message)) => return Err(message),
+        })
+    })
+    .await
+}
+
+// ---------------------------------------------------------------------------
+// Agent skill
+// ---------------------------------------------------------------------------
+
+fn skill_roots() -> Res<SourceRoots> {
+    Ok(skill::roots_for(&KbConfig::load()?))
+}
+
+fn skill_root(roots: &SourceRoots, target: skill::Target) -> Option<PathBuf> {
+    match target {
+        skill::Target::Claude => roots.claude.clone(),
+        skill::Target::Codex => roots.codex.clone(),
+    }
+}
+
+fn skill_statuses() -> Res<Vec<skill::SkillStatus>> {
+    let roots = skill_roots()?;
+    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    Ok(skill::Target::ALL
+        .iter()
+        .map(|t| skill::status(*t, skill_root(&roots, *t).as_deref(), &exe))
+        .collect())
+}
+
+#[tauri::command]
+pub async fn kb_skill_status() -> Res<Vec<skill::SkillStatus>> {
+    blocking(skill_statuses).await
+}
+
+fn parse_target(target: &str) -> Res<skill::Target> {
+    skill::Target::parse(target).ok_or_else(|| format!("unknown tool {target:?}"))
+}
+
+#[tauri::command]
+pub async fn kb_skill_install(target: String) -> Res<Vec<skill::SkillStatus>> {
+    blocking(move || {
+        let target = parse_target(&target)?;
+        let roots = skill_roots()?;
+        let root = skill_root(&roots, target).ok_or("that tool's folder is not configured")?;
+        let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+        skill::install(target, &root, &exe)?;
+        skill_statuses()
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn kb_skill_uninstall(target: String) -> Res<Vec<skill::SkillStatus>> {
+    blocking(move || {
+        let target = parse_target(&target)?;
+        let roots = skill_roots()?;
+        let root = skill_root(&roots, target).ok_or("that tool's folder is not configured")?;
+        let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+        skill::uninstall(target, &root, &exe)?;
+        skill_statuses()
+    })
+    .await
+}
+
+/// Runs a real `--kb-search` with the program the installed skill points at
+/// (the running program when nothing is installed).
+#[tauri::command]
+pub async fn kb_skill_test() -> Res<skill::SkillTest> {
+    blocking(|| {
+        let config = KbConfig::load()?;
+        let current = std::env::current_exe().map_err(|e| e.to_string())?;
+        let statuses = skill_statuses()?;
+        let exe = statuses
+            .iter()
+            .find_map(|s| s.installed_exe.clone())
+            .map_or(current, PathBuf::from);
+        // Any word that is in the index: one from the newest session's title.
+        let data = DataPaths::new(config.data_dir);
+        let word = db::open_readonly(&data.db())?
+            .and_then(|conn| {
+                conn.query_row(
+                    "SELECT title FROM sessions WHERE title IS NOT NULL \
+                     ORDER BY last_activity_at DESC LIMIT 1",
+                    [],
+                    |r| r.get::<_, String>(0),
+                )
+                .ok()
+            })
+            .and_then(|title| {
+                super::index::tokenize::tokens(&title)
+                    .into_iter()
+                    .find(|t| t.chars().count() >= 2)
+            })
+            .unwrap_or_else(|| "agentkb".to_string());
+        Ok(skill::test(&exe, &word))
+    })
+    .await
 }

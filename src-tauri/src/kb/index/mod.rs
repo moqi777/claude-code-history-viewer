@@ -13,7 +13,9 @@ use super::Source;
 pub mod claude;
 pub mod codex;
 pub mod codex_titles;
+pub mod messages;
 pub mod text;
+pub mod tokenize;
 
 /// Tolerant field decoding: a record whose field has an unexpected type must
 /// not make the whole line unparseable (the tools add and change fields).
@@ -70,64 +72,116 @@ impl FileMeta {
 
 pub type UnknownTypes = BTreeMap<String, u64>;
 
-pub enum Indexer {
+enum Inner {
     Claude(claude::ClaudeIndexer),
     Codex(codex::CodexIndexer),
 }
 
+/// Session facts plus the message rows for full-text search, fed from the
+/// same bytes. The message extractor's state is stored next to the session
+/// indexer's, under the `msgs` key of the same JSON document.
+pub struct Indexer {
+    source: Source,
+    inner: Inner,
+    messages: messages::Extractor,
+}
+
 impl Indexer {
     pub fn new(source: Source, meta: FileMeta) -> Self {
-        match source {
-            Source::Claude => Self::Claude(claude::ClaudeIndexer::new(meta)),
-            Source::Codex => Self::Codex(codex::CodexIndexer::new(meta)),
+        let inner = match source {
+            Source::Claude => Inner::Claude(claude::ClaudeIndexer::new(meta)),
+            Source::Codex => Inner::Codex(codex::CodexIndexer::new(meta)),
+        };
+        Self {
+            source,
+            inner,
+            // Starting from byte 0: this indexer holds the complete set.
+            messages: messages::Extractor::new(),
         }
     }
 
     /// Resume from stored state; unreadable state restarts from scratch (the
-    /// caller then re-indexes from offset 0, see `sync`).
+    /// caller then re-indexes from offset 0, see `sync`). State written
+    /// before messages were indexed has no `msgs` and counts as unreadable.
     pub fn restore(source: Source, meta: FileMeta, state: &str) -> Option<Self> {
-        match source {
-            Source::Claude => claude::ClaudeIndexer::restore(meta, state).map(Self::Claude),
-            Source::Codex => codex::CodexIndexer::restore(meta, state).map(Self::Codex),
-        }
+        let value: serde_json::Value = serde_json::from_str(state).ok()?;
+        let messages: messages::Extractor =
+            serde_json::from_value(value.get("msgs")?.clone()).ok()?;
+        let inner = match source {
+            Source::Claude => claude::ClaudeIndexer::restore(meta, state).map(Inner::Claude)?,
+            Source::Codex => codex::CodexIndexer::restore(meta, state).map(Inner::Codex)?,
+        };
+        Some(Self {
+            source,
+            inner,
+            messages,
+        })
     }
 
     /// `chunk` holds whole lines (it may lack a trailing newline only for the
     /// final line of a compressed file).
     pub fn feed(&mut self, chunk: &[u8]) {
-        match self {
-            Self::Claude(i) => i.feed(chunk),
-            Self::Codex(i) => i.feed(chunk),
+        match &mut self.inner {
+            Inner::Claude(i) => i.feed(chunk),
+            Inner::Codex(i) => i.feed(chunk),
         }
+        self.messages.feed(self.source, chunk);
     }
 
     pub fn record(&self) -> SessionRecord {
-        match self {
-            Self::Claude(i) => i.record(),
-            Self::Codex(i) => i.record(),
+        match &self.inner {
+            Inner::Claude(i) => i.record(),
+            Inner::Codex(i) => i.record(),
         }
     }
 
     pub fn state_json(&self) -> String {
-        match self {
-            Self::Claude(i) => serde_json::to_string(i),
-            Self::Codex(i) => serde_json::to_string(i),
+        let inner = match &self.inner {
+            Inner::Claude(i) => serde_json::to_value(i),
+            Inner::Codex(i) => serde_json::to_value(i),
+        };
+        let mut value = inner.unwrap_or_else(|_| serde_json::json!({}));
+        if let (Some(map), Ok(msgs)) = (value.as_object_mut(), serde_json::to_value(&self.messages))
+        {
+            map.insert("msgs".to_string(), msgs);
         }
-        .unwrap_or_else(|_| "{}".to_string())
+        value.to_string()
     }
 
     pub fn unknown_types(&self) -> &UnknownTypes {
-        match self {
-            Self::Claude(i) => &i.unknown,
-            Self::Codex(i) => &i.unknown,
+        match &self.inner {
+            Inner::Claude(i) => &i.unknown,
+            Inner::Codex(i) => &i.unknown,
         }
     }
 
     pub fn bad_lines(&self) -> u64 {
-        match self {
-            Self::Claude(i) => i.bad_lines,
-            Self::Codex(i) => i.bad_lines,
+        match &self.inner {
+            Inner::Claude(i) => i.bad_lines,
+            Inner::Codex(i) => i.bad_lines,
         }
+    }
+
+    /// Message changes since the last call, and whether they replace every
+    /// stored row of the file.
+    pub fn take_message_ops(&mut self) -> (bool, Vec<messages::MsgOp>) {
+        (self.messages.replace_all(), self.messages.take_ops())
+    }
+
+    /// Bytes of the mirror stream consumed so far (the next line's offset).
+    pub fn bytes_fed(&self) -> u64 {
+        self.messages.bytes_fed()
+    }
+
+    /// Call after the ops were committed.
+    pub fn messages_committed(&mut self) {
+        self.messages.committed();
+    }
+
+    /// The state was rebuilt by replaying the mirror: the stored rows must be
+    /// replaced by what the replay produced.
+    pub fn mark_rebuilt(&mut self) {
+        self.messages.mark_rebuilt();
     }
 }
 

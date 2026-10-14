@@ -120,7 +120,7 @@ fn read_session_index(path: &Path) -> HashMap<String, String> {
     best.into_iter().map(|(id, (_, name))| (id, name)).collect()
 }
 
-fn sqlite_uri(path: &Path, query: &str) -> String {
+pub(crate) fn sqlite_uri(path: &Path, query: &str) -> String {
     let encoded: Vec<String> = path
         .to_string_lossy()
         .replace('\\', "/")

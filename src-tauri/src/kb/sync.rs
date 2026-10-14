@@ -27,7 +27,7 @@ pub const LOCK_WAIT: Duration = Duration::from_secs(3);
 /// Bump when the indexers' output changes (title rules, counting, known types…).
 /// The next sync then rebuilds every session row from the mirror, which is the
 /// source of truth, so improvements reach sessions that never change again.
-pub const INDEXER_VERSION: &str = "3";
+pub const INDEXER_VERSION: &str = "4";
 const INDEXER_VERSION_KEY: &str = "indexer_version";
 
 /// Warn (in the log) about unexpectedly huge single lines.
@@ -48,6 +48,9 @@ pub struct KbEnv {
     /// `Some` only when the disk backup is enabled and fully configured.
     pub mirror: Option<MirrorTarget>,
     pub progress: ProgressSink,
+    /// Rebuild every derived row from the mirror even if the indexer version
+    /// matches (`--kb-reindex`).
+    pub force_reindex: bool,
 }
 
 impl KbEnv {
@@ -64,6 +67,7 @@ impl KbEnv {
             exclude_prefixes: config.exclude_prefixes.clone(),
             mirror: mirror.flatten(),
             progress: ProgressSink::default(),
+            force_reindex: false,
         }
     }
 
@@ -366,7 +370,9 @@ fn reindex_if_outdated(
     log: &SyncLog,
     summary: &mut Summary,
 ) -> Result<(), String> {
-    if db::get_meta(conn, INDEXER_VERSION_KEY)?.as_deref() == Some(INDEXER_VERSION) {
+    if !env.force_reindex
+        && db::get_meta(conn, INDEXER_VERSION_KEY)?.as_deref() == Some(INDEXER_VERSION)
+    {
         return Ok(());
     }
     let rows = db::load_files(conn)?;
@@ -401,6 +407,7 @@ fn reindex_one(env: &KbEnv, conn: &Connection, row: &FileRow) -> Result<(), Stri
         row.source,
         FileMeta::from_path(row.source, Path::new(&row.source_path)),
     );
+    // `Indexer::new` starts from byte 0, so its message rows replace the stored ones.
     if row.is_compressed {
         let reader = zstd::stream::Decoder::new(file)
             .map_err(|e| format!("cannot decompress mirror: {e}"))?;
@@ -420,6 +427,8 @@ fn reindex_one(env: &KbEnv, conn: &Connection, row: &FileRow) -> Result<(), Stri
     let tx = conn
         .unchecked_transaction()
         .map_err(|e| format!("begin: {e}"))?;
+    let (replace_all, ops) = indexer.take_message_ops();
+    db::apply_message_ops(&tx, row.id, replace_all, &ops)?;
     db::upsert_session(
         &tx,
         row.id,
@@ -474,7 +483,7 @@ fn process_file(
         Ok(())
     })?;
 
-    commit_file(conn, file, prior, &indexer, &mirrored.cursor, summary)?;
+    commit_file(conn, file, prior, &mut indexer, &mirrored.cursor, summary)?;
 
     summary.changed_files += 1;
     summary.copied_bytes += mirrored.copied_bytes;
@@ -508,10 +517,15 @@ fn restore_indexer(
 ) -> Result<Indexer, String> {
     if let Some(stored) = db::load_indexer_state(conn, row.id)? {
         if let Some(indexer) = Indexer::restore(source, meta.clone(), &stored.indexer_state) {
-            return Ok(indexer);
+            // Message offsets must continue exactly where the cursor is.
+            if indexer.bytes_fed() == upto {
+                return Ok(indexer);
+            }
         }
     }
     let mut indexer = Indexer::new(source, meta.clone());
+    // Replaying from byte 0: the rows it produces replace the stored ones.
+    indexer.mark_rebuilt();
     let file = std::fs::File::open(mirror_path)
         .map_err(|e| format!("cannot reopen mirror {}: {e}", mirror_path.display()))?;
     let reader = std::io::Read::take(file, upto);
@@ -526,7 +540,7 @@ fn commit_file(
     conn: &Connection,
     file: &SourceFile,
     prior: Option<&FileRow>,
-    indexer: &Indexer,
+    indexer: &mut Indexer,
     cursor: &Cursor,
     summary: &mut Summary,
 ) -> Result<(), String> {
@@ -552,6 +566,8 @@ fn commit_file(
         )?,
     };
     let unknown = serde_json::to_string(indexer.unknown_types()).unwrap_or_else(|_| "{}".into());
+    let (replace_all, ops) = indexer.take_message_ops();
+    db::apply_message_ops(&tx, file_id, replace_all, &ops)?;
     let is_new = db::upsert_session(
         &tx,
         file_id,
@@ -653,6 +669,7 @@ mod tests {
                 exclude_prefixes: vec![],
                 mirror: None,
                 progress: ProgressSink::default(),
+                force_reindex: false,
             };
             Self {
                 dir,
@@ -1095,6 +1112,429 @@ mod tests {
             (title.as_str(), source.as_str()),
             ("add a retry", "first_message")
         );
+    }
+
+    // ----- message index -------------------------------------------------
+
+    fn user_line(ts: &str, text: &str) -> String {
+        serde_json::json!({"type":"user","timestamp":ts,"cwd":"/Users/me/proj",
+            "message":{"role":"user","content":text}})
+        .to_string()
+            + "\n"
+    }
+
+    fn assistant_line(ts: &str, blocks: serde_json::Value) -> String {
+        serde_json::json!({"type":"assistant","timestamp":ts,
+            "message":{"role":"assistant","content":blocks}})
+        .to_string()
+            + "\n"
+    }
+
+    fn result_line(ts: &str, id: &str, text: &str) -> String {
+        serde_json::json!({"type":"user","timestamp":ts,
+            "message":{"role":"user","content":[{"type":"tool_result","tool_use_id":id,"content":text}]}})
+        .to_string()
+            + "\n"
+    }
+
+    fn tool_line(ts: &str, id: &str, command: &str) -> String {
+        assistant_line(
+            ts,
+            serde_json::json!([{"type":"tool_use","id":id,"name":"Bash","input":{"command":command}}]),
+        )
+    }
+
+    fn message_rows(conn: &Connection) -> Vec<(String, u64, String, String)> {
+        let mut stmt = conn
+            .prepare(
+                "SELECT s.session_id, m.seq, m.kind, m.text FROM messages m \
+                 JOIN sessions s ON s.file_id = m.file_id ORDER BY s.session_id, m.seq",
+            )
+            .unwrap();
+        stmt.query_map([], |r| {
+            Ok((
+                r.get(0)?,
+                u64::try_from(r.get::<_, i64>(1)?).unwrap(),
+                r.get(2)?,
+                r.get(3)?,
+            ))
+        })
+        .unwrap()
+        .map(Result::unwrap)
+        .collect()
+    }
+
+    fn found(sb: &Sandbox, query: &str) -> usize {
+        let params = crate::kb::search::SearchParams {
+            query: query.to_string(),
+            limit: Some(20),
+            ..Default::default()
+        };
+        crate::kb::search::search_in(&sb.env.data, &params)
+            .unwrap()
+            .matched_sessions
+    }
+
+    #[test]
+    fn messages_are_searchable_and_an_incremental_build_equals_a_rebuild() {
+        let mut sb = Sandbox::new();
+        write(
+            &sb.claude_file(),
+            &(user_line("2026-01-01T00:00:01Z", "连接池耗尽怎么办")
+                + &assistant_line(
+                    "2026-01-01T00:00:02Z",
+                    serde_json::json!([{"type":"text","text":"调大 maxActive，并检查 HikariCP"}]),
+                )),
+        );
+        write(&sb.codex_file(), &codex_text());
+        let first = sb.sync();
+        assert_eq!(first.status, "ok", "{:?}", first.errors);
+        assert_eq!(found(&sb, "连接池"), 1);
+        assert_eq!(found(&sb, "HikariCP"), 1);
+        assert_eq!(found(&sb, "add retry"), 1, "codex messages too");
+
+        append(
+            &sb.claude_file(),
+            &(user_line("2026-01-01T00:00:03Z", "再看看死锁")
+                + &tool_line("2026-01-01T00:00:04Z", "t1", "jstack 123")
+                + &result_line("2026-01-01T00:00:05Z", "t1", "BLOCKED waiting for lock")),
+        );
+        sb.sync();
+        assert_eq!(found(&sb, "jstack"), 1, "tool calls are indexed");
+        assert_eq!(found(&sb, "BLOCKED"), 1, "tool results are indexed");
+        let incremental = message_rows(&sb.db());
+        assert_eq!(incremental.len(), 6);
+
+        // A full rebuild from the mirror gives the very same rows.
+        sb.env.force_reindex = true;
+        let rebuilt = sb.sync();
+        assert_eq!(rebuilt.status, "ok", "{:?}", rebuilt.errors);
+        assert_eq!(message_rows(&sb.db()), incremental);
+        assert_eq!(found(&sb, "连接池"), 1);
+        let fts: i64 = sb
+            .db()
+            .query_row("SELECT COUNT(*) FROM messages_fts", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(fts, 6, "no orphaned index entries");
+    }
+
+    #[test]
+    fn a_rewritten_source_replaces_its_messages() {
+        let sb = Sandbox::new();
+        write(
+            &sb.claude_file(),
+            &(user_line("2026-01-01T00:00:01Z", "旧的问题 oldword")
+                + &assistant_line(
+                    "2026-01-01T00:00:02Z",
+                    serde_json::json!([{"type":"text","text":"旧的回答"}]),
+                )),
+        );
+        sb.sync();
+        assert_eq!(found(&sb, "oldword"), 1);
+        // Shorter and different: a rewrite, not an append.
+        write(
+            &sb.claude_file(),
+            &user_line("2026-02-01T00:00:01Z", "新的问题 newword"),
+        );
+        let s = sb.sync();
+        assert_eq!(s.rewritten_files, 1);
+        assert_eq!(found(&sb, "newword"), 1);
+        assert_eq!(found(&sb, "oldword"), 0, "the old text left the index");
+        let conn = sb.db();
+        let (rows, fts): (i64, i64) = (
+            conn.query_row("SELECT COUNT(*) FROM messages", [], |r| r.get(0))
+                .unwrap(),
+            conn.query_row("SELECT COUNT(*) FROM messages_fts", [], |r| r.get(0))
+                .unwrap(),
+        );
+        assert_eq!((rows, fts), (1, 1));
+    }
+
+    #[test]
+    fn lost_indexer_state_replays_the_mirror_without_duplicating_rows() {
+        let sb = Sandbox::new();
+        write(
+            &sb.claude_file(),
+            &user_line("2026-01-01T00:00:01Z", "第一条 alpha"),
+        );
+        sb.sync();
+        sb.db()
+            .execute("UPDATE sessions SET indexer_state = '{}'", [])
+            .unwrap();
+        append(
+            &sb.claude_file(),
+            &user_line("2026-01-01T00:00:02Z", "第二条 beta"),
+        );
+        let s = sb.sync();
+        assert_eq!(s.status, "ok", "{:?}", s.errors);
+        let rows = message_rows(&sb.db());
+        assert_eq!(
+            rows.iter().map(|r| r.3.as_str()).collect::<Vec<_>>(),
+            vec!["第一条 alpha", "第二条 beta"]
+        );
+        assert_eq!(found(&sb, "alpha"), 1);
+    }
+
+    #[test]
+    fn secrets_never_reach_the_index() {
+        let sb = Sandbox::new();
+        let key = "sk-ant-api03-AbCdEfGhIjKlMnOp1234";
+        write(
+            &sb.claude_file(),
+            &(user_line(
+                "2026-01-01T00:00:01Z",
+                &format!("deploy with DB_PASSWORD=hunter2 and {key}"),
+            ) + &tool_line("2026-01-01T00:00:02Z", "t1", "env")
+                + &result_line(
+                    "2026-01-01T00:00:03Z",
+                    "t1",
+                    &format!("TOKEN_VALUE\nAuthorization: Bearer abcdef1234567890xyz\n{key}"),
+                )),
+        );
+        sb.sync();
+        let conn = sb.db();
+        for row in message_rows(&conn) {
+            for secret in [key, "hunter2", "abcdef1234567890xyz"] {
+                assert!(!row.3.contains(secret), "{} leaks {secret}", row.3);
+            }
+        }
+        assert_eq!(found(&sb, "hunter2"), 0);
+        assert_eq!(found(&sb, "deploy"), 1);
+    }
+
+    #[test]
+    fn searching_the_history_does_not_make_it_searchable() {
+        let sb = Sandbox::new();
+        let kb = "/Applications/AgentKB.app/Contents/MacOS/AgentKB --kb-search \"deadlock\"";
+        // Two Q&A turns that only used the knowledge base…
+        let mut text = String::new();
+        for (n, id) in ["k1", "k2"].iter().enumerate() {
+            let ts = format!("2026-01-01T00:0{n}:00Z");
+            text += &user_line(&ts, "之前那个 zebra 问题怎么解决的");
+            text += &tool_line(&ts, id, kb);
+            text += &result_line(
+                &ts,
+                id,
+                "{\"agentkb_marker\":\"agentkb-result-v1\",\"x\":\"zebra\"}",
+            );
+            text += &assistant_line(
+                &ts,
+                serde_json::json!([{"type":"text","text":"当时是 zebra 配置错了"}]),
+            );
+        }
+        write(&sb.claude_file(), &text);
+        sb.sync();
+        assert_eq!(found(&sb, "zebra"), 0, "pure Q&A turns are not indexed");
+
+        // …then a turn that searched and went on to change things.
+        append(
+            &sb.claude_file(),
+            &(user_line("2026-01-01T01:00:00Z", "照着之前的 giraffe 方案修一下")
+                + &tool_line("2026-01-01T01:00:01Z", "k3", kb)
+                + &result_line(
+                    "2026-01-01T01:00:02Z",
+                    "k3",
+                    "{\"agentkb_marker\":\"agentkb-result-v1\"}",
+                )
+                + &tool_line("2026-01-01T01:00:03Z", "b1", "git commit -m flamingo")
+                + &result_line("2026-01-01T01:00:04Z", "b1", "done flamingo")
+                + &assistant_line(
+                    "2026-01-01T01:00:05Z",
+                    serde_json::json!([{"type":"text","text":"已提交 flamingo"}]),
+                )),
+        );
+        sb.sync();
+        assert_eq!(
+            found(&sb, "giraffe"),
+            1,
+            "the question of a working turn is kept"
+        );
+        assert_eq!(found(&sb, "flamingo"), 1, "the work is searchable");
+        assert_eq!(found(&sb, "zebra"), 0);
+        assert_eq!(
+            found(&sb, "agentkb_marker"),
+            0,
+            "kb output is never indexed"
+        );
+    }
+
+    #[test]
+    fn messages_survive_the_source_being_deleted() {
+        let sb = Sandbox::new();
+        write(
+            &sb.claude_file(),
+            &user_line("2026-01-01T00:00:01Z", "unique-wombat question"),
+        );
+        sb.sync();
+        fs::remove_file(sb.claude_file()).unwrap();
+        sb.sync();
+        assert_eq!(found(&sb, "wombat"), 1);
+        let params = crate::kb::search::SearchParams {
+            query: "wombat".into(),
+            ..Default::default()
+        };
+        let hit = &crate::kb::search::search_in(&sb.env.data, &params)
+            .unwrap()
+            .results[0];
+        assert_eq!(hit.session.source_status, "deleted");
+        assert!(!hit.resume.available);
+    }
+
+    #[test]
+    fn show_returns_the_neighbours_and_full_reads_the_original_line() {
+        let sb = Sandbox::new();
+        let long = format!("{}TAILMARK", "详细说明 ".repeat(5000));
+        let mut text = String::new();
+        for n in 1..=6 {
+            text += &user_line(&format!("2026-01-01T00:00:0{n}Z"), &format!("问题 {n}"));
+            text += &assistant_line(
+                &format!("2026-01-01T00:01:0{n}Z"),
+                serde_json::json!([{"type":"text","text": if n == 3 { long.clone() } else { format!("回答 {n}") }}]),
+            );
+        }
+        write(&sb.claude_file(), &text);
+        sb.sync();
+        let index = crate::kb::search::Index::open(&sb.env.data).unwrap();
+        let selector = format!("claude:{CLAUDE_ID}");
+
+        let shown = crate::kb::search::show(
+            &index,
+            &crate::kb::search::ShowParams {
+                session: selector.clone(),
+                around: Some(6),
+                context: Some(1),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let seqs: Vec<u64> = shown.messages.iter().map(|m| m.seq).collect();
+        assert_eq!(seqs, vec![5, 6, 7], "one visible message either side");
+        assert!(shown.messages[1].focus);
+        assert_eq!(shown.range.total_messages, 12);
+        assert!(shown.resume.command.unwrap().contains("claude --resume"));
+
+        let capped = crate::kb::search::show(
+            &index,
+            &crate::kb::search::ShowParams {
+                session: CLAUDE_ID[..8].to_string(),
+                around: Some(6),
+                context: Some(0),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert!(capped.messages[0].truncated, "default output is capped");
+        assert!(!capped.messages[0].text.contains("TAILMARK"));
+
+        // 16 KB cap on the index, but `--full` re-reads the mirror line.
+        let full = crate::kb::search::show(
+            &index,
+            &crate::kb::search::ShowParams {
+                session: selector,
+                around: Some(6),
+                context: Some(0),
+                full: Some(true),
+                max_chars: Some(1_000_000),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert!(
+            full.messages[0].text.ends_with("TAILMARK"),
+            "{}",
+            &full.messages[0].text[full.messages[0].text.len().saturating_sub(40)..]
+        );
+        assert!(!full.messages[0].truncated);
+
+        let missing = crate::kb::search::show(
+            &index,
+            &crate::kb::search::ShowParams {
+                session: "claude:99999999".into(),
+                ..Default::default()
+            },
+        );
+        assert!(missing.is_err());
+    }
+
+    #[test]
+    fn filters_relaxed_matching_and_grouping() {
+        let sb = Sandbox::new();
+        write(
+            &sb.claude_file(),
+            &(user_line("2026-01-01T00:00:01Z", "redis 连接池 耗尽")
+                + &assistant_line(
+                    "2026-01-01T00:00:02Z",
+                    serde_json::json!([{"type":"text","text":"redis 连接池 要调大"}]),
+                )
+                + &assistant_line(
+                    "2026-01-01T00:00:03Z",
+                    serde_json::json!([{"type":"text","text":"redis 超时另说"}]),
+                )),
+        );
+        write(&sb.codex_file(), &codex_text());
+        sb.sync();
+        let search = |query: &str, tweak: &dyn Fn(&mut crate::kb::search::SearchParams)| {
+            let mut params = crate::kb::search::SearchParams {
+                query: query.to_string(),
+                ..Default::default()
+            };
+            tweak(&mut params);
+            crate::kb::search::search_in(&sb.env.data, &params).unwrap()
+        };
+        let all = search("redis 连接池", &|p| p.mode = Some("all".into()));
+        assert_eq!((all.mode_used, all.returned), ("all", 1));
+        // Auto relaxes when the strict pass finds fewer than three sessions,
+        // and the session that has every word still comes first.
+        let auto = search("redis 连接池", &|_| {});
+        assert_eq!(
+            (auto.mode_used, auto.results[0].session.source.as_str()),
+            ("any", "claude")
+        );
+        assert_eq!(
+            all.results[0].hit_messages, 2,
+            "messages of one session are merged"
+        );
+        assert_eq!(all.results[0].hits.len(), 2);
+        assert!(!all.results[0].hits[0].highlights.is_empty());
+
+        // A word nobody has: strict finds nothing, relaxed falls back to the rest.
+        let relaxed = search("redis nonexistentword", &|_| {});
+        assert_eq!((relaxed.mode_used, relaxed.returned), ("any", 1));
+        let strict = search("redis nonexistentword", &|p| p.mode = Some("all".into()));
+        assert_eq!(strict.returned, 0);
+        assert!(strict.hint.is_some());
+
+        assert_eq!(
+            search("redis", &|p| p.source = Some("codex".into())).returned,
+            0
+        );
+        assert_eq!(
+            search("redis", &|p| p.source = Some("claude".into())).returned,
+            1
+        );
+        assert_eq!(
+            search("redis", &|p| p.project = Some("PROJ".into())).returned,
+            1
+        );
+        assert_eq!(
+            search("redis", &|p| p.project = Some("other".into())).returned,
+            0
+        );
+        assert_eq!(
+            search("redis", &|p| p.since = Some("2030-01-01T00:00:00Z".into())).returned,
+            0
+        );
+        assert_eq!(
+            search("redis", &|p| p.kinds = Some(vec!["tool_use".into()])).returned,
+            0
+        );
+        assert_eq!(
+            search("redis", &|p| p.per_session = Some(1)).results[0]
+                .hits
+                .len(),
+            1
+        );
+        assert!(search("redis", &|_| {}).data_as_of.is_some());
     }
 
     #[test]

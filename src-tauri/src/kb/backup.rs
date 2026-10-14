@@ -457,6 +457,7 @@ mod tests {
                 volume_uuid: "DISK-UUID".into(),
             }),
             progress: ProgressSink::default(),
+            force_reindex: false,
         };
         let query = FakeQuery::with([VolumeInfo {
             mount_point: disk.clone(),
