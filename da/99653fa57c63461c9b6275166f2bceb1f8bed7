@@ -1,0 +1,20 @@
+docs/agent-kb/P3-design.md
+  s_cca7c29607588b::t_267659aabc6b95 47
+  s_cca7c29607588b::t_72af007e863f67 1-46,48-420
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.11",
+  "base_commit_sha": "da99653fa57c63461c9b6275166f2bceb1f8bed7",
+  "prompts": {},
+  "sessions": {
+    "s_cca7c29607588b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ef228e77-8d37-45df-ab42-2d4c28a0387d",
+        "model": "unknown"
+      },
+      "human_author": "moqing <moqing@tsign.cn>"
+    }
+  }
+}
