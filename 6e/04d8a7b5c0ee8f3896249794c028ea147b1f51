@@ -1,0 +1,26 @@
+src-tauri/src/kb/paths.rs
+  ai_agent 197-202
+  s_cca7c29607588b::t_2518c71e759cbf 81-92,113-114,189-196
+  s_cca7c29607588b::t_34529125f21af4 93-112
+src-tauri/src/commands/session/delete.rs
+  s_cca7c29607588b::t_8db17c64328ba5 110-124
+  s_cca7c29607588b::t_2518c71e759cbf 49-52
+src-tauri/src/commands/session/rename.rs
+  s_cca7c29607588b::t_2518c71e759cbf 106-109
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.11",
+  "base_commit_sha": "6e04d8a7b5c0ee8f3896249794c028ea147b1f51",
+  "prompts": {},
+  "sessions": {
+    "s_cca7c29607588b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ef228e77-8d37-45df-ab42-2d4c28a0387d",
+        "model": "claude-sonnet-5-5"
+      },
+      "human_author": "moqing <moqing@tsign.cn>"
+    }
+  }
+}
