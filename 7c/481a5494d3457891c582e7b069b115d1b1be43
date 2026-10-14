@@ -1,0 +1,52 @@
+src/kb/api.ts
+  s_cca7c29607588b::t_7f029907a2fc8c 1-17
+src/kb/index.ts
+  s_cca7c29607588b::t_7f029907a2fc8c 1-2
+src/i18n/locales/ko/kb.json
+  s_cca7c29607588b::t_643ad674e7ee40 1-45
+src/layouts/Header/SettingDropdown/index.tsx
+  s_cca7c29607588b::t_488e3efb4a517d 10,18,84-90
+src/i18n/locales/en/kb.json
+  s_cca7c29607588b::t_643ad674e7ee40 1-45
+src/i18n/locales/ja/kb.json
+  s_cca7c29607588b::t_643ad674e7ee40 1-45
+src/layouts/AppLayout.tsx
+  s_cca7c29607588b::t_488e3efb4a517d 36,968
+src/i18n/index.ts
+  s_cca7c29607588b::t_643ad674e7ee40 22,38,54,70,86,127,160-161,178-179,196-197,214-215,232-233
+src/kb/types.ts
+  s_cca7c29607588b::t_7f029907a2fc8c 1-69
+src/kb/fixtures.ts
+  s_cca7c29607588b::t_b290388ecb37db 1-51
+src/i18n/locales/zh-TW/kb.json
+  s_cca7c29607588b::t_643ad674e7ee40 1-45
+src/i18n/types.generated.ts
+  ai_agent 8
+src/kb/KbPanel.test.tsx
+  s_cca7c29607588b::t_b290388ecb37db 1-20,23-133
+  s_cca7c29607588b::t_86881aee775700 21-22
+src/kb/KbPanel.tsx
+  s_cca7c29607588b::t_7f029907a2fc8c 1-270
+src/kb/useKbStore.test.ts
+  s_cca7c29607588b::t_b290388ecb37db 1-93
+src/i18n/locales/zh-CN/kb.json
+  s_cca7c29607588b::t_643ad674e7ee40 1-45
+src/kb/useKbStore.ts
+  s_cca7c29607588b::t_7f029907a2fc8c 1-133
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.11",
+  "base_commit_sha": "7c481a5494d3457891c582e7b069b115d1b1be43",
+  "prompts": {},
+  "sessions": {
+    "s_cca7c29607588b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ef228e77-8d37-45df-ab42-2d4c28a0387d",
+        "model": "claude-sonnet-5-5"
+      },
+      "human_author": "moqing <moqing@tsign.cn>"
+    }
+  }
+}
