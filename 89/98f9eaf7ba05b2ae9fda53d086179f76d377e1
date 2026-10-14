@@ -1,0 +1,20 @@
+docs/agent-kb/P1-design.md
+  s_cca7c29607588b::t_2f43df82d13f90 409-411,413,415-430,455
+  s_cca7c29607588b::t_a02bcf62907181 1-408,412,414,431-454,456-462
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.11",
+  "base_commit_sha": "8998f9eaf7ba05b2ae9fda53d086179f76d377e1",
+  "prompts": {},
+  "sessions": {
+    "s_cca7c29607588b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ef228e77-8d37-45df-ab42-2d4c28a0387d",
+        "model": "claude-sonnet-5-5"
+      },
+      "human_author": "moqing <moqing@tsign.cn>"
+    }
+  }
+}
