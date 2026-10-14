@@ -1,6 +1,6 @@
 # P2 设计说明：改名打包 + 配置 + 向导 + 知识库主页 + 移动硬盘备份
 
-> 状态：**待 leader 审核**（步骤 1 检查点）。审核通过前不改 `tauri.conf.json`、不删 updater、不写向导/主页/备份代码。
+> 状态：**leader 有条件通过（`P2-design-review.md`），已按第 12 节修订，直接进入实现**。
 > 步骤 0（P1 遗留）已先行完成，见第 0 节；其中第 7、8 项本质上是"主页"的设计，留到本文第 5 节一起审。
 > 依据：我读过的文件和函数都标在各条后面；实测过的东西贴了命令输出。分支 `agent-kb`，基于 P1 验收后的 `e913b99` + 步骤 0 提交 `ef3a04f`。
 
@@ -289,16 +289,20 @@ $ df -P /Users/mo7/Dev                    → /dev/disk3s5 … /System/Volumes/D
 2. **`raw/` 增量追加（只加不删）**：遍历 `<数据目录>/raw/**`（含 `.prev-*`）：
    - 目标文件不存在 → 复制（临时文件 + rename，`fsync`）。
    - 存在且 **长度更短**，且前 4 KB 的 SHA-256 与源一致 → 从目标长度处**追加**源的剩余字节，`fsync`。**目标文件长度本身就是游标**，所以崩溃/拔盘后重跑天然正确，不需要额外状态。
-   - 长度相等 → 跳过；目标更长或前 4 KB 不一致 → 不动它，记一条错误 `backup conflict`（意味着备份盘上的文件被外部改过，我们不覆盖）。
+   - 长度相等 → 跳过。
+   - **目标更长或前 4 KB 不一致（= 主目录里该文件被重写过，P1 镜像会把旧版改名为 `.prev-<ts>` 再按原名完整重拷）**：把备份盘上的旧文件改名为 `<原文件名>.conflict-<时间戳>`（**不以 `.jsonl` 结尾**，不会被当成会话），然后按新文件完整复制。记一条 info 日志，**不算错误**；只有改名或复制本身失败才进 `errors`。备份里依然什么都不删，再跑一次不会再报冲突（修订 2.1，修复"永远卡住"）。
    - `.prev-*` 是不可变文件，走"不存在才复制"。
    - **从不删除**：主目录里被删/被轮转的东西，备份里保留。
 3. **`kb.db` 快照**：用 rusqlite `backup` feature（`Cargo.toml` 给 rusqlite 加 `"backup"`，不增加新 crate）做 **online backup** 到备份目录的临时文件，校验 `PRAGMA integrity_check` 后原子替换 `kb.db`，上一份改名 `kb.db.prev`（**始终保留一份上一版**，不堆积日期快照；`kb.db` 本身可由 `raw/` 重建，所以只需要"最近一致快照"，决策 D5）。**每天最多一次**：`meta.backup_last_db_snapshot_day` 记日期。
 4. 结果写 `meta`：`backup_last_at`、`backup_last_result`（`ok`/`skipped`/`error:…`）、复制字节数；并放进 `--kb-sync` 的 JSON 摘要 `backup` 字段。
-5. 中途拔盘 → 拷贝报 I/O 错误 → 记为 `errors[]`（stage `backup`），已拷贝的部分有效，下次续传；**不影响收集本身的成功**。
+5. 进度：备份阶段通过 `kb-progress`（phase=`backup`，已拷字节/总字节）上报；`meta.backup_state` 在备份期间为 `running`（修订 2.3）。
+6. 中途拔盘 → 拷贝报 I/O 错误 → 记为 `errors[]`（stage `backup`），已拷贝的部分有效，下次续传；**不影响收集本身的成功**。
 
 **并发**：`kb_backup_now` 命令和收集共用 `SyncLock`（同一把 `kb.lock`），语义同 P1：等 3 秒，拿不到就 `skipped`。**不新增第二把锁**。
 
 ### 6.3 主页呈现
+
+状态区区分"正在收集"和"正在备份到移动硬盘（已完成 X%）"；备份期间"立即收集/立即备份"按钮提示"备份进行中，完成后可用"（锁不拆，修订 2.3）。
 
 "移动硬盘：<名称> · 上次备份 X"；**超过 7 天**（`now - backup_last_at > 7d`，且配置启用）→ 黄色提醒"已超过 7 天没有备份，请连接移动硬盘"；从未备份且已启用 → "尚未备份"。盘不在线时显示"未连接"（灰）。
 
@@ -435,3 +439,13 @@ $ df -P /Users/mo7/Dev                    → /dev/disk3s5 … /System/Volumes/D
 - [ ] **D8 identifier 变更时只迁移 `settings.json`**（复制、不移动），WebKit 存储不迁移。
 - [ ] **D9 `PLAN.md` 的两处更正由 leader 改**（见 9.2 末行），我在报告里列清单。
 - [ ] **第 5 节整体**：新增 `kb` 视图、对底座 `AppLayout/Header/analytics/projectSlice` 约 60 行的接入，同意。
+
+---
+
+## 12. leader 审核后的修订（`P2-design-review.md`）
+
+- 第 11 节全部按推荐项决定（D1=A 内置字体，CSP 收紧为只允许 `'self'` 并作为"不访问原项目"的证据；D2 删邮件；D3=A，`SessionCopyMenu` 先读代码再定，结论写报告；D4–D8 同意；D9 由 leader 已改 PLAN）。
+- **2.1 备份冲突**：见 6.2——冲突时旧文件改名 `.conflict-<ts>`，重新完整复制，不算错误；补测试：重写后备份盘同时有旧版本与完整新版本，且再跑一次无冲突。
+- **2.2 版本号**：`package.json` 保持 1.32.0 不变；`kb` 模块加 `AGENTKB_VERSION = "0.2.0"`（第 N 期 `0.N.0`）。关于页与主页显示"AgentKB 0.2.0（基于 Claude Code History Viewer 1.32.0）"。
+- **2.3 首次备份进度**：见 6.2 第 5 点与 6.3。续传（中途退出/拔盘）要有测试。
+- 实现注意：未签名启动若需改 `hardenedRuntime` 写明原因；D8 验证项——本机 `com.claude.history-viewer/settings.json` 含简体中文设置，迁移后 AgentKB 首次打开应直接是中文；真机确认清单放报告末尾。
