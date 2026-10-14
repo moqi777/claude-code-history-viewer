@@ -1,0 +1,19 @@
+src/kb/KbHome.tsx
+  s_cca7c29607588b::t_e3d03566ac28bb 146
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.11",
+  "base_commit_sha": "c8c1a066f8c0c5ca7971d1f1222aff055fd57de0",
+  "prompts": {},
+  "sessions": {
+    "s_cca7c29607588b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ef228e77-8d37-45df-ab42-2d4c28a0387d",
+        "model": "unknown"
+      },
+      "human_author": "moqing <moqing@tsign.cn>"
+    }
+  }
+}
