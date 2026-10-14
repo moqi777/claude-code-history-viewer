@@ -1,0 +1,106 @@
+src/i18n/locales/zh-TW/kb.json
+  s_cca7c29607588b::t_5884b4f3c86e7d 47-208
+src/kb/api.ts
+  s_cca7c29607588b::t_1c130932eb30a9 3-11,14-15,19-21,26,28,31-32,35-56
+src/i18n/locales/en/kb.json
+  s_cca7c29607588b::t_5884b4f3c86e7d 47-208
+src/kb/pickFolder.ts
+  s_cca7c29607588b::t_fa456857761936 1-9
+src/kb/progressLabel.ts
+  s_cca7c29607588b::t_4c07c01de3a626 1-20
+src/hooks/analytics/useAnalyticsComputed.ts
+  s_cca7c29607588b::t_294169b98953c0 17
+src/i18n/locales/ko/kb.json
+  s_cca7c29607588b::t_5884b4f3c86e7d 47-208
+src/kb/KbSettings.tsx
+  s_cca7c29607588b::t_38dfc71deaca4d 16-18
+  s_cca7c29607588b::t_7ae9527fafad75 1-15,19-258
+src/kb/useTest.ts
+  s_cca7c29607588b::t_38dfc71deaca4d 1-40
+src/kb/openSession.ts
+  s_cca7c29607588b::t_2aff12cfd493ee 1-76
+src/layouts/Header/SettingDropdown/index.tsx
+  s_cca7c29607588b::t_294169b98953c0 28,35,77
+src/kb/KbHome.test.tsx
+  s_cca7c29607588b::t_b99132be881968 1-4,6-20,26-264
+  s_cca7c29607588b::t_f8af5cc3cc9f3e 5,21-25
+src/kb/types.ts
+  s_cca7c29607588b::t_1c130932eb30a9 15-32,44,46,64-67,73-92,100-103,106-110,113-253,260-265
+src/kb/fixtures.ts
+  s_cca7c29607588b::t_bfd2c139c2f9f1 16-24,33-35
+src/kb/homeStatus.ts
+  s_cca7c29607588b::t_15db1ff55466e7 1-63
+src/kb/openSession.test.ts
+  s_cca7c29607588b::t_27222b11d0bcec 1-110
+src/hooks/analytics/useAnalyticsNavigation.ts
+  s_cca7c29607588b::t_294169b98953c0 66-70,462,499
+src/layouts/AppLayout.tsx
+  s_cca7c29607588b::t_294169b98953c0 35,241,319,331-334,716-718,963
+src/layouts/Header/Header.tsx
+  s_cca7c29607588b::t_294169b98953c0 343-345
+  s_cca7c29607588b::t_1bc708beaa692c 10-11,57-58,200-210,233,297-313
+src/kb/KbRoot.tsx
+  s_cca7c29607588b::t_15db1ff55466e7 1-56
+src/kb/messages.ts
+  s_cca7c29607588b::t_0857471fe8f619 1-125
+src/kb/logic.ts
+  s_cca7c29607588b::t_38dfc71deaca4d 1-18
+src/store/slices/projectSlice.ts
+  s_cca7c29607588b::t_2aff12cfd493ee 564-567,720-723
+src/kb/format.ts
+  s_cca7c29607588b::t_fa456857761936 1-16
+src/kb/useKbStore.ts
+  s_cca7c29607588b::t_fa456857761936 4-8,10,17-18,23-24,28-32,35-36,38-39,44-47,49-57,60-73,75-88,93-97,100-101,103-104,120,130-161,167-181,186,190-192,194,200-208,211-226
+src/kb/KbWizard.test.tsx
+  s_cca7c29607588b::t_599152d026590e 170,175,190
+  s_cca7c29607588b::t_d5cfb028fd3965 1-45,53-74,76-78,80-98,100-110,112-127,129-130,132-139,141,143-156,158,160-169,171-174,176-180,182,184-189,191-198,200,202-225,227,229-243,245-255,257-262
+  s_cca7c29607588b::t_4ca96d33fcea7f 46-51,79,131,142,159,183,201,228
+  s_cca7c29607588b::t_d98d8706232f10 52,75,99,111,128,140,157,181,199,226,244,256
+src/i18n/locales/ja/kb.json
+  s_cca7c29607588b::t_5884b4f3c86e7d 47-208
+src/types/analytics.ts
+  s_cca7c29607588b::t_294169b98953c0 19,141,157
+src/i18n/locales/zh-CN/kb.json
+  s_cca7c29607588b::t_5884b4f3c86e7d 4-34,38,40,45,52-62,69-73,76,78-80,82-83,86,89-94,96-208
+src/components/SessionItem/hooks/useSessionEditing.ts
+  s_cca7c29607588b::t_91ae55a9f5c62d 39-43,45,47
+src/kb/useKbStore.test.ts
+  s_cca7c29607588b::t_9c8fe72e1d7cf3 4,6-13,17-21,27-50,53-55,61,69-70,79-81,85-86,89,94,99,102,107-115,117-151
+  s_cca7c29607588b::t_599152d026590e 3
+src/kb/index.ts
+  s_cca7c29607588b::t_15db1ff55466e7 1-2,4
+src/kb/fields.tsx
+  s_cca7c29607588b::t_0857471fe8f619 1-15,17-463
+  s_cca7c29607588b::t_38dfc71deaca4d 16
+src/kb/homeStatus.test.ts
+  s_cca7c29607588b::t_27222b11d0bcec 1-112
+src/kb/KbHome.tsx
+  s_cca7c29607588b::t_15db1ff55466e7 1-558
+src/kb/KbWizard.tsx
+  s_cca7c29607588b::t_4c07c01de3a626 1-16,18-53,57-205,207-216,218-308
+  s_cca7c29607588b::t_38dfc71deaca4d 17
+  s_cca7c29607588b::t_7ae9527fafad75 54-56
+  s_cca7c29607588b::t_bfd2c139c2f9f1 206,217
+src/test/projectSlice.kbProject.test.ts
+  s_cca7c29607588b::t_6395db73f65c74 1-81
+src/kb/testkit.ts
+  s_cca7c29607588b::t_9c8fe72e1d7cf3 1-53
+src/kb/KbSettings.test.tsx
+  s_cca7c29607588b::t_4af3025475ee71 1-211
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.11",
+  "base_commit_sha": "c673637fc7409a801b718a17745656e32d099a57",
+  "prompts": {},
+  "sessions": {
+    "s_cca7c29607588b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ef228e77-8d37-45df-ab42-2d4c28a0387d",
+        "model": "claude-sonnet-5-5"
+      },
+      "human_author": "moqing <moqing@tsign.cn>"
+    }
+  }
+}
