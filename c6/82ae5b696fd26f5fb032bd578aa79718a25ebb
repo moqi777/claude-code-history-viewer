@@ -1,0 +1,21 @@
+docs/agent-kb/P2-design-review.md
+  s_d58d4b162ae7dc::t_ba5c081fb0debe 1-49
+docs/agent-kb/P2-design.md
+  ai_agent 3,292-293,298-299,305-306,442-451
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.11",
+  "base_commit_sha": "c682ae5b696fd26f5fb032bd578aa79718a25ebb",
+  "prompts": {},
+  "sessions": {
+    "s_d58d4b162ae7dc": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "c4c081c6-aaf3-412b-8f62-de2a98c156fc",
+        "model": "unknown"
+      },
+      "human_author": "moqing <moqing@tsign.cn>"
+    }
+  }
+}
