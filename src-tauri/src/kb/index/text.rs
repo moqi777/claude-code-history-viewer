@@ -24,6 +24,16 @@ static STATUS_BLOCK: Lazy<Regex> = Lazy::new(|| {
     .expect("valid status block regex")
 });
 
+/// The same block after Codex flattened the newlines of a thread title.
+static FLAT_STATUS_BLOCK: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"Version:\s+\S+\s+Session name:").expect("valid flat status regex"));
+
+/// True for a tool-made title that is really a pasted status block, which says
+/// nothing about the conversation; the first real message titles it instead.
+pub fn is_status_block_title(title: &str) -> bool {
+    FLAT_STATUS_BLOCK.is_match(title)
+}
+
 /// `text` without pasted status blocks (only blocks that carry a session id).
 fn strip_status_blocks(text: &str) -> String {
     STATUS_BLOCK
@@ -145,6 +155,17 @@ mod tests {
             None,
             "nothing but the block: try the next message"
         );
+    }
+
+    #[test]
+    fn a_native_title_made_of_a_status_block_is_recognised() {
+        assert!(is_status_block_title(
+            "Version: 2.1.296 Session name: 月付项目 Session ID: 52261b64-a33d-43c1"
+        ));
+        assert!(is_status_block_title(
+            "看一下当前目录 这个 Version: 2.1.295 Session name: 月付"
+        ));
+        assert!(!is_status_block_title("Upgrade to Version: 2 today"));
     }
 
     #[test]

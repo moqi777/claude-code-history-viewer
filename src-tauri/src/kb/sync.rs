@@ -1072,6 +1072,32 @@ mod tests {
     }
 
     #[test]
+    fn a_native_title_that_is_a_pasted_status_block_gives_way_to_the_first_message() {
+        let sb = Sandbox::new();
+        write(&sb.codex_file(), &codex_text());
+        let conn = Connection::open(sb.codex.join("state_5.sqlite")).unwrap();
+        conn.execute_batch(&format!(
+            "CREATE TABLE threads (id TEXT PRIMARY KEY, title TEXT NOT NULL);
+             INSERT INTO threads VALUES ('{CODEX_ID}',
+               'Version: 2.1.296 Session name: demo Session ID: 52261b64-a33d-43c1-9bb');"
+        ))
+        .unwrap();
+        drop(conn);
+        let s = sb.sync();
+        assert_eq!(s.status, "ok", "{:?}", s.errors);
+        let (title, source): (String, String) = sb
+            .db()
+            .query_row("SELECT title, title_source FROM sessions", [], |r| {
+                Ok((r.get(0)?, r.get(1)?))
+            })
+            .unwrap();
+        assert_eq!(
+            (title.as_str(), source.as_str()),
+            ("add a retry", "first_message")
+        );
+    }
+
+    #[test]
     fn unreadable_titles_db_degrades_to_a_warning_not_a_failed_sync() {
         let sb = Sandbox::new();
         write(&sb.codex_file(), &codex_text());
