@@ -1,0 +1,27 @@
+src-tauri/src/kb/sync.rs
+  s_cca7c29607588b::t_cda352a6c604f6 30
+  s_cca7c29607588b::t_26a1014f2a6a0c 1209-1226,1233-1238
+  s_cca7c29607588b::t_50ca79e1a36fe8 379
+src-tauri/src/kb/index/messages.rs
+  s_cca7c29607588b::t_cda352a6c604f6 208-211,214-216,959-979
+src-tauri/src/kb/db.rs
+  s_cca7c29607588b::t_50ca79e1a36fe8 89-95,402-413
+src-tauri/src/kb/cli.rs
+  s_cca7c29607588b::t_0a372aa32a10d1 17,32,182-184,186-188,193-211
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.11",
+  "base_commit_sha": "b640d9fe9d6b383f1a9f742b666728474c5cf2be",
+  "prompts": {},
+  "sessions": {
+    "s_cca7c29607588b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ef228e77-8d37-45df-ab42-2d4c28a0387d",
+        "model": "claude-sonnet-5-5"
+      },
+      "human_author": "moqing <moqing@tsign.cn>"
+    }
+  }
+}
