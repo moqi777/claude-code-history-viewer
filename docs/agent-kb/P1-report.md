@@ -19,9 +19,9 @@
 
 **新增**（全在 `kb` 命名空间，约 5000 行 Rust + 前端）
 
-- `src-tauri/src/kb/`：`mod.rs`、`config.rs`、`paths.rs`、`lock.rs`、`log.rs`、`db.rs`、`discover.rs`、`mirror.rs`、`index/{mod,claude,codex,codex_titles,text}.rs`、`sync.rs`、`status.rs`、`schedule.rs`、`cli.rs`、`commands.rs`（含 76 个单元测试）
+- `src-tauri/src/kb/`：`mod.rs`、`config.rs`、`paths.rs`、`lock.rs`、`log.rs`、`db.rs`、`discover.rs`、`mirror.rs`、`index/{mod,claude,codex,codex_titles,text}.rs`、`sync.rs`、`status.rs`、`schedule.rs`、`cli.rs`、`commands.rs`（含 74 个单元测试）
 - `src/kb/`：`types.ts`、`api.ts`、`useKbStore.ts`、`KbPanel.tsx`、`index.ts`、`fixtures.ts`、两个测试文件（15 个测试）
-- `src/i18n/locales/{en,ko,ja,zh-CN,zh-TW}/kb.json`（新 namespace `kb`，各 41 个键；`en`、`zh-CN` 认真写，其余三种先填英文）
+- `src/i18n/locales/{en,ko,ja,zh-CN,zh-TW}/kb.json`（新 namespace `kb`，各 43 个键；`en`、`zh-CN` 认真写，其余三种先填英文）
 - `docs/agent-kb/P1-design.md`、`P1-report.md`
 
 **修改底座文件**（合计 +65 / −10，不含 lockfile 与生成文件）
