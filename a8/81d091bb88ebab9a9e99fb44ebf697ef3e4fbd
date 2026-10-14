@@ -1,0 +1,34 @@
+docs/agent-kb/P1-acceptance.md
+  s_d58d4b162ae7dc::t_320283c0ed3d44 15
+  s_d58d4b162ae7dc::t_6716bcb59317bc 33
+  s_d58d4b162ae7dc::t_d2010fad1786e5 1-14,16-32,39-41
+  s_d58d4b162ae7dc::t_55a3b6c46f07ef 34-38,42-43
+docs/agent-kb/P2-setup-and-packaging.md
+  s_d58d4b162ae7dc::t_6e87c87163d2dc 1-134
+docs/agent-kb/P2-design.md
+  s_cca7c29607588b::t_ad4480f331b5ec 1-437
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.11",
+  "base_commit_sha": "a881d091bb88ebab9a9e99fb44ebf697ef3e4fbd",
+  "prompts": {},
+  "sessions": {
+    "s_cca7c29607588b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ef228e77-8d37-45df-ab42-2d4c28a0387d",
+        "model": "claude-sonnet-5-5"
+      },
+      "human_author": "moqing <moqing@tsign.cn>"
+    },
+    "s_d58d4b162ae7dc": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "c4c081c6-aaf3-412b-8f62-de2a98c156fc",
+        "model": "unknown"
+      },
+      "human_author": "moqing <moqing@tsign.cn>"
+    }
+  }
+}
