@@ -20,10 +20,10 @@ describe('Tauri Configuration Import Tests', () => {
   });
 
   it('should maintain product information when imported', () => {
-    expect(tauriConfig.productName).toBe('Claude Code History Viewer');
+    expect(tauriConfig.productName).toBe('AgentKB');
     // Version should match semver format (stable or prerelease)
     expect(tauriConfig.version).toMatch(/^\d+\.\d+\.\d+(-[a-zA-Z0-9.-]+)?$/);
-    expect(tauriConfig.identifier).toBe('com.claude.history-viewer');
+    expect(tauriConfig.identifier).toBe('io.github.moqi777.agentkb');
   });
 
   it('should preserve nested object structure', () => {

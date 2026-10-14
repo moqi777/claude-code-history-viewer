@@ -47,7 +47,7 @@ describe('Tauri Configuration Tests', () => {
 
   describe('Product Information Validation', () => {
     it('should have correct product name', () => {
-      expect(config.productName).toBe('Claude Code History Viewer');
+      expect(config.productName).toBe('AgentKB');
       expect(typeof config.productName).toBe('string');
       expect(config.productName.length).toBeGreaterThan(0);
     });
@@ -59,7 +59,7 @@ describe('Tauri Configuration Tests', () => {
 
     it('should have valid app identifier in reverse domain notation', () => {
       expect(config.identifier).toMatch(/^[a-zA-Z0-9.-]+$/);
-      expect(config.identifier).toBe('com.claude.history-viewer');
+      expect(config.identifier).toBe('io.github.moqi777.agentkb');
       expect(config.identifier.split('.').length).toBeGreaterThanOrEqual(3);
     });
 
@@ -123,7 +123,7 @@ describe('Tauri Configuration Tests', () => {
         // title bar falls back to productName / CFBundleName instead of the
         // window's own title. See PR #337.
         expect(mainWindow.title).toBe('');
-        expect(config.productName).toBe('Claude Code History Viewer');
+        expect(config.productName).toBe('AgentKB');
       });
 
       it('should have reasonable default window dimensions', () => {
@@ -227,41 +227,10 @@ describe('Tauri Configuration Tests', () => {
     });
 
     describe('Updater Plugin', () => {
-      it('should have updater plugin enabled', () => {
-        expect(config.plugins.updater).toBeDefined();
-        expect(config.plugins.updater.active).toBe(true);
-        expect(typeof config.plugins.updater.active).toBe('boolean');
-      });
-
-      it('should have valid GitHub update endpoints', () => {
-        expect(Array.isArray(config.plugins.updater.endpoints)).toBe(true);
-        expect(config.plugins.updater.endpoints.length).toBeGreaterThan(0);
-        
-        config.plugins.updater.endpoints.forEach((endpoint: string) => {
-          expect(endpoint).toMatch(/^https:\/\//); // HTTPS required
-          expect(endpoint).toContain('github.com');
-          expect(endpoint).toContain('jhlee0409/claude-code-history-viewer');
-          expect(endpoint).toContain('latest.json');
-        });
-      });
-
-      it('should have update dialog disabled', () => {
-        expect(config.plugins.updater.dialog).toBe(false);
-        expect(typeof config.plugins.updater.dialog).toBe('boolean');
-      });
-
-      it('should have valid minisign public key', () => {
-        expect(config.plugins.updater.pubkey).toBeDefined();
-        expect(typeof config.plugins.updater.pubkey).toBe('string');
-        expect(config.plugins.updater.pubkey.length).toBeGreaterThan(50);
-
-        // Check for base64 encoded minisign public key format
-        expect(config.plugins.updater.pubkey).toMatch(/^[A-Za-z0-9+/=]+$/);
-      });
-
-      it('should not expose private keys or secrets', () => {
-        expect(config.plugins.updater.pubkey).not.toContain('private');
-        expect(config.plugins.updater.pubkey).not.toContain('secret');
+      it('is absent: AgentKB must never fetch or install packages from the original project', () => {
+        expect(config.plugins.updater).toBeUndefined();
+        expect(JSON.stringify(config)).not.toContain('latest.json');
+        expect(JSON.stringify(config)).not.toContain('jhlee0409');
       });
     });
   });
@@ -269,8 +238,8 @@ describe('Tauri Configuration Tests', () => {
   describe('Bundle Configuration Validation', () => {
     it('should have bundle configuration enabled', () => {
       expect(config.bundle.active).toBe(true);
-      expect(config.bundle.targets).toBe('all');
-      expect(config.bundle.createUpdaterArtifacts).toBe(true);
+      expect(config.bundle.targets).toEqual(['app']);
+      expect(config.bundle.createUpdaterArtifacts).toBe(false);
     });
 
     it('should have valid icon file paths', () => {
@@ -322,7 +291,8 @@ describe('Tauri Configuration Tests', () => {
       });
 
       it('should have appropriate signing configuration', () => {
-        expect(config.bundle.macOS.signingIdentity).toBeNull();
+        // ad-hoc: seals Info.plist and resources into the signature without a certificate
+        expect(config.bundle.macOS.signingIdentity).toBe('-');
         expect(config.bundle.macOS.hardenedRuntime).toBe(true);
         expect(typeof config.bundle.macOS.hardenedRuntime).toBe('boolean');
       });
@@ -347,7 +317,7 @@ describe('Tauri Configuration Tests', () => {
       // window[0].title is empty by design (PR #337); productName remains the
       // canonical app name surfaced via CFBundleName.
       expect(config.app.windows[0].title).toBe('');
-      expect(config.productName).toBe('Claude Code History Viewer');
+      expect(config.productName).toBe('AgentKB');
       expect(config.productName).not.toContain('undefined');
       expect(config.productName).not.toContain('null');
     });
@@ -414,19 +384,15 @@ describe('Tauri Configuration Tests', () => {
   });
 
   describe('Security and Privacy Validation', () => {
-    it('should use HTTPS for all external endpoints', () => {
-      config.plugins.updater.endpoints.forEach((endpoint: string) => {
-        expect(endpoint).toMatch(/^https:\/\//);
-        expect(endpoint).not.toMatch(/^http:\/\//);
-      });
+    it('allows no external origin in the CSP (self-contained app, no outbound requests)', () => {
+      const csp: string = config.app.security.csp;
+      expect(csp).not.toMatch(/https?:\/\//);
+      expect(csp).not.toContain('github');
+      expect(csp).toContain("connect-src 'self'");
     });
 
-    it('should have proper reverse domain notation identifier', () => {
-      const parts = config.identifier.split('.');
-      expect(parts.length).toBeGreaterThanOrEqual(3);
-      expect(parts[0]).toBe('com'); // Proper reverse domain
-      expect(parts[1]).toBe('claude');
-      expect(parts[2]).toBe('history-viewer');
+    it('should use the AgentKB reverse domain identifier', () => {
+      expect(config.identifier.split('.')).toEqual(['io', 'github', 'moqi777', 'agentkb']);
     });
 
     it('should not expose sensitive information', () => {
@@ -441,16 +407,6 @@ describe('Tauri Configuration Tests', () => {
           expect(configString).not.toContain(pattern);
         }
       });
-    });
-
-    it('should have updater public key but no private information', () => {
-      expect(config.plugins.updater.pubkey).toBeDefined();
-      expect(typeof config.plugins.updater.pubkey).toBe('string');
-      expect(config.plugins.updater.pubkey.length).toBeGreaterThan(0);
-      // Public key can be base64 encoded, so just check it's not exposing private info
-      const lowerKey = config.plugins.updater.pubkey.toLowerCase();
-      expect(lowerKey).not.toContain('private');
-      expect(lowerKey).not.toContain('secret');
     });
   });
 });

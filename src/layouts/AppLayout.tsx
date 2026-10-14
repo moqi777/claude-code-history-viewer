@@ -25,7 +25,6 @@ import { RecentEditsViewToggle } from "@/components/RecentEditsViewer/RecentEdit
 import { TokenStatsViewer } from "@/components/TokenStatsViewer";
 import { AnalyticsDashboard } from "@/components/AnalyticsDashboard";
 import { RecentEditsViewer } from "@/components/RecentEditsViewer";
-import { SimpleUpdateManager } from "@/components/SimpleUpdateManager";
 import { SettingsManager } from "@/components/SettingsManager";
 import { SessionBoard } from "@/components/SessionBoard/SessionBoard";
 import { ArchiveManager } from "@/components/ArchiveManager";
@@ -34,7 +33,6 @@ import { MobileNavigatorSheet } from "@/components/mobile/MobileNavigatorSheet";
 import { Header } from "@/layouts/Header/Header";
 import { ModalContainer } from "@/layouts/Header/SettingDropdown/ModalContainer";
 import { KbPanel } from "@/kb";
-import { DesktopOnly } from "@/contexts/platform";
 import { useIsLgUp, useIsXlUp } from "@/hooks/useMediaQuery";
 import { useResizablePanel } from "@/hooks/useResizablePanel";
 import { SessionsPane } from "@/components/SessionsPane/SessionsPane";
@@ -51,7 +49,6 @@ import {
   type AppError,
 } from "@/types";
 import type { UseAnalyticsReturn } from "@/types/analytics";
-import type { UseUpdaterReturn } from "@/hooks/useUpdater";
 import type { SearchState, SearchFilterType } from "@/store/slices/types";
 import type { WorktreeGroup, DirectoryGroup } from "@/utils/worktreeUtils";
 import type { ProjectTokenStatsPagination } from "@/store/slices/messageSlice";
@@ -87,8 +84,6 @@ export interface AppLayoutProps {
   analyticsActions: UseAnalyticsReturn["actions"];
   computed: UseAnalyticsReturn["computed"];
 
-  // Updater
-  updater: UseUpdaterReturn;
   appVersion: string;
 
   // Platform
@@ -186,7 +181,6 @@ export const AppLayout: React.FC<AppLayoutProps> = (props) => {
     analyticsState,
     analyticsActions,
     computed,
-    updater,
     appVersion,
     isDesktop,
     isMobile,
@@ -487,7 +481,6 @@ export const AppLayout: React.FC<AppLayoutProps> = (props) => {
         <Header
           analyticsActions={analyticsActions}
           analyticsComputed={computed}
-          updater={updater}
         />
 
         {/* Mobile Sidebar Drawer */}
@@ -921,11 +914,6 @@ export const AppLayout: React.FC<AppLayoutProps> = (props) => {
         >
           {liveStatusMessage}
         </div>
-
-        {/* Update Manager (desktop only) */}
-        <DesktopOnly>
-          <SimpleUpdateManager updater={updater} />
-        </DesktopOnly>
 
         {/* Mobile Bottom Tab Bar */}
         {isMobile && (

@@ -540,7 +540,6 @@ function App() {
       analyticsState={analyticsState}
       analyticsActions={analyticsActions}
       computed={computed}
-      updater={updater}
       appVersion={appVersion}
       isDesktop={isDesktop}
       isMobile={isMobile}

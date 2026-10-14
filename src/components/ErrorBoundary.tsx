@@ -1,4 +1,5 @@
 import { Component, type ErrorInfo, type ReactNode } from "react";
+import { ISSUES_URL } from "@/kb/branding";
 import { AlertTriangle, Mail, Copy, RefreshCw, CheckCircle2, HelpCircle } from "lucide-react";
 import { withTranslation, type WithTranslation } from "react-i18next";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -91,7 +92,7 @@ ${t("error.copyTemplate.timestamp", {
       const emailSubject = encodeURIComponent(
         t("error.emailTemplate.subject", {
           error: this.state.error?.message || "Unknown error",
-          defaultValue: "[Claude Code History Viewer] Error Report: {{error}}",
+          defaultValue: "[AgentKB] Error Report: {{error}}",
         })
       );
       const emailBody = encodeURIComponent(`
@@ -101,7 +102,7 @@ ${t("error.emailTemplate.greeting", {
 
 ${t("error.emailTemplate.description", {
   defaultValue:
-    "I encountered the following error while using Claude Code History Viewer:",
+    "I encountered the following error while using AgentKB:",
 })}
 
 ${t("error.emailTemplate.placeholder", {
@@ -190,15 +191,17 @@ ${t("error.emailTemplate.thanks", {
                   <p className="text-sm mb-3">
                     {t("error.reportDescription", {
                       defaultValue:
-                        "If this error occurs repeatedly, please report it to the email below:",
+                        "If this error occurs repeatedly, please report it on GitHub:",
                     })}
                   </p>
                   <div className="flex flex-col gap-3">
                     <a
-                      href={`mailto:relee6203@gmail.com?subject=${emailSubject}&body=${emailBody}`}
+                      href={`${ISSUES_URL}?title=${emailSubject}&body=${emailBody}`}
+                      target="_blank"
+                      rel="noreferrer"
                       className="text-sm font-medium text-info hover:underline"
                     >
-                      relee6203@gmail.com
+                      {ISSUES_URL.replace("https://", "")}
                     </a>
                     <Button
                       variant="outline"
@@ -256,7 +259,7 @@ ${t("error.emailTemplate.thanks", {
                       <span className="text-muted-foreground/60">•</span>
                       {t("error.troubleshootingSteps.updateVersion", {
                         defaultValue:
-                          "Ensure you have the latest version of Claude Code History Viewer installed",
+                          "Ensure you have the latest version of AgentKB installed",
                       })}
                     </li>
                     <li className="flex items-start gap-2">

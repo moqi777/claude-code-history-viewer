@@ -14,10 +14,6 @@ describe("Tauri Capabilities", () => {
     "dialog:allow-open",
     "dialog:allow-save",
     "process:allow-restart",
-    "updater:allow-check",
-    "updater:allow-download",
-    "updater:allow-install",
-    "updater:allow-download-and-install",
     "store:allow-load",
     "store:allow-get",
     "store:allow-set",
@@ -28,7 +24,6 @@ describe("Tauri Capabilities", () => {
       allow: [
         { url: "http://*" },
         { url: "https://*" },
-        { url: "mailto:*" },
       ],
     },
     "os:allow-locale",
@@ -45,15 +40,13 @@ describe("Tauri Capabilities", () => {
     expect(capability.permissions).toContain("process:allow-restart");
   });
 
-  it("keeps updater permissions enabled for in-app update flow", () => {
+  it("grants no updater permissions (auto-update is disabled)", () => {
     const capability = JSON.parse(fs.readFileSync(defaultCapabilityPath, "utf-8"));
-    expect(capability.permissions).toEqual(expect.arrayContaining([
-      "updater:allow-check",
-      "updater:allow-download",
-      "updater:allow-install",
-      "updater:allow-download-and-install",
-    ]));
-    expect(capability.permissions).not.toContain("updater:default");
+    expect(
+      capability.permissions.filter(
+        (permission: unknown) => typeof permission === "string" && permission.startsWith("updater:")
+      )
+    ).toEqual([]);
   });
 
   it("does not grant broad default or unused plugin permissions", () => {
@@ -78,7 +71,6 @@ describe("Tauri Capabilities", () => {
       allow: [
         { url: "http://*" },
         { url: "https://*" },
-        { url: "mailto:*" },
       ],
     });
   });

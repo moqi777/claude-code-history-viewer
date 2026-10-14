@@ -14,10 +14,6 @@
     "dialog:allow-open",
     "dialog:allow-save",
     "process:allow-restart",
-    "updater:allow-check",
-    "updater:allow-download",
-    "updater:allow-install",
-    "updater:allow-download-and-install",
     "store:allow-load",
     "store:allow-get",
     "store:allow-set",
@@ -31,9 +27,6 @@
         },
         {
           "url": "https://*"
-        },
-        {
-          "url": "mailto:*"
         }
       ]
     },

@@ -12,7 +12,6 @@ import {
 import { TooltipButton } from "@/shared/TooltipButton";
 import { useAppStore } from "@/store/useAppStore";
 import type { UseAnalyticsReturn } from "@/types/analytics";
-import type { UseUpdaterReturn } from "@/hooks/useUpdater";
 import { useModal } from "@/contexts/modal";
 
 import { cn } from "@/lib/utils";
@@ -25,7 +24,6 @@ import { SessionCopyMenu } from "./SessionCopyMenu";
 interface HeaderProps {
   analyticsActions: UseAnalyticsReturn["actions"];
   analyticsComputed: UseAnalyticsReturn["computed"];
-  updater: UseUpdaterReturn;
 }
 
 const SHORTCUT_LABEL = isMacOS() ? "⌘+K" : "Ctrl+K";
@@ -35,7 +33,7 @@ const SHORTCUT_LABEL = isMacOS() ? "⌘+K" : "Ctrl+K";
 // shell — the WebUI build has no overlay controls.
 const HAS_MACOS_TRAFFIC_LIGHTS = isTauri() && isMacOS();
 
-export const Header = ({ analyticsActions, analyticsComputed, updater }: HeaderProps) => {
+export const Header = ({ analyticsActions, analyticsComputed }: HeaderProps) => {
   const { t } = useTranslation();
   const { openModal } = useModal();
 
@@ -143,7 +141,7 @@ export const Header = ({ analyticsActions, analyticsComputed, updater }: HeaderP
       <div className="relative z-10 flex items-center gap-2.5 min-w-0 flex-1 pointer-events-none">
         <img
           src={getAssetPath("app-icon.png")}
-          alt="Claude Code History"
+          alt="AgentKB"
           className="w-6 h-6 hidden md:block"
         />
         <div className="flex flex-col min-w-0">
@@ -301,7 +299,6 @@ export const Header = ({ analyticsActions, analyticsComputed, updater }: HeaderP
         {/* App menu: preferences plus the Claude Code tools (Settings
             Manager, Archive) that used to sit beside them as bare icons. */}
         <SettingDropdown
-          updater={updater}
           onOpenSettingsManager={() => {
             if (!computed.isSettingsView) analyticsActions.switchToSettings();
           }}

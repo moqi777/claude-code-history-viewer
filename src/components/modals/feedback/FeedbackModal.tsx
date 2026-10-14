@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { api } from "@/services/api";
 import { isWebUI, openExternalUrl } from "@/utils/platform";
 import { useTranslation } from "react-i18next";
-import { GithubIcon, MailIcon, InfoIcon } from "lucide-react";
+import { GithubIcon, InfoIcon } from "lucide-react";
 import type { FeedbackPrefill, FeedbackType } from "@/contexts/modal/context";
 import {
   Dialog,
@@ -23,13 +23,6 @@ import {
   Switch,
 } from "@/components/ui";
 
-interface FeedbackData {
-  subject: string;
-  body: string;
-  include_system_info: boolean;
-  feedback_type: string;
-}
-
 interface SystemInfo {
   app_version: string;
   os_type: string;
@@ -49,7 +42,6 @@ export const FeedbackModal = ({ isOpen, prefill, onClose }: FeedbackModalProps) 
   const [subject, setSubject] = useState<string>("");
   const [body, setBody] = useState<string>("");
   const [includeSystemInfo, setIncludeSystemInfo] = useState<boolean>(true);
-  const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [systemInfo, setSystemInfo] = useState<SystemInfo | null>(null);
 
   const feedbackTypes = [
@@ -88,41 +80,6 @@ export const FeedbackModal = ({ isOpen, prefill, onClose }: FeedbackModalProps) 
     } catch (error) {
       console.error("Failed to load system info:", error);
       alert(t("feedback.systemInfoError"));
-    }
-  };
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const trimmedSubject = subject.trim();
-    const trimmedBody = body.trim();
-
-    if (!trimmedSubject || !trimmedBody) {
-      return;
-    }
-
-    if (trimmedSubject.length > 100 || trimmedBody.length > 1000) {
-      return;
-    }
-
-    setIsSubmitting(true);
-    try {
-      const feedbackData: FeedbackData = {
-        subject: trimmedSubject,
-        body: trimmedBody,
-        include_system_info: includeSystemInfo,
-        feedback_type: feedbackType,
-      };
-
-      await api("send_feedback", { feedback: feedbackData });
-
-      setSubject("");
-      setBody("");
-      onClose();
-    } catch (error) {
-      console.error("Failed to send feedback:", error);
-      alert(t("feedback.sendError"));
-    } finally {
-      setIsSubmitting(false);
     }
   };
 
@@ -166,7 +123,13 @@ export const FeedbackModal = ({ isOpen, prefill, onClose }: FeedbackModalProps) 
           </DialogDescription>
         </DialogHeader>
 
-        <form onSubmit={handleSubmit} className="space-y-3">
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            void handleOpenGitHub();
+          }}
+          className="space-y-3"
+        >
           {/* Feedback Type & Subject - Side by Side */}
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
@@ -261,18 +224,6 @@ export const FeedbackModal = ({ isOpen, prefill, onClose }: FeedbackModalProps) 
           <DialogFooter className="flex-row gap-2 pt-2">
             <Button
               type="submit"
-              disabled={isSubmitting || !subject.trim() || !body.trim()}
-              size="sm"
-              className="flex-1"
-            >
-              <MailIcon className="h-3.5 w-3.5" />
-              {isSubmitting ? t("feedback.sendingEmail") : t("feedback.sendEmail")}
-            </Button>
-
-            <Button
-              type="button"
-              variant="secondary"
-              onClick={handleOpenGitHub}
               size="sm"
               className="flex-1"
             >

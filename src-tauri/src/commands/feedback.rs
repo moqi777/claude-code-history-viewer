@@ -16,47 +16,12 @@ pub struct FeedbackData {
     pub feedback_type: String, // "bug", "feature", "improvement", "other"
 }
 
+/// Kept for command-surface compatibility. `AgentKB` has no email channel (the
+/// upstream address belongs to another project), so this opens the GitHub
+/// issue form instead.
 #[tauri::command]
 pub async fn send_feedback(feedback: FeedbackData) -> Result<(), String> {
-    let mut email_body = feedback.body.clone();
-
-    // Include system information
-    if feedback.include_system_info {
-        let system_info = get_system_info().await?;
-        email_body.push_str("\n\n---\n");
-        email_body.push_str("System Information:\n");
-        email_body.push_str(&format!("App Version: {}\n", system_info.app_version));
-        email_body.push_str(&format!(
-            "OS: {} {}\n",
-            system_info.os_type, system_info.os_version
-        ));
-        email_body.push_str(&format!("Architecture: {}\n", system_info.arch));
-    }
-
-    // Adjust email subject based on feedback type
-    let email_subject = match feedback.feedback_type.as_str() {
-        "bug" => format!("[Bug Report] {}", feedback.subject),
-        "feature" => format!("[Feature Request] {}", feedback.subject),
-        "improvement" => format!("[Improvement] {}", feedback.subject),
-        _ => format!("[Feedback] {}", feedback.subject),
-    };
-
-    // URL encoding
-    let encoded_subject = urlencoding::encode(&email_subject);
-    let encoded_body = urlencoding::encode(&email_body);
-
-    // Generate mailto link
-
-    let feedback_email = std::env::var("FEEDBACK_EMAIL")
-        .unwrap_or_else(|_| "feedback@claude-history-viewer.app".to_string());
-    let mailto_url =
-        format!("mailto:{feedback_email}?subject={encoded_subject}&body={encoded_body}");
-
-    // Open with system default email app
-    tauri_plugin_opener::open_url(mailto_url, None::<String>)
-        .map_err(|e| format!("Failed to open email client: {e}"))?;
-
-    Ok(())
+    open_github_issues(Some(feedback)).await
 }
 
 #[tauri::command]
@@ -71,7 +36,7 @@ pub async fn get_system_info() -> Result<SystemInfo, String> {
 
 #[tauri::command]
 pub async fn open_github_issues(feedback: Option<FeedbackData>) -> Result<(), String> {
-    let base_url = "https://github.com/jhlee0409/claude-code-history-viewer/issues/new";
+    let base_url = crate::branding::ISSUES_URL;
 
     let github_url = match feedback {
         Some(fb) => {

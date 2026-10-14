@@ -1,10 +1,7 @@
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from "vitest";
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { useUpdater } from "../hooks/useUpdater";
-import { SimpleUpdateManager } from "../components/SimpleUpdateManager";
+import { render, screen } from "@testing-library/react";
 import { SettingDropdown } from "../layouts/Header/SettingDropdown/index";
 import { PlatformProvider } from "../contexts/platform";
-import type { UpdateSettings } from "../types/updateSettings";
 
 // Simulate Tauri environment so isTauri() returns true
 beforeAll(() => {
@@ -108,116 +105,37 @@ vi.mock("../layouts/Header/SettingDropdown/AccessibilityMenuGroup", () => ({
   AccessibilityMenuGroup: () => <div data-testid="accessibility-group" />,
 }));
 
-const defaultSettings: UpdateSettings = {
-  autoCheck: true,
-  checkInterval: "startup",
-  skippedVersions: [],
-  postponeInterval: 24 * 60 * 60 * 1000,
-  hasSeenIntroduction: false,
-  respectOfflineStatus: true,
-  allowCriticalUpdates: true,
-};
 
-const mockStore = {
-  updateSettings: { ...defaultSettings },
-  loadUpdateSettings: vi.fn(async () => {}),
-  setUpdateSetting: vi.fn(async () => {}),
-  postponeUpdate: vi.fn(async () => {}),
-  skipVersion: vi.fn(async () => {}),
-};
-
-vi.mock("@/store/useAppStore", () => ({
-  useAppStore: (selector: (state: typeof mockStore) => unknown) => selector(mockStore),
-}));
-
-function createDeferred<T>() {
-  let resolve!: (value: T) => void;
-  let reject!: (error?: unknown) => void;
-  const promise = new Promise<T>((res, rej) => {
-    resolve = res;
-    reject = rej;
-  });
-  return { promise, resolve, reject };
-}
-
-function UpdateFlowHarness() {
-  const updater = useUpdater();
-
-  return (
-    <PlatformProvider>
-      <SettingDropdown updater={updater} />
-      <SimpleUpdateManager updater={updater} />
-    </PlatformProvider>
-  );
-}
-
-describe("Update flow integration", () => {
+// AgentKB ships without any update mechanism: the updater would fetch from the
+// original project and accept packages signed by its author's key.
+describe("Updates are disabled", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockGetVersion.mockResolvedValue("1.0.0");
-    mockCheck.mockResolvedValue(null);
-    mockRelaunch.mockResolvedValue(undefined);
-    mockStore.updateSettings = { ...defaultSettings };
   });
 
-  it("runs manual check from settings menu and shows checking -> up-to-date flow", async () => {
-    const deferred = createDeferred<null>();
-    mockCheck.mockReturnValueOnce(deferred.promise);
+  it("offers no 'check for updates' entry and never calls the updater plugin", async () => {
+    render(
+      <PlatformProvider>
+        <SettingDropdown />
+      </PlatformProvider>
+    );
 
-    render(<UpdateFlowHarness />);
-
-    await waitFor(() => {
-      expect(mockStore.loadUpdateSettings).toHaveBeenCalledTimes(1);
-    });
-
-    fireEvent.click(screen.getByText("common.settings.checkUpdate"));
-
-    await waitFor(() => {
-      expect(mockCheck).toHaveBeenCalledTimes(1);
-    });
-
-    expect(screen.getByText("updateSettingsModal.checking")).toBeInTheDocument();
-    expect(screen.getByText("common.settings.checking").closest("button")).toBeDisabled();
-
-    await act(async () => {
-      deferred.resolve(null);
-      await deferred.promise;
-    });
-
-    await waitFor(() => {
-      expect(screen.getByText("upToDateNotification.upToDate")).toBeInTheDocument();
-      expect(mockStore.setUpdateSetting).toHaveBeenCalledWith(
-        "lastCheckedAt",
-        expect.any(Number)
-      );
-    });
+    expect(screen.queryByText("common.settings.checkUpdate")).toBeNull();
+    expect(screen.queryByText("common.settings.checking")).toBeNull();
+    // Let any stray effect run.
+    await Promise.resolve();
+    expect(mockCheck).not.toHaveBeenCalled();
   });
 
-  it("supports skip version action from update modal after manual check", async () => {
-    const mockDownloadAndInstall = vi.fn();
-    mockCheck.mockResolvedValueOnce({
-      version: "2.0.0",
-      downloadAndInstall: mockDownloadAndInstall,
-    });
-
-    render(<UpdateFlowHarness />);
-
-    await waitFor(() => {
-      expect(mockStore.loadUpdateSettings).toHaveBeenCalledTimes(1);
-    });
-
-    fireEvent.click(screen.getByText("common.settings.checkUpdate"));
-
-    await waitFor(() => {
-      expect(
-        screen.getByRole("heading", { name: "simpleUpdateModal.newUpdateAvailable" })
-      ).toBeInTheDocument();
-    });
-
-    fireEvent.click(screen.getByText("simpleUpdateModal.skipVersion"));
-
-    await waitFor(() => {
-      expect(mockStore.skipVersion).toHaveBeenCalledWith("2.0.0");
-    });
+  it("does not react to the legacy manual-update-check event", async () => {
+    render(
+      <PlatformProvider>
+        <SettingDropdown />
+      </PlatformProvider>
+    );
+    window.dispatchEvent(new Event("manual-update-check"));
+    await Promise.resolve();
+    expect(mockCheck).not.toHaveBeenCalled();
   });
 });
