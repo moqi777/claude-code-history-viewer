@@ -1,0 +1,62 @@
+src/kb/KbSettings.test.tsx
+  s_cca7c29607588b::t_dc15588d3608f0 87-98
+src/i18n/locales/zh-TW/common.json
+  s_cca7c29607588b::t_32cfc864ae4af5 9
+src/i18n/locales/en/common.json
+  s_cca7c29607588b::t_32cfc864ae4af5 9
+src-tauri/src/kb/volume.rs
+  s_cca7c29607588b::t_baa5a08dc57492 496-508
+  s_cca7c29607588b::t_ea61d8668535e6 29-30,178-181,273-277,314
+  s_cca7c29607588b::t_cdff7e9c29470a 490-493
+src-tauri/src/kb/config.rs
+  s_cca7c29607588b::t_ea61d8668535e6 249-254
+  s_cca7c29607588b::t_baa5a08dc57492 556-573
+src/i18n/locales/ko/common.json
+  s_cca7c29607588b::t_32cfc864ae4af5 9
+src/kb/KbWizard.test.tsx
+  s_cca7c29607588b::t_52caa0274431fd 130
+src/kb/types.ts
+  s_cca7c29607588b::t_2393e25058d765 119
+src/store/useLanguageStore.test.ts
+  s_cca7c29607588b::t_dc15588d3608f0 1-65
+src/i18n/locales/zh-CN/common.json
+  s_cca7c29607588b::t_32cfc864ae4af5 9
+src/kb/testkit.ts
+  s_cca7c29607588b::t_2393e25058d765 53
+src-tauri/src/kb/index/text.rs
+  s_cca7c29607588b::t_63aea56eac54e9 18-39,53,126-147
+src/kb/KbWizard.tsx
+  s_cca7c29607588b::t_4e89a0b8e839a1 13,15,35-61,167
+src/i18n/types.generated.ts
+  ai_agent 8
+src/store/useLanguageStore.ts
+  s_cca7c29607588b::t_7037504553b833 62-69,72-75
+  s_cca7c29607588b::t_0828834584dbbc 18-20
+src/layouts/AppLayout.tsx
+  s_cca7c29607588b::t_4da17f716732b9 52
+  s_cca7c29607588b::t_7037504553b833 872
+src/i18n/locales/ja/common.json
+  s_cca7c29607588b::t_32cfc864ae4af5 9
+src/kb/fields.tsx
+  s_cca7c29607588b::t_1bafd0ff0b4c63 183-187
+  s_cca7c29607588b::t_3dfdf02bbad003 238-241
+  s_cca7c29607588b::t_52caa0274431fd 175-176
+src-tauri/src/kb/sync.rs
+  s_cca7c29607588b::t_63aea56eac54e9 30
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.11",
+  "base_commit_sha": "f58bc2c8fe61775596f95820a2edbb4fa9b15042",
+  "prompts": {},
+  "sessions": {
+    "s_cca7c29607588b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ef228e77-8d37-45df-ab42-2d4c28a0387d",
+        "model": "claude-sonnet-5-5"
+      },
+      "human_author": "moqing <moqing@tsign.cn>"
+    }
+  }
+}
