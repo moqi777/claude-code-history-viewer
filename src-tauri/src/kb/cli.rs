@@ -12,7 +12,8 @@ use super::config::KbConfig;
 use super::schedule::{self, TRIGGER_ENV};
 use super::sync::{self, KbEnv};
 
-const USAGE: &str = "usage: --kb-sync | --kb-schedule install|uninstall|status";
+const USAGE: &str =
+    "usage: --kb-sync | --kb-backup | --kb-schedule install|uninstall|status|ensure";
 
 /// `Some(exit code)` when `args` is a KB command, `None` to let the app start
 /// normally. Only `argv[1]` is inspected, so a stray `--kb-…` value elsewhere
@@ -24,6 +25,7 @@ pub fn try_run(args: &[String]) -> Option<i32> {
     }
     Some(match command.as_str() {
         "--kb-sync" => run_sync_command(),
+        "--kb-backup" => run_backup_command(),
         "--kb-schedule" => run_schedule_command(args.get(2).map(String::as_str)),
         other => {
             eprintln!("unknown KB command {other}\n{USAGE}");
@@ -69,8 +71,26 @@ fn run_sync_command() -> i32 {
     }
 }
 
+/// Back up to the external disk now (the same pass a collection ends with).
+fn run_backup_command() -> i32 {
+    let config = match load_config() {
+        Ok(config) => config,
+        Err(code) => return code,
+    };
+    match super::backup::run_standalone(&KbEnv::from_config(&config), &super::volume::MacQuery) {
+        Ok(summary) => {
+            print_json(&summary);
+            i32::from(summary.status == "error")
+        }
+        Err(e) => {
+            eprintln!("{e}");
+            1
+        }
+    }
+}
+
 fn run_schedule_command(action: Option<&str>) -> i32 {
-    if !matches!(action, Some("install" | "uninstall" | "status")) {
+    if !matches!(action, Some("install" | "uninstall" | "status" | "ensure")) {
         eprintln!("{USAGE}");
         return 2;
     }
@@ -78,6 +98,18 @@ fn run_schedule_command(action: Option<&str>) -> i32 {
         Ok(config) => config,
         Err(code) => return code,
     };
+    if action == Some("ensure") {
+        return match schedule::ensure_current_now() {
+            Ok(repair) => {
+                print_json(&repair);
+                0
+            }
+            Err(e) => {
+                eprintln!("{e}");
+                1
+            }
+        };
+    }
     let result = match action {
         Some("install") => schedule::install_now(&config),
         Some("uninstall") => schedule::uninstall_now(),

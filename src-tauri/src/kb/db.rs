@@ -417,6 +417,12 @@ pub fn set_meta(conn: &Connection, key: &str, value: &str) -> Result<(), String>
     Ok(())
 }
 
+pub fn delete_meta(conn: &Connection, key: &str) -> Result<(), String> {
+    conn.execute("DELETE FROM meta WHERE key=?1", [key])
+        .map_err(|e| err("delete meta", e))?;
+    Ok(())
+}
+
 pub fn begin_run(conn: &Connection, trigger: &str, now: &str) -> Result<i64, String> {
     conn.execute(
         "INSERT INTO sync_runs (started_at, trigger) VALUES (?1, ?2)",

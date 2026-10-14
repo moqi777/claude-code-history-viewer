@@ -6,8 +6,10 @@ use std::collections::BTreeMap;
 use rusqlite::Connection;
 use serde::Serialize;
 
+use super::backup;
 use super::db;
 use super::lock::{self, LockInfo};
+use super::schedule;
 use super::sync::KbEnv;
 
 #[derive(Debug, Clone, Serialize)]
@@ -30,6 +32,40 @@ pub struct KbStatus {
     /// process that wrote the lock file is still alive.
     pub running: bool,
     pub lock_holder: Option<LockInfo>,
+    /// `idle`, `collecting` or `backing_up` — what the process holding the
+    /// lock is doing right now.
+    pub activity: &'static str,
+    pub backup: BackupMeta,
+    /// Set when the app re-pointed the scheduled task at itself.
+    pub schedule_notice: Option<ScheduleNotice>,
+    /// Size of the whole data directory.
+    pub data_bytes: u64,
+}
+
+/// Backup facts recorded in `kb.db` by whichever process ran the backup.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct BackupMeta {
+    pub last_at: Option<String>,
+    pub last_result: Option<String>,
+    pub last_skipped_at: Option<String>,
+    pub last_bytes: Option<u64>,
+    /// `bytes done / bytes total` of a running backup.
+    pub progress: Option<(u64, u64)>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ScheduleNotice {
+    pub at: String,
+    pub from: Option<String>,
+    pub to: String,
+    pub reason: String,
+}
+
+fn meta(conn: &Connection, key: &str) -> Option<String> {
+    db::get_meta(conn, key)
+        .ok()
+        .flatten()
+        .filter(|v| !v.is_empty())
 }
 
 pub fn collect(env: &KbEnv) -> Result<KbStatus, String> {
@@ -41,6 +77,10 @@ pub fn collect(env: &KbEnv) -> Result<KbStatus, String> {
         last_run: None,
         running: false,
         lock_holder: lock::read_info(&env.data.lock()),
+        activity: "idle",
+        backup: BackupMeta::default(),
+        schedule_notice: None,
+        data_bytes: super::fsutil::dir_size(env.data.root()),
     };
     let Some(conn) = db::open_readonly(&env.data.db())? else {
         return Ok(status);
@@ -76,6 +116,41 @@ pub fn collect(env: &KbEnv) -> Result<KbStatus, String> {
             .lock_holder
             .as_ref()
             .is_some_and(|h| process_alive(h.pid));
+
+    status.backup = BackupMeta {
+        last_at: meta(&conn, backup::META_LAST_AT),
+        last_result: meta(&conn, backup::META_LAST_RESULT),
+        last_skipped_at: meta(&conn, backup::META_LAST_SKIPPED_AT),
+        last_bytes: meta(&conn, backup::META_LAST_BYTES).and_then(|v| v.parse().ok()),
+        progress: meta(&conn, backup::META_PROGRESS).and_then(|v| {
+            let (done, total) = v.split_once('/')?;
+            Some((done.parse().ok()?, total.parse().ok()?))
+        }),
+    };
+    // A process that died mid-backup leaves "running" behind; only believe it
+    // while the lock holder is alive.
+    let holder_alive = status
+        .lock_holder
+        .as_ref()
+        .is_some_and(|h| process_alive(h.pid));
+    let backing_up = holder_alive && meta(&conn, backup::META_STATE).as_deref() == Some("running");
+    status.activity = if backing_up {
+        "backing_up"
+    } else if status.running {
+        "collecting"
+    } else {
+        "idle"
+    };
+    status.running = status.running || backing_up;
+    if !backing_up {
+        status.backup.progress = None;
+    }
+    status.schedule_notice = meta(&conn, schedule::META_REPAIRED_AT).map(|at| ScheduleNotice {
+        at,
+        from: meta(&conn, schedule::META_REPAIRED_FROM),
+        to: meta(&conn, schedule::META_REPAIRED_TO).unwrap_or_default(),
+        reason: meta(&conn, schedule::META_REPAIRED_REASON).unwrap_or_default(),
+    });
     Ok(status)
 }
 
@@ -148,6 +223,16 @@ pub struct SessionFilter {
     pub include_subagents: Option<bool>,
     /// Sessions with no user/assistant messages (metadata-only files).
     pub include_empty: Option<bool>,
+    /// `cli`, `vscode`, `exec`… as recorded by the indexer.
+    pub client: Option<String>,
+    pub project: Option<String>,
+    /// Exact working directory (used to open a session in its project).
+    pub cwd: Option<String>,
+    /// Lower / upper bound on last activity, RFC 3339.
+    pub since: Option<String>,
+    pub until: Option<String>,
+    /// Substring of the title.
+    pub query: Option<String>,
     pub limit: Option<u32>,
     pub offset: Option<u32>,
 }
@@ -171,6 +256,12 @@ pub fn list_sessions(env: &KbEnv, filter: &SessionFilter) -> Result<Vec<KbSessio
                AND (?2 = 0 OR f.source_status = 'deleted') \
                AND (?3 = 1 OR s.is_subagent = 0) \
                AND (?6 = 1 OR s.message_count > 0) \
+               AND (?7 IS NULL OR s.client = ?7) \
+               AND (?8 IS NULL OR s.project_name = ?8) \
+               AND (?9 IS NULL OR COALESCE(s.last_activity_at, f.last_synced_at) >= ?9) \
+               AND (?10 IS NULL OR COALESCE(s.last_activity_at, f.last_synced_at) <= ?10) \
+               AND (?11 IS NULL OR instr(lower(COALESCE(s.title, '')), lower(?11)) > 0) \
+               AND (?12 IS NULL OR s.cwd = ?12) \
              ORDER BY COALESCE(s.last_activity_at, f.last_synced_at) DESC, s.id DESC \
              LIMIT ?4 OFFSET ?5",
         )
@@ -184,6 +275,12 @@ pub fn list_sessions(env: &KbEnv, filter: &SessionFilter) -> Result<Vec<KbSessio
                 i64::from(limit),
                 i64::from(filter.offset.unwrap_or(0)),
                 i64::from(filter.include_empty.unwrap_or(false)),
+                filter.client,
+                filter.project,
+                filter.since,
+                filter.until,
+                filter.query.as_deref().filter(|q| !q.is_empty()),
+                filter.cwd,
             ],
             |r| {
                 let mirror_rel: String = r.get(2)?;
@@ -224,4 +321,40 @@ pub fn list_sessions(env: &KbEnv, filter: &SessionFilter) -> Result<Vec<KbSessio
         )
         .map_err(|e| e.to_string())?;
     rows.collect::<Result<_, _>>().map_err(|e| e.to_string())
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct Facets {
+    pub clients: Vec<String>,
+    /// `(source, project name)` pairs.
+    pub projects: Vec<(String, String)>,
+}
+
+/// Values the filter drop-downs offer.
+pub fn facets(env: &KbEnv) -> Result<Facets, String> {
+    let Some(conn) = db::open_readonly(&env.data.db())? else {
+        return Ok(Facets::default());
+    };
+    let mut out = Facets::default();
+    let mut stmt = conn
+        .prepare("SELECT DISTINCT client FROM sessions WHERE client IS NOT NULL ORDER BY client")
+        .map_err(|e| e.to_string())?;
+    out.clients = stmt
+        .query_map([], |r| r.get::<_, String>(0))
+        .map_err(|e| e.to_string())?
+        .collect::<Result<_, _>>()
+        .map_err(|e| e.to_string())?;
+    let mut stmt = conn
+        .prepare(
+            "SELECT DISTINCT source, project_name FROM sessions \
+             WHERE project_name IS NOT NULL AND project_name <> '' \
+             ORDER BY project_name COLLATE NOCASE, source",
+        )
+        .map_err(|e| e.to_string())?;
+    out.projects = stmt
+        .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))
+        .map_err(|e| e.to_string())?
+        .collect::<Result<_, _>>()
+        .map_err(|e| e.to_string())?;
+    Ok(out)
 }

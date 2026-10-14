@@ -128,6 +128,11 @@ pub struct ScheduleStatus {
     pub loaded: bool,
     pub interval_secs: Option<u64>,
     pub program: Option<String>,
+    /// Executable named in the installed plist (what launchd will run), and
+    /// whether it is still there. `false` means the task is dead (app moved
+    /// or deleted).
+    pub plist_program: Option<String>,
+    pub program_exists: Option<bool>,
     /// launchd's own view: `running` / `not running` / `waiting`…
     pub state: Option<String>,
     pub last_exit_code: Option<i64>,
@@ -203,6 +208,10 @@ impl Scheduler<'_> {
             installed: plist.is_file(),
             ..ScheduleStatus::default()
         };
+        if let Some(installed) = read_installed(&plist) {
+            status.program_exists = installed.program.as_deref().map(Path::exists);
+            status.plist_program = installed.program.map(|p| p.display().to_string());
+        }
         if let Some(text) = self.launchctl.print(&self.target())? {
             status.loaded = true;
             status.state = print_field(&text, "state").map(str::to_owned);
@@ -226,12 +235,167 @@ fn print_field<'a>(text: &'a str, key: &str) -> Option<&'a str> {
 }
 
 fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), String> {
-    let mut tmp = path.as_os_str().to_owned();
-    tmp.push(format!(".tmp-{}", std::process::id()));
-    let tmp = PathBuf::from(tmp);
-    std::fs::write(&tmp, bytes).map_err(|e| format!("cannot write {}: {e}", tmp.display()))?;
-    std::fs::rename(&tmp, path)
-        .map_err(|e| format!("cannot move {} into place: {e}", tmp.display()))
+    super::fsutil::write_atomic(path, bytes)
+}
+
+// ---------------------------------------------------------------------------
+// Keeping the task pointed at the app that is actually installed
+// ---------------------------------------------------------------------------
+
+/// Whether a running executable is a place a background task may safely point at.
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ExeStability {
+    Stable,
+    /// `cargo run`, `tauri dev`, a bare binary: not an installed app.
+    NotInApp,
+    /// macOS runs an unsigned app opened from Downloads from a random,
+    /// read-only copy; the path is gone after the next launch.
+    Translocated,
+    /// Inside a mounted disk image.
+    DiskImage,
+}
+
+pub fn classify_exe(exe: &Path) -> ExeStability {
+    let text = exe.to_string_lossy();
+    if text.contains("/AppTranslocation/") {
+        ExeStability::Translocated
+    } else if text.starts_with("/Volumes/") {
+        ExeStability::DiskImage
+    } else if !text.contains(".app/Contents/MacOS/") {
+        ExeStability::NotInApp
+    } else {
+        ExeStability::Stable
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InstalledPlist {
+    pub program: Option<PathBuf>,
+    pub interval_secs: Option<u64>,
+}
+
+/// What the installed plist says, or `None` when it is missing or unreadable.
+pub fn read_installed(plist_path: &Path) -> Option<InstalledPlist> {
+    let value = plist::Value::from_file(plist_path).ok()?;
+    let dict = value.as_dictionary()?;
+    let program = dict
+        .get("ProgramArguments")
+        .and_then(plist::Value::as_array)
+        .and_then(|args| args.first())
+        .and_then(plist::Value::as_string)
+        .map(PathBuf::from);
+    let interval_secs = dict
+        .get("StartInterval")
+        .and_then(plist::Value::as_unsigned_integer);
+    Some(InstalledPlist {
+        program,
+        interval_secs,
+    })
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(tag = "outcome", rename_all = "snake_case")]
+pub enum Repair {
+    /// Already correct, or the user turned the schedule off.
+    NotNeeded,
+    /// We are not running from an installed app; leave the task alone.
+    Skipped { stability: ExeStability },
+    Repaired {
+        from: Option<String>,
+        to: String,
+        reason: String,
+    },
+}
+
+fn same_file(a: &Path, b: &Path) -> bool {
+    match (a.canonicalize(), b.canonicalize()) {
+        (Ok(a), Ok(b)) => a == b,
+        _ => a == b,
+    }
+}
+
+impl Scheduler<'_> {
+    /// Reinstall the task if it no longer matches this app and the settings.
+    /// Safe to call on every start: it only acts when something differs.
+    pub fn ensure_current(&self, config: &KbConfig) -> Result<Repair, String> {
+        if !config.schedule_enabled {
+            return Ok(Repair::NotNeeded);
+        }
+        let stability = classify_exe(&self.exe);
+        if stability != ExeStability::Stable {
+            return Ok(Repair::Skipped { stability });
+        }
+        let installed = read_installed(&self.plist_path());
+        let reason = match &installed {
+            None => Some("the task was not installed"),
+            Some(i)
+                if i.program
+                    .as_deref()
+                    .map_or(true, |p| !same_file(p, &self.exe)) =>
+            {
+                Some("the app moved")
+            }
+            Some(i) if i.interval_secs != Some(config.interval_secs) => {
+                Some("the interval differs from the settings")
+            }
+            Some(_) if self.launchctl.print(&self.target())?.is_none() => {
+                Some("the task was not loaded")
+            }
+            Some(_) => None,
+        };
+        let Some(reason) = reason else {
+            return Ok(Repair::NotNeeded);
+        };
+        let from = installed
+            .and_then(|i| i.program)
+            .map(|p| p.display().to_string());
+        self.install(config)?;
+        Ok(Repair::Repaired {
+            from,
+            to: self.exe.display().to_string(),
+            reason: reason.to_string(),
+        })
+    }
+}
+
+pub const META_REPAIRED_AT: &str = "schedule_repaired_at";
+pub const META_REPAIRED_FROM: &str = "schedule_repaired_from";
+pub const META_REPAIRED_TO: &str = "schedule_repaired_to";
+pub const META_REPAIRED_REASON: &str = "schedule_repaired_reason";
+
+/// App-start hook: repair the task for a configured install and leave a note
+/// for the home page. Users who never finished setup (no `config.json`) get
+/// nothing installed behind their back.
+pub fn ensure_current_now() -> Result<Repair, String> {
+    if !matches!(KbConfig::state()?, super::config::ConfigState::Valid) {
+        return Ok(Repair::NotNeeded);
+    }
+    let config = KbConfig::load()?;
+    let repair = with_system_scheduler(|s| s.ensure_current(&config), || Repair::NotNeeded)?;
+    let data = super::paths::DataPaths::new(config.data_dir.clone());
+    let log = super::log::SyncLog::open(&data.logs());
+    match &repair {
+        Repair::Repaired { from, to, reason } => {
+            log.line(&format!(
+                "schedule repaired: {} -> {to} ({reason})",
+                from.as_deref().unwrap_or("(none)")
+            ));
+            let conn = super::db::open(&data.db())?;
+            let now = chrono::Utc::now().to_rfc3339();
+            super::db::set_meta(&conn, META_REPAIRED_AT, &now)?;
+            super::db::set_meta(&conn, META_REPAIRED_FROM, from.as_deref().unwrap_or(""))?;
+            super::db::set_meta(&conn, META_REPAIRED_TO, to)?;
+            super::db::set_meta(&conn, META_REPAIRED_REASON, reason)?;
+        }
+        Repair::Skipped { stability } => {
+            log.line(&format!(
+                "schedule repair skipped: unstable executable path ({stability:?})"
+            ));
+        }
+        Repair::NotNeeded => {}
+    }
+    Ok(repair)
 }
 
 #[cfg(target_os = "macos")]
@@ -332,6 +496,8 @@ mod tests {
     }
 
     fn config(dir: &Path) -> KbConfig {
+        // `KbConfig::default()` resolves the home directory; sandbox it.
+        std::env::set_var("CCHV_TEST_HOME", dir);
         KbConfig {
             data_dir: dir.join("AgentKB"),
             interval_secs: 600,
@@ -417,5 +583,140 @@ mod tests {
             .filter(|e| e.file_name().to_string_lossy().contains(".tmp-"))
             .collect();
         assert!(leftovers.is_empty());
+    }
+
+    fn scheduler_at<'a>(dir: &Path, exe: &str, fake: &'a FakeLaunchctl) -> Scheduler<'a> {
+        Scheduler {
+            launch_agents_dir: dir.join("LaunchAgents"),
+            uid: "501".into(),
+            exe: PathBuf::from(exe),
+            launchctl: fake,
+        }
+    }
+
+    const APP_A: &str = "/Applications/AgentKB.app/Contents/MacOS/AgentKB";
+    const APP_B: &str = "/Users/x/Apps/AgentKB.app/Contents/MacOS/AgentKB";
+
+    #[test]
+    fn exe_stability_classification() {
+        assert_eq!(classify_exe(Path::new(APP_A)), ExeStability::Stable);
+        assert_eq!(
+            classify_exe(Path::new("/repo/src-tauri/target/debug/agentkb")),
+            ExeStability::NotInApp
+        );
+        assert_eq!(
+            classify_exe(Path::new(
+                "/private/var/folders/x/AppTranslocation/ABC/d/AgentKB.app/Contents/MacOS/AgentKB"
+            )),
+            ExeStability::Translocated
+        );
+        assert_eq!(
+            classify_exe(Path::new(
+                "/Volumes/AgentKB/AgentKB.app/Contents/MacOS/AgentKB"
+            )),
+            ExeStability::DiskImage
+        );
+    }
+
+    #[test]
+    fn a_moved_app_gets_the_task_repointed_and_the_old_path_is_reported() {
+        let dir = tempfile::tempdir().unwrap();
+        let fake = FakeLaunchctl::default();
+        scheduler_at(dir.path(), APP_A, &fake)
+            .install(&config(dir.path()))
+            .unwrap();
+        let installed =
+            read_installed(&scheduler_at(dir.path(), APP_A, &fake).plist_path()).unwrap();
+        assert_eq!(installed.program, Some(PathBuf::from(APP_A)));
+
+        // Same app, nothing to do.
+        let same = scheduler_at(dir.path(), APP_A, &fake);
+        assert_eq!(
+            same.ensure_current(&config(dir.path())).unwrap(),
+            Repair::NotNeeded
+        );
+
+        // The app now runs from somewhere else.
+        let moved = scheduler_at(dir.path(), APP_B, &fake);
+        let repair = moved.ensure_current(&config(dir.path())).unwrap();
+        assert!(
+            matches!(&repair, Repair::Repaired { from: Some(f), to, .. }
+            if f == APP_A && to == APP_B),
+            "{repair:?}"
+        );
+        let now = read_installed(&moved.plist_path()).unwrap();
+        assert_eq!(now.program, Some(PathBuf::from(APP_B)));
+        assert_eq!(
+            moved.ensure_current(&config(dir.path())).unwrap(),
+            Repair::NotNeeded
+        );
+    }
+
+    #[test]
+    fn a_dev_build_never_hijacks_the_installed_task() {
+        let dir = tempfile::tempdir().unwrap();
+        let fake = FakeLaunchctl::default();
+        scheduler_at(dir.path(), APP_A, &fake)
+            .install(&config(dir.path()))
+            .unwrap();
+        let dev = scheduler_at(dir.path(), "/repo/target/debug/agentkb", &fake);
+        assert_eq!(
+            dev.ensure_current(&config(dir.path())).unwrap(),
+            Repair::Skipped {
+                stability: ExeStability::NotInApp
+            }
+        );
+        let still = read_installed(&dev.plist_path()).unwrap();
+        assert_eq!(still.program, Some(PathBuf::from(APP_A)));
+    }
+
+    #[test]
+    fn missing_plist_changed_interval_or_unloaded_task_are_repaired_and_disabled_is_left_alone() {
+        let dir = tempfile::tempdir().unwrap();
+        let fake = FakeLaunchctl::default();
+        let sched = scheduler_at(dir.path(), APP_A, &fake);
+        let mut cfg = config(dir.path());
+
+        assert!(matches!(
+            sched.ensure_current(&cfg).unwrap(),
+            Repair::Repaired { from: None, .. }
+        ));
+        cfg.interval_secs = 300;
+        assert!(matches!(
+            sched.ensure_current(&cfg).unwrap(),
+            Repair::Repaired { .. }
+        ));
+        assert_eq!(
+            read_installed(&sched.plist_path()).unwrap().interval_secs,
+            Some(300)
+        );
+
+        *fake.loaded.borrow_mut() = false; // launchd forgot the job
+        assert!(matches!(
+            sched.ensure_current(&cfg).unwrap(),
+            Repair::Repaired { .. }
+        ));
+
+        cfg.schedule_enabled = false;
+        cfg.interval_secs = 120;
+        assert_eq!(sched.ensure_current(&cfg).unwrap(), Repair::NotNeeded);
+    }
+
+    #[test]
+    fn status_flags_a_task_whose_program_no_longer_exists() {
+        let dir = tempfile::tempdir().unwrap();
+        let fake = FakeLaunchctl::default();
+        let sched = scheduler_at(
+            dir.path(),
+            "/gone/AgentKB.app/Contents/MacOS/AgentKB",
+            &fake,
+        );
+        sched.install(&config(dir.path())).unwrap();
+        let status = sched.status().unwrap();
+        assert_eq!(status.program_exists, Some(false));
+        assert_eq!(
+            status.plist_program.as_deref(),
+            Some("/gone/AgentKB.app/Contents/MacOS/AgentKB")
+        );
     }
 }

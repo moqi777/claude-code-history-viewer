@@ -146,6 +146,9 @@ fn run_tauri() {
     use std::sync::{Arc, Mutex};
     use tauri::{Emitter, Manager};
 
+    // Carry the original app's settings.json over before the webview can ask for it.
+    kb::legacy::migrate_store_settings_at_startup();
+
     // Parse CLI args for a session preload hint (e.g. `--session <uuid>`).
     // A missing or unrecognized value yields None; the GUI then runs as usual.
     let startup_session_hint = cli::StartupSessionHint(cli::parse_session_hint(
@@ -193,10 +196,26 @@ fn run_tauri() {
         .invoke_handler(tauri::generate_handler![
             crate::cli::get_startup_session_hint,
             kb::commands::kb_get_status,
+            kb::commands::kb_get_backup_presence,
             kb::commands::kb_sync_now,
+            kb::commands::kb_backup_now,
             kb::commands::kb_list_sessions,
+            kb::commands::kb_session_facets,
+            kb::commands::kb_dismiss_notice,
             kb::commands::kb_schedule_install,
             kb::commands::kb_schedule_uninstall,
+            kb::commands::kb_get_config_state,
+            kb::commands::kb_get_config,
+            kb::commands::kb_save_config,
+            kb::commands::kb_restore_default_config,
+            kb::commands::kb_probe_sources,
+            kb::commands::kb_test_data_dir,
+            kb::commands::kb_test_schedule_env,
+            kb::commands::kb_list_external_volumes,
+            kb::commands::kb_test_mirror,
+            kb::commands::kb_wizard_commit,
+            kb::commands::kb_change_data_dir_check,
+            kb::commands::kb_change_data_dir_run,
             get_claude_folder_path,
             validate_claude_folder,
             validate_custom_claude_dir,
@@ -297,6 +316,16 @@ fn run_tauri() {
             // Updater fallback
             force_quit_and_relaunch
         ])
+        .setup(|_app| {
+            // Keep the scheduled task pointed at this app (moved, reinstalled…).
+            // Off the main thread: it shells out to launchctl.
+            std::thread::spawn(|| {
+                if let Err(e) = kb::schedule::ensure_current_now() {
+                    log::warn!("schedule check failed: {e}");
+                }
+            });
+            Ok(())
+        })
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|app, event| {

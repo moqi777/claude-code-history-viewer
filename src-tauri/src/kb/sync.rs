@@ -128,6 +128,15 @@ impl Summary {
 /// Run one collection. Takes the sync lock (waiting up to [`LOCK_WAIT`]); a
 /// held lock yields a `skipped` summary, not an error.
 pub fn run_sync(env: &KbEnv, trigger: &str) -> Result<Summary, String> {
+    run_sync_with(env, trigger, &super::volume::MacQuery)
+}
+
+/// [`run_sync`] with the disk-identification backend chosen by the caller.
+pub fn run_sync_with(
+    env: &KbEnv,
+    trigger: &str,
+    query: &dyn super::volume::SystemQuery,
+) -> Result<Summary, String> {
     let started = Instant::now();
     let Some(_lock) = SyncLock::acquire(&env.data.lock(), LOCK_WAIT)? else {
         return Ok(Summary::skipped(trigger, "locked"));
@@ -150,7 +159,7 @@ pub fn run_sync(env: &KbEnv, trigger: &str) -> Result<Summary, String> {
     // Collection first, so the backup copies what was just collected. A backup
     // problem is reported but never turns a good collection into a failed one.
     if result.is_ok() && env.mirror.is_some() {
-        let backup = super::backup::run(env, &conn, &log, &super::volume::MacQuery);
+        let backup = super::backup::run(env, &conn, &log, query);
         summary.errors.extend(backup.errors.iter().cloned());
         summary.backup = Some(backup);
     }
@@ -622,7 +631,7 @@ mod tests {
     const CLAUDE_ID: &str = "11111111-2222-3333-4444-555555555555";
 
     struct Sandbox {
-        _dir: tempfile::TempDir,
+        dir: tempfile::TempDir,
         env: KbEnv,
         claude: PathBuf,
         codex: PathBuf,
@@ -646,7 +655,7 @@ mod tests {
                 progress: ProgressSink::default(),
             };
             Self {
-                _dir: dir,
+                dir,
                 env,
                 claude,
                 codex,
@@ -1236,5 +1245,132 @@ mod tests {
         )
         .unwrap();
         assert_eq!(all.len(), 2);
+    }
+
+    // ---- backup wired into the collection ----
+
+    fn fake_disk(
+        sb: &Sandbox,
+    ) -> (
+        PathBuf,
+        crate::kb::volume::fake::FakeQuery,
+        super::super::sync::MirrorTarget,
+    ) {
+        use crate::kb::volume::fake::{volume, FakeQuery};
+        let disk = sb.dir.path().join("disk");
+        fs::create_dir_all(&disk).unwrap();
+        let query = FakeQuery::with([crate::kb::volume::VolumeInfo {
+            mount_point: disk.clone(),
+            ..volume("DISK", "/x", false, "exfat")
+        }]);
+        let target = MirrorTarget {
+            target_dir: disk.join("AgentKB-backup"),
+            volume_uuid: "DISK".into(),
+        };
+        (disk, query, target)
+    }
+
+    #[test]
+    fn a_collection_is_followed_by_a_byte_identical_backup() {
+        let mut sb = Sandbox::new();
+        let (_disk, query, target) = fake_disk(&sb);
+        sb.env.mirror = Some(target.clone());
+        write(&sb.claude_file(), &claude_text());
+        let summary = run_sync_with(&sb.env, "test", &query).unwrap();
+        assert_eq!(summary.status, "ok", "{summary:?}");
+        let backup = summary.backup.expect("backup ran");
+        assert_eq!(backup.status, "ok");
+        let rel = "claude/projects/-Users-me-proj/".to_string() + CLAUDE_ID + ".jsonl";
+        assert_eq!(
+            fs::read(sb.mirror_of(&rel)).unwrap(),
+            fs::read(target.target_dir.join("raw").join(&rel)).unwrap()
+        );
+        // A later append to the source flows through collect then backup.
+        append(&sb.claude_file(), "{\"type\":\"mode\",\"mode\":\"y\"}\n");
+        let again = run_sync_with(&sb.env, "test", &query).unwrap();
+        assert_eq!(again.backup.unwrap().appended_files, 1);
+        assert_eq!(
+            fs::read(sb.mirror_of(&rel)).unwrap(),
+            fs::read(target.target_dir.join("raw").join(&rel)).unwrap()
+        );
+    }
+
+    #[test]
+    fn an_unplugged_disk_never_fails_or_dirties_the_collection() {
+        use crate::kb::volume::fake::FakeQuery;
+        let mut sb = Sandbox::new();
+        let (disk, _query, target) = fake_disk(&sb);
+        sb.env.mirror = Some(target.clone());
+        write(&sb.claude_file(), &claude_text());
+        // Unplugged: only the system disk answers, and the folder exists as a plain one.
+        let system_only = FakeQuery::with([crate::kb::volume::VolumeInfo {
+            mount_point: sb.dir.path().to_path_buf(),
+            ..crate::kb::volume::fake::volume("SYS", "/", true, "apfs")
+        }]);
+        fs::create_dir_all(&target.target_dir).unwrap();
+        let summary = run_sync_with(&sb.env, "test", &system_only).unwrap();
+        assert_eq!(summary.status, "ok");
+        assert_eq!(summary.backup.as_ref().unwrap().status, "skipped");
+        assert!(summary.errors.is_empty());
+        assert!(fs::read_dir(&target.target_dir).unwrap().next().is_none());
+        assert!(disk.is_dir());
+    }
+
+    #[test]
+    fn list_filters_narrow_by_client_project_text_and_cwd() {
+        use super::super::status::{list_sessions, SessionFilter};
+        let sb = Sandbox::new();
+        write(&sb.claude_file(), &claude_text());
+        write(&sb.codex_file(), &codex_text());
+        sb.sync();
+        let count = |f: SessionFilter| list_sessions(&sb.env, &f).unwrap().len();
+        assert_eq!(count(SessionFilter::default()), 2);
+        assert_eq!(
+            count(SessionFilter {
+                source: Some("codex".into()),
+                ..Default::default()
+            }),
+            1
+        );
+        assert_eq!(
+            count(SessionFilter {
+                query: Some("zzz-no-such-title".into()),
+                ..Default::default()
+            }),
+            0
+        );
+        assert_eq!(
+            count(SessionFilter {
+                since: Some("2999-01-01T00:00:00Z".into()),
+                ..Default::default()
+            }),
+            0
+        );
+        assert_eq!(
+            count(SessionFilter {
+                until: Some("2999-01-01T00:00:00Z".into()),
+                ..Default::default()
+            }),
+            2
+        );
+        let first = list_sessions(&sb.env, &SessionFilter::default()).unwrap();
+        let project = first[0].project_name.clone();
+        let hits = count(SessionFilter {
+            project: Some(project),
+            ..Default::default()
+        });
+        assert!(hits >= 1);
+        let cwd = first
+            .iter()
+            .find_map(|s| s.cwd.clone())
+            .expect("a session has a cwd");
+        assert!(
+            count(SessionFilter {
+                cwd: Some(cwd),
+                ..Default::default()
+            }) >= 1
+        );
+        let facets = super::super::status::facets(&sb.env).unwrap();
+        assert!(!facets.projects.is_empty());
     }
 }
