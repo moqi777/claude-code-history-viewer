@@ -33,6 +33,7 @@ import { BottomTabBar } from "@/components/mobile/BottomTabBar";
 import { MobileNavigatorSheet } from "@/components/mobile/MobileNavigatorSheet";
 import { Header } from "@/layouts/Header/Header";
 import { ModalContainer } from "@/layouts/Header/SettingDropdown/ModalContainer";
+import { KbPanel } from "@/kb";
 import { DesktopOnly } from "@/contexts/platform";
 import { useIsLgUp, useIsXlUp } from "@/hooks/useMediaQuery";
 import { useResizablePanel } from "@/hooks/useResizablePanel";
@@ -964,6 +965,7 @@ export const AppLayout: React.FC<AppLayoutProps> = (props) => {
 
       {/* Modals */}
       <ModalContainer />
+      <KbPanel />
     </TooltipProvider>
   );
 };

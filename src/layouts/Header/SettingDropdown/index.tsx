@@ -7,7 +7,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 
-import { Settings, RefreshCw, MessageSquare, Folder, Loader2, Archive, SlidersHorizontal } from "lucide-react";
+import { Settings, RefreshCw, MessageSquare, Folder, Loader2, Archive, SlidersHorizontal, DatabaseBackup } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 
@@ -15,6 +15,7 @@ import type { UseUpdaterReturn } from "@/hooks/useUpdater";
 import { useTranslation } from "react-i18next";
 import { useModal } from "@/contexts/modal";
 import { DesktopOnly } from "@/contexts/platform";
+import { useKbStore } from "@/kb";
 import { ThemeMenuGroup } from "./ThemeMenuGroup";
 import { LanguageMenuGroup } from "./LanguageMenuGroup";
 import { FilterMenuGroup } from "./FilterMenuGroup";
@@ -80,6 +81,13 @@ export const SettingDropdown = ({
               <DropdownMenuSeparator />
             </>
           )}
+          <DesktopOnly>
+            <DropdownMenuItem onClick={() => useKbStore.getState().open()}>
+              <DatabaseBackup className="mr-2 h-4 w-4 text-foreground" />
+              <span>{t("kb.menuItem")}</span>
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+          </DesktopOnly>
           <DropdownMenuLabel>{t('common.settings.title')}</DropdownMenuLabel>
           <DropdownMenuSeparator />
           <DropdownMenuItem

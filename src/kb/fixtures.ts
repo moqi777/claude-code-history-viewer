@@ -1,0 +1,51 @@
+import type { KbOverview, KbRunSummary, KbSession } from "./types";
+
+export const overviewFixture = (patch: Partial<KbOverview> = {}): KbOverview => ({
+  data_dir: "/Users/me/AgentKB",
+  db_exists: true,
+  sessions_by_source: { claude: 2, codex: 1 },
+  deleted_sources: 1,
+  last_run: {
+    started_at: "2026-10-14T10:00:00Z",
+    finished_at: "2026-10-14T10:00:05Z",
+    trigger: "schedule",
+    ok: true,
+    summary: { status: "ok", changed_files: 3, errors: [] } as unknown as KbRunSummary,
+  },
+  running: false,
+  interval_secs: 600,
+  schedule: {
+    supported: true,
+    label: "io.github.moqi777.agentkb.sync",
+    plist_path: "/Users/me/Library/LaunchAgents/x.plist",
+    installed: true,
+    loaded: true,
+    interval_secs: 600,
+    state: "not running",
+    last_exit_code: 0,
+    runs: 4,
+  },
+  ...patch,
+});
+
+export const sessionFixture = (patch: Partial<KbSession> = {}): KbSession => ({
+  session_id: "/Users/me/AgentKB/raw/claude/projects/p/a.jsonl",
+  actual_session_id: "a",
+  file_path: "/Users/me/AgentKB/raw/claude/projects/p/a.jsonl",
+  project_name: "proj",
+  message_count: 12,
+  first_message_time: "2026-10-14T09:00:00Z",
+  last_message_time: "2026-10-14T09:30:00Z",
+  last_modified: "2026-10-14T09:30:00Z",
+  has_tool_use: false,
+  has_errors: false,
+  summary: "Fix the login bug",
+  provider: "claude",
+  storage_type: "jsonl",
+  cwd: "/Users/me/proj",
+  source_status: "present",
+  source_path: "/Users/me/.claude/projects/p/a.jsonl",
+  parent_session_id: null,
+  is_subagent: false,
+  ...patch,
+});
