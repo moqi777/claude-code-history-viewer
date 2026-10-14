@@ -1,0 +1,19 @@
+src-tauri/src/providers/zcode.rs
+  s_cca7c29607588b::t_de7c0c2ebf9fc7 3,542
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.11",
+  "base_commit_sha": "794ed00eb22c06be2b805487f3bca46244d47e6c",
+  "prompts": {},
+  "sessions": {
+    "s_cca7c29607588b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ef228e77-8d37-45df-ab42-2d4c28a0387d",
+        "model": "claude-sonnet-5-5"
+      },
+      "human_author": "moqing <moqing@tsign.cn>"
+    }
+  }
+}
