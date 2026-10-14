@@ -9,8 +9,12 @@ import type {
   KbOverview,
   KbProgress,
   KbRunSummary,
+  KbSearchParams,
+  KbSearchResponse,
   KbSession,
   KbSessionQuery,
+  KbSkillStatus,
+  KbSkillTarget,
 } from "./types";
 
 /**
@@ -21,6 +25,15 @@ import type {
  * component decides how to tell the user (toast).
  */
 export type WizardMode = "first" | "rerun";
+
+export type KbSearchStatus = "idle" | "loading" | "ok" | "not_ready" | "no_data" | "error";
+
+export interface KbSearchState {
+  query: string;
+  status: KbSearchStatus;
+  response: KbSearchResponse | null;
+  message: string | null;
+}
 
 export interface KbState {
   overview: KbOverview | null;
@@ -37,6 +50,8 @@ export interface KbState {
   loadError: string | null;
   wizard: { open: boolean; mode: WizardMode };
   settingsOpen: boolean;
+  search: KbSearchState;
+  skills: KbSkillStatus[] | null;
 }
 
 export interface KbActions {
@@ -55,6 +70,11 @@ export interface KbActions {
   closeWizard: () => void;
   openSettings: () => void;
   closeSettings: () => void;
+  setSearchQuery: (query: string) => void;
+  runSearch: () => Promise<void>;
+  loadSkills: () => Promise<void>;
+  installSkill: (target: KbSkillTarget) => Promise<{ error?: string }>;
+  uninstallSkill: (target: KbSkillTarget) => Promise<{ error?: string }>;
 }
 
 const errorMessage = (e: unknown): string => (e instanceof Error ? e.message : String(e));
@@ -87,6 +107,22 @@ export const queryFor = (filters: KbFilters, now = Date.now()): KbSessionQuery =
   };
 };
 
+export const searchParamsFor = (query: string, filters: KbFilters, now = Date.now()): KbSearchParams => {
+  const days = filters.range === "7d" ? 7 : filters.range === "30d" ? 30 : 0;
+  return {
+    query: query.trim(),
+    limit: 20,
+    per_session: 2,
+    include_subagents: filters.includeSubagents,
+    ...(filters.source !== "all" ? { source: filters.source } : {}),
+    ...(filters.client != null ? { client: filters.client } : {}),
+    ...(filters.project != null ? { project: filters.project } : {}),
+    ...(days > 0 ? { since: new Date(now - days * DAY_MS).toISOString() } : {}),
+  };
+};
+
+const idleSearch: KbSearchState = { query: "", status: "idle", response: null, message: null };
+
 const initialState: KbState = {
   overview: null,
   sessions: [],
@@ -102,11 +138,14 @@ const initialState: KbState = {
   loadError: null,
   wizard: { open: false, mode: "first" },
   settingsOpen: false,
+  search: idleSearch,
+  skills: null,
 };
 
 // Responses of overlapping refreshes can arrive out of order; only the newest
 // request may write.
 let refreshEpoch = 0;
+let searchEpoch = 0;
 
 export const useKbStore = create<KbState & KbActions>((set, get) => ({
   ...initialState,
@@ -156,7 +195,62 @@ export const useKbStore = create<KbState & KbActions>((set, get) => ({
 
   setFilters: async (patch) => {
     set({ filters: { ...get().filters, ...patch } });
-    await get().refresh();
+    await Promise.all([get().refresh(), get().search.query.trim() !== "" ? get().runSearch() : undefined]);
+  },
+
+  setSearchQuery: (query) => {
+    if (query.trim() === "") {
+      searchEpoch++;
+      set({ search: { ...idleSearch, query } });
+    } else {
+      set({ search: { ...get().search, query } });
+    }
+  },
+
+  runSearch: async () => {
+    const { query } = get().search;
+    if (query.trim() === "") return;
+    const epoch = ++searchEpoch;
+    set({ search: { ...get().search, status: "loading", message: null } });
+    try {
+      const outcome = await kbApi.search(searchParamsFor(query, get().filters));
+      // A newer search (or an emptied box) supersedes this answer.
+      if (epoch !== searchEpoch) return;
+      if (outcome.state === "ok") {
+        set({ search: { query, status: "ok", response: outcome.response, message: null } });
+      } else {
+        set({ search: { query, status: outcome.state, response: null, message: outcome.message } });
+      }
+    } catch (e) {
+      if (epoch !== searchEpoch) return;
+      set({ search: { query, status: "error", response: null, message: errorMessage(e) } });
+    }
+  },
+
+  loadSkills: async () => {
+    try {
+      set({ skills: await kbApi.skillStatus() });
+    } catch {
+      set({ skills: null });
+    }
+  },
+
+  installSkill: async (target) => {
+    try {
+      set({ skills: await kbApi.skillInstall(target) });
+      return {};
+    } catch (e) {
+      return { error: errorMessage(e) };
+    }
+  },
+
+  uninstallSkill: async (target) => {
+    try {
+      set({ skills: await kbApi.skillUninstall(target) });
+      return {};
+    } catch (e) {
+      return { error: errorMessage(e) };
+    }
   },
 
   syncNow: async () => {

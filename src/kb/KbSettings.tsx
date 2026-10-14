@@ -15,6 +15,7 @@ import {
 import { kbApi } from "./api";
 import { Field, IntervalField, MirrorField, SourcesField, VerdictLine } from "./fields";
 import { excludesValid, parseExcludes } from "./logic";
+import { SkillField } from "./SkillField";
 import { useTest } from "./useTest";
 import { describeMigrateCheck } from "./messages";
 import { pickFolder } from "./pickFolder";
@@ -135,6 +136,8 @@ export const KbSettings = () => {
               onChange={(mirror) => setDraft({ ...draft, mirror })}
               onTested={setMirrorOk}
             />
+
+            <SkillField />
 
             <MoveDataDir current={saved.data_dir} />
 

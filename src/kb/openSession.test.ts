@@ -9,13 +9,19 @@ const mocks = vi.hoisted(() => ({
     setViewingGlobalStats: vi.fn(),
     setAnalyticsCurrentView: vi.fn(),
     selectSession: vi.fn(),
+    fetchFullSessionMessages: vi.fn(),
+    navigateToMessage: vi.fn(),
   },
+  loaded: { list: [] as unknown[] },
   setState: vi.fn(),
 }));
 
 vi.mock("./api", () => ({ kbApi: { listSessions: mocks.listSessions } }));
 vi.mock("@/store/useAppStore", () => ({
-  useAppStore: { getState: () => mocks.app, setState: mocks.setState },
+  useAppStore: {
+    getState: () => ({ ...mocks.app, messages: mocks.loaded.list }),
+    setState: mocks.setState,
+  },
 }));
 
 const codex = sessionFixture({
@@ -43,6 +49,7 @@ describe("opening a backed-up session", () => {
     mocks.setState.mockReset();
     for (const fn of Object.values(mocks.app)) fn.mockReset();
     mocks.app.selectSession.mockResolvedValue(undefined);
+    mocks.loaded.list = [];
   });
 
   it("builds a stand-in project that carries the source and the working directory", () => {
@@ -106,5 +113,44 @@ describe("opening a backed-up session", () => {
     mocks.listSessions.mockResolvedValue([codex]);
     mocks.app.selectSession.mockRejectedValue(new Error("no such file"));
     await expect(openKbSession(codex)).rejects.toThrow("no such file");
+  });
+
+  it("scrolls to the message a Claude hit names, without loading the whole session", async () => {
+    mocks.listSessions.mockResolvedValue([codex]);
+    mocks.loaded.list = [{ uuid: "u-1", type: "assistant", timestamp: "2026-10-14T09:00:00Z" }];
+    const found = await openKbSession(codex, { msgKey: "u-1", at: null, kind: "assistant" });
+    expect(found).toBe(true);
+    expect(mocks.app.fetchFullSessionMessages).not.toHaveBeenCalled();
+    expect(mocks.app.navigateToMessage).toHaveBeenCalledWith("u-1", { history: "none" });
+  });
+
+  it("finds a Codex message by time among the complete message list", async () => {
+    mocks.listSessions.mockResolvedValue([codex]);
+    mocks.app.fetchFullSessionMessages.mockResolvedValue([
+      { uuid: "codex-4", type: "user", timestamp: "2026-10-14T09:00:00.000Z" },
+      { uuid: "codex-7", type: "assistant", timestamp: "2026-10-14T09:05:00.000Z" },
+    ]);
+    const found = await openKbSession(codex, {
+      msgKey: null,
+      at: "2026-10-14T09:05:00.000Z",
+      kind: "assistant",
+    });
+    expect(found).toBe(true);
+    expect(mocks.app.navigateToMessage).toHaveBeenCalledWith("codex-7", { history: "none" });
+  });
+
+  it("reports that it could not locate the message, but the session is open", async () => {
+    mocks.listSessions.mockResolvedValue([codex]);
+    mocks.app.fetchFullSessionMessages.mockResolvedValue([]);
+    const found = await openKbSession(codex, { msgKey: null, at: "2026-10-14T09:05:00Z", kind: "user" });
+    expect(found).toBe(false);
+    expect(mocks.app.navigateToMessage).not.toHaveBeenCalled();
+    expect(mocks.app.selectSession).toHaveBeenCalled();
+  });
+
+  it("opening without a focus does not touch the message list", async () => {
+    mocks.listSessions.mockResolvedValue([codex]);
+    expect(await openKbSession(codex)).toBe(true);
+    expect(mocks.app.fetchFullSessionMessages).not.toHaveBeenCalled();
   });
 });

@@ -1,6 +1,7 @@
 import type { ClaudeProject, ProviderId } from "@/types";
 import { useAppStore } from "@/store/useAppStore";
 import { kbApi } from "./api";
+import { resolveFocusUuid, type KbFocus } from "./searchHit";
 import type { KbSession } from "./types";
 
 export const KB_PROJECT_PREFIX = "kb://";
@@ -41,9 +42,10 @@ export const syntheticProject = (session: KbSession, siblings: KbSession[]): Cla
 /**
  * Open a backed-up session in the viewer. The middle column lists the other
  * backed-up sessions of the same project (including ones whose source file is
- * gone) and the header shows the session's source and project.
+ * gone) and the header shows the session's source and project. With a
+ * `focus` it also scrolls to that message; the result says whether it could.
  */
-export async function openKbSession(session: KbSession): Promise<void> {
+export async function openKbSession(session: KbSession, focus?: KbFocus): Promise<boolean> {
   const siblings =
     session.cwd != null
       ? await kbApi.listSessions({
@@ -73,4 +75,19 @@ export async function openKbSession(session: KbSession): Promise<void> {
   app.setViewingGlobalStats(false);
   app.setAnalyticsCurrentView("messages");
   await useAppStore.getState().selectSession(session);
+  return focus == null ? true : scrollToFocus(focus);
+}
+
+/** Scroll the opened session to the message a search hit points at. */
+async function scrollToFocus(focus: KbFocus): Promise<boolean> {
+  const store = useAppStore.getState();
+  // The loaded window is only the newest page; the whole list is needed to
+  // find a Codex message, whose id the viewer derives itself.
+  const all = focus.msgKey != null && store.messages.some((m) => m.uuid === focus.msgKey)
+    ? store.messages
+    : await store.fetchFullSessionMessages();
+  const uuid = resolveFocusUuid(all, focus);
+  if (uuid == null) return false;
+  useAppStore.getState().navigateToMessage(uuid, { history: "none" });
+  return true;
 }

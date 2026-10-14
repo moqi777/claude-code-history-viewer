@@ -16,6 +16,7 @@ import { useLanguageStore } from "@/store/useLanguageStore";
 import { kbApi } from "./api";
 import { DataDirField, IntervalField, MirrorField, SourcesField, VerdictLine } from "./fields";
 import { formatBytes } from "./format";
+import { SkillField } from "./SkillField";
 import { dataDirAcceptable } from "./logic";
 import { progressLabel } from "./progressLabel";
 import type { KbConfig, KbDataDirReport, KbWizardResult } from "./types";
@@ -333,6 +334,11 @@ const Done = ({ result }: { result: WizardOutcome }) => {
           }}
         />
       )}
+      <div className="border-t pt-4">
+        <p className="mb-1 font-medium">{t("kb.wizard.agentsTitle")}</p>
+        <p className="mb-3 text-muted-foreground">{t("kb.wizard.agentsIntro")}</p>
+        <SkillField />
+      </div>
     </div>
   );
 };

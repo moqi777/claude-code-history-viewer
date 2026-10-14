@@ -267,3 +267,99 @@ export interface KbSessionQuery {
   limit?: number;
   offset?: number;
 }
+
+// ---------------------------------------------------------------------------
+// Full-text search
+// ---------------------------------------------------------------------------
+
+export interface KbSearchParams {
+  query: string;
+  source?: KbSource;
+  client?: string;
+  project?: string;
+  since?: string;
+  until?: string;
+  limit?: number;
+  per_session?: number;
+  include_subagents?: boolean;
+  mode?: "auto" | "all" | "any";
+}
+
+export interface KbHit {
+  seq: number;
+  kind: "user" | "assistant" | "tool_use" | "tool_result" | "tool_error";
+  at: string | null;
+  /** Viewer message id (Claude `uuid`); null for Codex. */
+  msg_key: string | null;
+  snippet: string;
+  /** Matched ranges in `snippet`, as character offsets `[start, end)`. */
+  highlights: [number, number][];
+  show: string;
+}
+
+export interface KbHitSession {
+  source: KbSource;
+  session_id: string;
+  title: string | null;
+  client: string | null;
+  project: string | null;
+  cwd: string | null;
+  started_at: string | null;
+  last_activity_at: string | null;
+  source_status: KbSourceStatus;
+  is_subagent: boolean;
+  parent_session_id: string | null;
+  message_count: number;
+}
+
+export interface KbSessionHit {
+  rank: number;
+  score: number;
+  session: KbHitSession;
+  resume: { available: boolean; command: string | null; note: string | null };
+  paths: { mirror: string; original: string };
+  hit_messages: number;
+  hits: KbHit[];
+}
+
+export interface KbSearchResponse {
+  query: string;
+  tokens: string[];
+  mode_used: "all" | "any";
+  read_mode: "normal" | "immutable";
+  data_as_of: string | null;
+  matched_sessions: number;
+  returned: number;
+  results: KbSessionHit[];
+  hint: string | null;
+}
+
+export type KbSearchOutcome =
+  | { state: "ok"; response: KbSearchResponse }
+  | { state: "not_ready"; message: string }
+  | { state: "no_data"; message: string };
+
+// ---------------------------------------------------------------------------
+// Agent skill
+// ---------------------------------------------------------------------------
+
+export type KbSkillTarget = "claude" | "codex";
+
+export interface KbSkillStatus {
+  target: KbSkillTarget;
+  tool_found: boolean;
+  dir: string;
+  state: "not_installed" | "current" | "stale" | "foreign";
+  installed_version: string | null;
+  installed_exe: string | null;
+  installed_exe_exists: boolean | null;
+  stale_reason: "version" | "path" | "missing_exe" | null;
+}
+
+export interface KbSkillTest {
+  ok: boolean;
+  query: string | null;
+  matched_sessions: number | null;
+  millis: number;
+  message: string | null;
+}

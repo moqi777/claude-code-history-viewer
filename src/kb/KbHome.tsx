@@ -1,14 +1,15 @@
-import { useCallback, useEffect } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { AlertTriangle, DatabaseBackup, HardDriveDownload, Loader2, RefreshCw, Settings, X } from "lucide-react";
-import { Badge, Button, Input } from "@/components/ui";
+import { Badge, Button } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import { formatTime } from "@/utils/time";
 import { formatBytes } from "./format";
 import { describeBackup, scheduleHealth } from "./homeStatus";
 import { VerdictLine } from "./fields";
 import { openKbSession } from "./openSession";
+import { SearchBox, SearchResults } from "./KbSearch";
 import { percentOf, progressLabel } from "./progressLabel";
 import type { KbFilters, KbOverview, KbSession, KbTimeRange } from "./types";
 import { defaultFilters, useKbStore } from "./useKbStore";
@@ -32,6 +33,7 @@ export const KbHome = () => {
   const isBackingUp = useKbStore((s) => s.isBackingUp);
   const isRepairing = useKbStore((s) => s.isRepairing);
   const loadError = useKbStore((s) => s.loadError);
+  const searching = useKbStore((s) => s.search.query.trim() !== "");
 
   const activity = overview?.activity ?? "idle";
   const busy = isSyncing || isBackingUp || overview?.running === true;
@@ -42,6 +44,7 @@ export const KbHome = () => {
     void store.refresh();
     void store.loadFacets();
     void store.refreshPresence();
+    void store.loadSkills();
   }, []);
 
   // Collections also run from launchd, outside this window: keep the page fresh.
@@ -225,10 +228,14 @@ export const KbHome = () => {
         />
       )}
 
+      <SearchBox />
+
       <Filters filters={filters} facets={facets} />
 
       <div className="min-h-[12rem] flex-1 overflow-y-auto rounded-md border" aria-busy={isLoading}>
-        {sessions.length === 0 ? (
+        {searching ? (
+          <SearchResults />
+        ) : sessions.length === 0 ? (
           <p className="p-6 text-center text-sm text-muted-foreground">
             {configState?.state === "missing"
               ? t("kb.sessions.emptyNoSetup")
@@ -246,17 +253,58 @@ export const KbHome = () => {
           </ul>
         )}
       </div>
-      {sessions.length >= 500 && (
+      {!searching && sessions.length >= 500 && (
         <p className="text-xs text-muted-foreground">{t("kb.sessions.limitNote", { count: 500 })}</p>
       )}
     </div>
   );
 };
 
+const SKILL_OFFER_KEY = "agentkb.skillOffer.dismissed";
+
+const offerDismissed = (): boolean => {
+  try {
+    return window.localStorage.getItem(SKILL_OFFER_KEY) === "1";
+  } catch {
+    return false;
+  }
+};
+
 const Banners = () => {
   const { t } = useTranslation();
   const overview = useKbStore((s) => s.overview);
   const configState = useKbStore((s) => s.configState);
+  const skills = useKbStore((s) => s.skills);
+  const [offerHidden, setOfferHidden] = useState(offerDismissed);
+
+  const stale = (skills ?? []).filter((s) => s.state === "stale");
+  const anyInstalled = (skills ?? []).some((s) => s.state === "current" || s.state === "stale");
+  const canOffer =
+    skills != null &&
+    configState?.state === "valid" &&
+    !anyInstalled &&
+    skills.some((s) => s.tool_found && s.state === "not_installed") &&
+    !offerHidden;
+
+  const hideOffer = () => {
+    try {
+      window.localStorage.setItem(SKILL_OFFER_KEY, "1");
+    } catch {
+      /* the offer simply comes back next time */
+    }
+    setOfferHidden(true);
+  };
+
+  const updateSkills = async () => {
+    for (const s of stale) {
+      const { error } = await useKbStore.getState().installSkill(s.target);
+      if (error != null) {
+        toast.error(t("kb.skill.actionFailed", { message: error }));
+        return;
+      }
+    }
+    toast.success(t("kb.skill.installed"));
+  };
 
   const restore = async () => {
     const { error } = await useKbStore.getState().restoreDefaultConfig();
@@ -290,6 +338,31 @@ const Banners = () => {
           <span className="min-w-0 flex-1">{t("kb.banner.notSetUp")}</span>
           <Button size="sm" onClick={() => useKbStore.getState().openWizard("first")}>
             {t("kb.banner.startWizard")}
+          </Button>
+        </div>
+      )}
+      {stale.length > 0 && (
+        <div role="status" className="flex flex-wrap items-center gap-3 rounded-md border border-warning/50 p-3 text-sm">
+          <span className="min-w-0 flex-1">{t("kb.skillPrompt.stale")}</span>
+          <Button size="sm" onClick={() => void updateSkills()}>
+            {t("kb.skillPrompt.update")}
+          </Button>
+        </div>
+      )}
+      {canOffer && (
+        <div role="status" className="flex flex-wrap items-center gap-3 rounded-md border p-3 text-sm">
+          <span className="min-w-0 flex-1">{t("kb.skillPrompt.offer")}</span>
+          <Button
+            size="sm"
+            onClick={() => {
+              hideOffer();
+              useKbStore.getState().openSettings();
+            }}
+          >
+            {t("kb.skillPrompt.open")}
+          </Button>
+          <Button size="sm" variant="ghost" onClick={hideOffer}>
+            {t("kb.skillPrompt.dismiss")}
           </Button>
         </div>
       )}
@@ -482,13 +555,6 @@ const Filters = ({
           ))}
         </select>
       </label>
-      <Input
-        value={filters.query}
-        onChange={(e) => set({ query: e.target.value })}
-        placeholder={t("kb.filters.search")}
-        aria-label={t("kb.filters.search")}
-        className="h-8 w-48"
-      />
       <label className="flex items-center gap-2 text-sm text-muted-foreground">
         <input
           type="checkbox"

@@ -5,6 +5,7 @@ import type {
   KbMigrateCheck,
   KbMirrorReport,
   KbScheduleEnvReport,
+  KbSkillTest,
   KbSourceProbe,
   KbUnsupportedReason,
 } from "./types";
@@ -123,3 +124,14 @@ export const describeMigrateCheck = (check: KbMigrateCheck, t: TFunction): Verdi
       return { tone: "ok", text: t("kb.move.ready", { needed, free }) };
   }
 };
+
+export const describeSkillTest = (result: KbSkillTest, t: TFunction): Verdict =>
+  result.ok
+    ? {
+        tone: "ok",
+        text: t("kb.test.skill.ok", {
+          count: result.matched_sessions ?? 0,
+          millis: result.millis,
+        }),
+      }
+    : { tone: "error", text: t("kb.test.skill.failed", { message: result.message ?? "" }) };

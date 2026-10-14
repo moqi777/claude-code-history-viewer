@@ -429,7 +429,7 @@ allowed-tools: Bash(/Applications/AgentKB.app/Contents/MacOS/AgentKB --kb-search
 
 **新增文件（Rust，`src-tauri/src/kb/`）**：`redact.rs`（脱敏，第 4 期复用）、`index/messages.rs`（抽取规则 + 轮状态机）、`index/tokenize.rs`（切词）、`search.rs`（查询、合并、排序、片段、高亮；CLI 和 GUI 共用）、`skill.rs`（模板、状态、安装/卸载/测试）。
 
-**修改文件（Rust）**：`db.rs`（迁移 v2、`purge_messages`、插入消息的函数）、`index/mod.rs` + `index/claude.rs` + `index/codex.rs`（Indexer 产出消息行、新增状态字段）、`sync.rs`（`INDEXER_VERSION` → "4"、`commit_file`/`reindex_one` 写消息、`--kb-reindex`）、`index/text.rs`（无）、`cli.rs`（`--kb-search`、`--kb-show`、`--kb-reindex`）、`commands.rs` + `lib.rs`（`kb_search`、`kb_skill_status/install/uninstall/test` 命令）、`mod.rs`（模块声明、`AGENTKB_VERSION` → "0.3.0"）。
+**修改文件（Rust）**：`db.rs`（迁移 v2、`purge_messages`、插入消息的函数）、`index/mod.rs` + `index/claude.rs` + `index/codex.rs`（Indexer 产出消息行、新增状态字段）、`sync.rs`（`INDEXER_VERSION` → "4"、`commit_file`/`reindex_one` 写消息、`--kb-reindex`）、`cli.rs`（`--kb-search`、`--kb-show`、`--kb-reindex`）、`commands.rs` + `lib.rs`（`kb_search`、`kb_skill_status/install/uninstall/test` 命令）、`mod.rs`（模块声明、`AGENTKB_VERSION` → "0.3.0"）。
 
 **新增/修改文件（前端 `src/kb/`）**：`KbSearch.tsx`、`useKbStore.ts`（搜索状态）、`api.ts`/`types.ts`、`openSession.ts`（`focus`）、`KbSettings.tsx`（「让 Agent 能查历史」区块）、`KbWizard.tsx`（最后一页）、`KbHome.tsx`（搜索框；首页说明换行修复；skill 过期/升级后首次提示）；i18n `kb.json` 五个语言。
 
