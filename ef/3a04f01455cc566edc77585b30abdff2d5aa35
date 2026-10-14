@@ -1,0 +1,52 @@
+src-tauri/src/kb/index/claude.rs
+  s_cca7c29607588b::t_be3dcad2d8a5d7 31-38,45-53,208-213,312-341
+src/i18n/locales/zh-CN/kb.json
+  s_cca7c29607588b::t_4cdfa690b6afea 34,44-47
+src/kb/KbPanel.tsx
+  s_cca7c29607588b::t_4cdfa690b6afea 38,166-173,273-276
+src/kb/useKbStore.ts
+  s_cca7c29607588b::t_4cdfa690b6afea 24,36,48,51,62,93-97,102,105
+src-tauri/src/kb/index/codex.rs
+  s_cca7c29607588b::t_be3dcad2d8a5d7 20-22,69-72,85-87,124-151,203,245-250,328-359
+src/i18n/locales/en/kb.json
+  s_cca7c29607588b::t_4cdfa690b6afea 34,44-47
+src-tauri/src/kb/db.rs
+  s_cca7c29607588b::t_ec944999c72d0d 404-419
+src-tauri/src/kb/index/text.rs
+  s_cca7c29607588b::t_a69be1ee8e51b0 31-38,41-52,122-129,131-132
+  s_cca7c29607588b::t_be3dcad2d8a5d7 6-7,12-17,25,39-40,104-121,130
+src-tauri/src/kb/index/codex_titles.rs
+  s_cca7c29607588b::t_a69be1ee8e51b0 14-15,106,114,146
+src/i18n/locales/zh-TW/kb.json
+  s_cca7c29607588b::t_4cdfa690b6afea 34,44-47
+src/i18n/locales/ko/kb.json
+  s_cca7c29607588b::t_4cdfa690b6afea 34,44-47
+src/i18n/locales/ja/kb.json
+  s_cca7c29607588b::t_4cdfa690b6afea 34,44-47
+src-tauri/src/kb/status.rs
+  s_cca7c29607588b::t_be3dcad2d8a5d7 149-150,173,186
+src/kb/useKbStore.test.ts
+  s_cca7c29607588b::t_4cdfa690b6afea 28,66-72
+src-tauri/src/kb/sync.rs
+  s_cca7c29607588b::t_ec944999c72d0d 26-31,168,305-377,1096-1164
+  s_cca7c29607588b::t_f7e47be1999528 1056-1095,1165-1178,1180-1192
+  s_cca7c29607588b::t_be3dcad2d8a5d7 536-550,552-554
+src/kb/types.ts
+  s_cca7c29607588b::t_4cdfa690b6afea 67
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.11",
+  "base_commit_sha": "ef3a04f01455cc566edc77585b30abdff2d5aa35",
+  "prompts": {},
+  "sessions": {
+    "s_cca7c29607588b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ef228e77-8d37-45df-ab42-2d4c28a0387d",
+        "model": "claude-sonnet-5-5"
+      },
+      "human_author": "moqing <moqing@tsign.cn>"
+    }
+  }
+}
