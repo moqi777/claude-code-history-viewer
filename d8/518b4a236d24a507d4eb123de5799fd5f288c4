@@ -1,0 +1,19 @@
+docs/agent-kb/P1-collect-and-backup.md
+  s_d58d4b162ae7dc::t_aec2b0b23baa24 1-134
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.11",
+  "base_commit_sha": "d8518b4a236d24a507d4eb123de5799fd5f288c4",
+  "prompts": {},
+  "sessions": {
+    "s_d58d4b162ae7dc": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "c4c081c6-aaf3-412b-8f62-de2a98c156fc",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "moqing <moqing@tsign.cn>"
+    }
+  }
+}
