@@ -14,7 +14,7 @@ use super::sync::{self, KbEnv};
 
 const USAGE: &str = "usage: --kb-sync | --kb-reindex | --kb-backup | --kb-move-data <new dir> \
 | --kb-schedule install|uninstall|status|ensure | --kb-search \"<words>\" [options] \
-| --kb-show <source:session-id> [--around <seq>] [options]";
+| --kb-show <source:session-id> [--around <seq>] [options] | --kb-skill-print claude|codex";
 
 /// `Some(exit code)` when `args` is a KB command, `None` to let the app start
 /// normally. Only `argv[1]` is inspected, so a stray `--kb-…` value elsewhere
@@ -29,6 +29,7 @@ pub fn try_run(args: &[String]) -> Option<i32> {
         "--kb-reindex" => run_reindex_command(),
         "--kb-search" => run_search_command(&args[2..]),
         "--kb-show" => run_show_command(&args[2..]),
+        "--kb-skill-print" => run_skill_print_command(args.get(2).map(String::as_str)),
         "--kb-backup" => run_backup_command(),
         "--kb-move-data" => run_move_data_command(args.get(2).map(String::as_str)),
         "--kb-schedule" => run_schedule_command(args.get(2).map(String::as_str)),
@@ -178,9 +179,36 @@ fn usage_error(message: &str) -> i32 {
     2
 }
 
+/// Where `--kb-search` / `--kb-show` read. `AGENTKB_DATA_DIR` points them at
+/// another data folder (a restored backup, or a test copy) without touching
+/// the configuration; the commands only ever read it.
 fn data_paths() -> Result<super::paths::DataPaths, i32> {
+    if let Some(dir) = std::env::var_os("AGENTKB_DATA_DIR").filter(|d| !d.is_empty()) {
+        return Ok(super::paths::DataPaths::new(dir));
+    }
     let config = load_config()?;
     Ok(super::paths::DataPaths::new(config.data_dir))
+}
+
+/// `--kb-skill-print claude|codex`: the skill text this program would install.
+fn run_skill_print_command(target: Option<&str>) -> i32 {
+    let Some(target) = target.and_then(super::skill::Target::parse) else {
+        return usage_error("--kb-skill-print needs claude or codex");
+    };
+    match std::env::current_exe() {
+        Ok(exe) => {
+            let _ = write!(
+                std::io::stdout(),
+                "{}",
+                super::skill::render(target, &exe.to_string_lossy())
+            );
+            0
+        }
+        Err(e) => {
+            eprintln!("{e}");
+            1
+        }
+    }
 }
 
 fn print_output<T: Serialize>(format: &str, value: &T, text: impl FnOnce() -> String) {

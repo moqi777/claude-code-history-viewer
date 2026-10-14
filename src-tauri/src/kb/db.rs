@@ -86,6 +86,13 @@ const MIGRATIONS: &[&str] = &[
     ",
 ];
 
+/// Same definition as in migration v2, for [`reset_message_index`].
+const MESSAGES_FTS_DDL: &str = "CREATE VIRTUAL TABLE messages_fts USING fts5(
+      body, tool,
+      content='', contentless_delete=1,
+      tokenize='unicode61 remove_diacritics 0'
+    )";
+
 const SYNC_RUNS_KEPT: i64 = 500;
 
 pub fn latest_version() -> i64 {
@@ -390,6 +397,20 @@ fn remove_message(tx: &Transaction<'_>, file_id: i64, seq: u64) -> Result<(), St
             .map_err(|e| err("delete message", e))?;
     }
     Ok(())
+}
+
+/// Empty the whole message index. A rebuild starts from a fresh full-text
+/// table because FTS5 does not give back the statistics of deleted rows, and
+/// the relevance scores would otherwise drift with every rebuild.
+pub fn reset_message_index(conn: &Connection) -> Result<(), String> {
+    let tx = conn
+        .unchecked_transaction()
+        .map_err(|e| err("begin reset", e))?;
+    tx.execute_batch("DROP TABLE IF EXISTS messages_fts; DELETE FROM messages;")
+        .map_err(|e| err("reset messages", e))?;
+    tx.execute_batch(MESSAGES_FTS_DDL)
+        .map_err(|e| err("recreate index", e))?;
+    tx.commit().map_err(|e| err("commit reset", e))
 }
 
 /// Drop every message (and its index entry) of one file. The full-text table

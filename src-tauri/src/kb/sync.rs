@@ -27,7 +27,7 @@ pub const LOCK_WAIT: Duration = Duration::from_secs(3);
 /// Bump when the indexers' output changes (title rules, counting, known types…).
 /// The next sync then rebuilds every session row from the mirror, which is the
 /// source of truth, so improvements reach sessions that never change again.
-pub const INDEXER_VERSION: &str = "4";
+pub const INDEXER_VERSION: &str = "5";
 const INDEXER_VERSION_KEY: &str = "indexer_version";
 
 /// Warn (in the log) about unexpectedly huge single lines.
@@ -376,6 +376,7 @@ fn reindex_if_outdated(
         return Ok(());
     }
     let rows = db::load_files(conn)?;
+    db::reset_message_index(conn)?;
     log.line(&format!(
         "indexer version changed: rebuilding {} session rows from the mirror",
         rows.len()
@@ -1205,12 +1206,36 @@ mod tests {
         let incremental = message_rows(&sb.db());
         assert_eq!(incremental.len(), 6);
 
+        let scores = |sb: &Sandbox| -> Vec<(String, f64)> {
+            crate::kb::search::search_in(
+                &sb.env.data,
+                &crate::kb::search::SearchParams {
+                    query: "连接池 jstack".into(),
+                    mode: Some("any".into()),
+                    ..Default::default()
+                },
+            )
+            .unwrap()
+            .results
+            .iter()
+            .map(|r| (r.session.session_id.clone(), r.score))
+            .collect()
+        };
+        let before = scores(&sb);
+        assert!(!before.is_empty());
+
         // A full rebuild from the mirror gives the very same rows.
         sb.env.force_reindex = true;
         let rebuilt = sb.sync();
         assert_eq!(rebuilt.status, "ok", "{:?}", rebuilt.errors);
         assert_eq!(message_rows(&sb.db()), incremental);
         assert_eq!(found(&sb, "连接池"), 1);
+        // …and the same relevance scores, however often it is rebuilt.
+        assert_eq!(scores(&sb), before);
+        sb.sync();
+        let again = sb.sync();
+        assert_eq!(again.status, "ok");
+        assert_eq!(scores(&sb), before);
         let fts: i64 = sb
             .db()
             .query_row("SELECT COUNT(*) FROM messages_fts", [], |r| r.get(0))

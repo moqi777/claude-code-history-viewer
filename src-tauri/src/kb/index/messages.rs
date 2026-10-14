@@ -205,11 +205,15 @@ fn cap_head_tail(raw: &str, head: usize, tail: usize) -> (String, bool) {
 }
 
 static KB_COMMAND: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r#"(?i)(?:agentkb|claude-code-history-viewer)\S*['"]?\s+--kb-(?:search|show)\b"#)
-        .expect("valid kb command regex")
+    Regex::new(
+        r#"(?i)(?:(?:agentkb|claude-code-history-viewer)\S*['"]?\s+--kb-(?:search|show)\b|skills/agentkb/SKILL\.md)"#,
+    )
+    .expect("valid kb command regex")
 });
 
-/// True for a shell command line that runs this program's search/show.
+/// True for a shell command line that runs this program's search/show, or
+/// that reads the skill file (how Codex loads a skill): both are the lookup
+/// itself, not work.
 pub fn is_kb_command(command: &str) -> bool {
     KB_COMMAND.is_match(command)
 }
@@ -950,6 +954,29 @@ mod tests {
         ]
         .concat();
         assert!(run(Source::Claude, &[chunk]).is_empty());
+    }
+
+    #[test]
+    fn codex_reading_the_skill_file_is_part_of_the_lookup_not_work() {
+        let read_skill = "/bin/zsh -lc 'cat /Users/me/proj/.agents/skills/agentkb/SKILL.md'";
+        assert!(is_kb_command(read_skill));
+        assert!(is_kb_command("cat ~/.codex/skills/agentkb/SKILL.md"));
+        assert!(!is_kb_command("cat ~/.codex/skills/other/SKILL.md"));
+        let chunk = [
+            codex_line("t1", json!({"type":"message","role":"user","content":[{"type":"input_text","text":"之前那个限流怎么解决的"}]})),
+            codex_line("t2", json!({"type":"function_call","name":"exec_command","call_id":"c0",
+                "arguments": json!({"cmd": read_skill}).to_string()})),
+            codex_line("t3", json!({"type":"function_call_output","call_id":"c0","output":"---\nname: agentkb"})),
+            codex_line("t4", json!({"type":"function_call","name":"exec_command","call_id":"c1",
+                "arguments": json!({"cmd": KB_CMD}).to_string()})),
+            codex_line("t5", json!({"type":"function_call_output","call_id":"c1","output":"{}"})),
+            codex_line("t6", json!({"type":"message","role":"assistant","content":[{"type":"output_text","text":"找到了"}]})),
+        ]
+        .concat();
+        assert!(
+            run(Source::Codex, &[chunk]).is_empty(),
+            "loading the skill and searching is still a pure Q&A turn"
+        );
     }
 
     #[test]
