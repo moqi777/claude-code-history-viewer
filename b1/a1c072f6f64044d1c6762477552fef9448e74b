@@ -1,0 +1,9 @@
+docs/agent-kb/P1-design.md
+  ai_agent 3,63,104,106,110-112,184,189,329,363,384-385,425-427,460-484
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.11",
+  "base_commit_sha": "b1a1c072f6f64044d1c6762477552fef9448e74b",
+  "prompts": {}
+}
