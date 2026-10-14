@@ -1,0 +1,74 @@
+src/kb/searchHit.test.ts
+  s_cca7c29607588b::t_1fb8079fb37375 1-78
+src/kb/useKbStore.ts
+  s_cca7c29607588b::t_68663c220f23a6 12-13,16-17,29-37,53-54,73-77,110-125,141-142,148,198-253
+src/kb/branding.ts
+  s_cca7c29607588b::t_2fe6147b1b5114 5
+src/kb/messages.ts
+  s_cca7c29607588b::t_f1ef47f1fea8a8 8,127-137
+src/kb/api.ts
+  s_cca7c29607588b::t_2fe6147b1b5114 17-21,36-41
+src/i18n/types.generated.ts
+  ai_agent 8
+src/i18n/locales/zh-CN/kb.json
+  s_cca7c29607588b::t_86ab1af3317e49 206-252
+src/kb/searchHit.ts
+  s_cca7c29607588b::t_919b9c3ca8b0da 1-80
+src/kb/KbSearch.tsx
+  s_cca7c29607588b::t_13b991ab182d33 1-221
+src/i18n/locales/ja/kb.json
+  s_cca7c29607588b::t_86ab1af3317e49 206-252
+src/kb/testkit.ts
+  s_cca7c29607588b::t_2fe6147b1b5114 12-16
+src/kb/KbHome.tsx
+  s_cca7c29607588b::t_565530d4ad0a84 5
+  s_cca7c29607588b::t_13b991ab182d33 12,36,231-232,236-238,256
+  s_cca7c29607588b::t_a9551ee5992119 1,47,263-272,277-307,344-365
+docs/agent-kb/P3-design.md
+  s_cca7c29607588b::t_2fc6c8768d0bf7 432
+src/kb/types.ts
+  s_cca7c29607588b::t_2fe6147b1b5114 270-365
+src/i18n/locales/en/kb.json
+  s_cca7c29607588b::t_86ab1af3317e49 206-252
+src/i18n/locales/zh-TW/kb.json
+  s_cca7c29607588b::t_86ab1af3317e49 206-252
+src/kb/openSession.test.ts
+  s_cca7c29607588b::t_a3566bcc2caea9 12-13,15,21-24,52,117-154
+src/kb/KbSearch.test.tsx
+  s_cca7c29607588b::t_1fb8079fb37375 1-54,56-159,161-171,173-216
+  s_cca7c29607588b::t_88b268caead91f 55,160,172
+src/kb/KbSettings.tsx
+  s_cca7c29607588b::t_b7da68b733cc35 18,140
+src/kb/KbHome.test.tsx
+  s_cca7c29607588b::t_c325d5a2a6b68b 72
+src/kb/openSession.ts
+  s_cca7c29607588b::t_13b991ab182d33 45-46,48,78,82,90-92
+  s_cca7c29607588b::t_919b9c3ca8b0da 4,79-81,83-89
+src/kb/SkillField.tsx
+  s_cca7c29607588b::t_f1ef47f1fea8a8 1-111
+src/i18n/locales/ko/kb.json
+  s_cca7c29607588b::t_86ab1af3317e49 206-252
+src/kb/KbWizard.tsx
+  s_cca7c29607588b::t_b7da68b733cc35 19
+  s_cca7c29607588b::t_565530d4ad0a84 337-341
+src/kb/fixtures.ts
+  s_cca7c29607588b::t_2fe6147b1b5114 22
+src/kb/SkillField.test.tsx
+  s_cca7c29607588b::t_5eaa13bd874c6f 1-212
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.11",
+  "base_commit_sha": "47784244bd960b653e1c709dca2b151c7f785357",
+  "prompts": {},
+  "sessions": {
+    "s_cca7c29607588b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ef228e77-8d37-45df-ab42-2d4c28a0387d",
+        "model": "claude-sonnet-5-5"
+      },
+      "human_author": "moqing <moqing@tsign.cn>"
+    }
+  }
+}
