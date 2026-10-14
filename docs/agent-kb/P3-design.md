@@ -1,6 +1,6 @@
 # P3 设计：全文搜索 + `--kb-search` / `--kb-show` + skill
 
-状态：待 leader 审核（步骤 1 检查点）。通过前不写实现代码，只有步骤 0（首页说明文字换行，一行 CSS，已改）。
+状态：**有条件通过**（`P3-design-review.md`），已按审核意见修订，本文是修订后的版本；修订处用「【审核修订】」标出，落实情况见 `P3-report.md`。
 
 文中的数字都是我在本机真实数据的**副本**上量的（`~/AgentKB/raw` 拷到临时目录，274 个会话文件、2.8 GB，不动 `~/AgentKB`），原型代码在 `scratch/p3/proto/`（gitignored，不进仓库）。两个 Agent 的实测记录见第 6 节。
 
@@ -13,8 +13,10 @@
 **需要你拍板：**
 
 1. **kb.db 的 WAL 模式在 Codex 沙箱里打不开**（第 6 节实测）：没有 `-wal/-shm` 文件时，沙箱里的只读打开直接 `unable to open database file`。我的方案是 `--kb-search/--kb-show` 先正常只读打开，失败再用 `immutable=1` 重试（实测在 Codex 的 workspace-write 和 read-only 两种沙箱里都能用）。代价写在 6.2：只在「没有任何进程持有 kb.db、WAL 已全部落盘」时才会走到 immutable，所以不会少数据，只有极小概率在收集进程恰好开始写的瞬间读到不一致的页，结果是报错重试而不是错数据。你如果不接受，备选是把 kb.db 改成 DELETE 日志模式（会让 GUI 和收集之间的并发读写变差），我不推荐。
-2. **Claude Code 的权限提示不能完全消除**（第 6 节实测）：skill 文件里写 `allowed-tools` 后，调用我们的二进制不再提示；但**第一次调用 `Skill(agentkb)` 本身**在默认权限模式下会提示一次（用户可以选「总是允许」）。要彻底免提示只能改 `~/.claude/settings.json` 的 permissions，这超出 PLAN 里「只写 `skills/agentkb/`」的例外，所以我**不做**，只在安装界面里告诉用户第一次会问一次、点「总是允许」。
-3. **App 移动或升级后 skill 里的路径过期怎么修**：PLAN 例外只允许「用户点安装」时写 `~/.claude`、`~/.codex`，所以不能像定时任务那样在 App 启动时自动改。方案：App 启动和设置页只**检测**（已安装但版本/路径过期 → 首页提示「Agent 技能需要更新」，一个按钮，用户点了才写）；同时 SKILL.md 里带一条不用写盘的兜底（路径不存在时用 `mdfind` 按 bundle id 找 App），所以过期时不会完全失效。需要你确认「点更新也算用户点击安装」。
+
+【审核修订】leader 同意；补两点：输出里加 `"read_mode": "normal" | "immutable"`；immutable 模式下查询出错时自动重试一次（间隔 150 ms，最多一次）。
+2. **Claude Code 的权限提示不能完全消除**（第 6 节实测）：skill 文件里写 `allowed-tools` 后，调用我们的二进制不再提示；但**第一次调用 `Skill(agentkb)` 本身**在默认权限模式下会提示一次（用户可以选「总是允许」）。要彻底免提示只能改 `~/.claude/settings.json` 的 permissions，这超出 PLAN 里「只写 `skills/agentkb/`」的例外，所以我**不做**，只在安装界面里告诉用户第一次会问一次、点「总是允许」。【审核修订】leader 同意；安装界面上用一句话说明「第一次会问一次，选“总是允许”」。
+3. **App 移动或升级后 skill 里的路径过期怎么修**：PLAN 例外只允许「用户点安装」时写 `~/.claude`、`~/.codex`，所以不能像定时任务那样在 App 启动时自动改。方案：App 启动和设置页只**检测**（已安装但版本/路径过期 → 首页提示「Agent 技能需要更新」，一个按钮，用户点了才写）；同时 SKILL.md 里带一条不用写盘的兜底（路径不存在时用 `mdfind` 按 bundle id 找 App），所以过期时不会完全失效。【审核修订】leader 确认：点「更新」算用户点击安装，在 PLAN 例外范围内；mdfind 兜底保留。
 
 ## 1. 表结构与增量
 
@@ -176,6 +178,7 @@ JSON 输出（默认；字段名稳定，skill 依赖它）：
   "query": "死锁",
   "tokens": ["死锁"],
   "mode_used": "all",
+  "read_mode": "normal",
   "data_as_of": "2026-10-15T00:30:22Z",
   "total_sessions": 11,
   "returned": 2,
@@ -265,17 +268,41 @@ JSON 输出（默认；字段名稳定，skill 依赖它）：
 
 没有被「自己搜自己」规则排除、也没被索引的消息（thinking 等）在 `--kb-show` 里同样不出现；`--kb-show` 只展示索引里有的消息。
 
-## 5. 自己搜到自己
+## 5. 自己搜到自己【审核修订：不再整轮排除】
 
 问题：Agent 调 `--kb-search` 后，① 命令行（含查询词）作为 `tool_use` 写进会话；② JSON 结果作为 `tool_result` 写进会话；③ 用户的问题和 Agent 的回答也写进会话。下次收集后这些都会被索引，搜同一个词又会搜到「上次的搜索」。
 
-方案：**整轮排除**（一轮 = 从用户的一条真实提问到下一条真实提问之前）。
+原方案（只要这一轮调用过就整轮不索引）会把「先搜历史、再照着修」这种最常见用法里真正的工作内容也丢掉。**修订后的规则**（一轮 = 从用户的一条真实提问到下一条真实提问之前）：
 
-1. **识别**：`tool_use` 的命令里含 `--kb-search` 或 `--kb-show`（Claude 的 `Bash.input.command`、Codex 的 `exec_command/shell` 参数里的 `cmd`），或 Claude 的 `Skill` 调用 `skill=agentkb`，都说明这一轮用了知识库。Indexer 状态里记下该调用的 `tool_use_id` / `call_id`（`kb_call_ids`）；配对的 `tool_result` 也跳过。作为第二道保险：任何 `tool_result` 文本里含 `"agentkb_marker":"agentkb-result-v1"` 的也跳过（输出的第一个字段就是它）。
-2. **排除范围**：这一轮的**全部**消息不进索引——包括触发它的那条用户提问（它在 Indexer 里是更早喂进来的，所以 `commit_file` 要支持 `purge_messages(file_id, from_seq = turn_start_seq)`：把本轮已经入库的行删掉；本轮之后到下一条真实用户消息之前的行，靠 `in_kb_turn` 标志继续丢弃）。「真实用户提问」= 带非注入文本的 `user` 消息，不是只有 `tool_result` 的 `user` 行。
-3. **确定性**：`seq` 按「候选消息」计数，被排除的行**也占序号**，所以增量建和 `--kb-reindex` 重建出来的 `seq` 完全一样，`--kb-show --around` 的序号稳定。
-4. 代价：一个会话里某一轮顺口问了历史，这一轮的内容搜不到（其余轮正常）。可接受，也是用户明确要的行为（验收 7）。`sessions.kb_turns` 记录被排除的轮数方便排查。
-5. 验收 7 的测试方式：测试会话里连续搜同一个问题 3 次，再收集一次，第 4 次的结果里不应出现这 3 次产生的任何消息（步骤 5 写成自动化测试：用夹具 JSONL 模拟这三轮，断言 `messages` 里没有它们；再在真机上走一遍完整流程）。
+1. **`--kb-search`、`--kb-show` 的调用和结果一律不进索引。** 识别：`tool_use` 的命令里含 `--kb-search`/`--kb-show`（Claude 的 `Bash.input.command`、Codex 的 `exec_command/shell` 参数里的 `cmd`），或 Claude 的 `Skill` 调用 `skill=agentkb`；Indexer 状态里记下该调用的 `tool_use_id`/`call_id`，配对的 `tool_result` 跳过。第二道保险：任何 `tool_result` 文本里含 `"agentkb_marker":"agentkb-result-v1"`（输出的第一个字段）的也跳过。
+2. **纯问答轮**：这一轮里除了 kb 调用**没有别的工具调用** → 这一轮的用户提问和助手回答也不进索引。
+3. **做了别的事的轮**：这一轮里还有别的工具调用 → 用户提问、助手回答、其他工具调用和结果都照常索引。
+4. **实现（流式，增量安全）**：每轮维护三态 `Undecided → KbOnly → Work`（`index/messages.rs`，状态序列化进已有的 `indexer_state`）。
+   - 轮内的 `user` 提问和 `assistant` 文本先正常产出，同时记在本轮的 `turn_rows`（有上限：最多 32 条、64 KB，超过就当作工作轮，不再保留）。
+   - 出现第一个 kb 调用且此前没有别的工具调用：进入 `KbOnly`，对本轮已经产出的行发出 `Remove(seq)`（`commit_file` 在同一事务里 `purge`），之后这一轮的 assistant 文本只保留在 `turn_rows` 里、不产出。
+   - 在 `KbOnly` 里又出现别的工具调用：进入 `Work`，把 `turn_rows` 里被撤回的行重新产出（`seq` 不变），此后一律照常产出。`Work` 是终态，同一轮之后再出现 kb 调用也只跳过调用本身和结果。
+   - 下一条真实用户提问到来：关闭上一轮（`KbOnly` 保持被排除），开新轮。
+   - 「真实用户提问」= 带非注入文本的 `user` 消息，不是只有 `tool_result` 的 `user` 行。
+5. **确定性**：`seq` 按「候选消息」计数，被跳过/被撤回的行**也占序号**，所以增量建和 `--kb-reindex` 重建的 `seq` 完全一致，`--kb-show --around` 的序号稳定。
+6. **验收 7 的测试口径**（步骤 5 自动化 + 真机各一遍）：纯问答轮连续搜 3 次、再收集后，第 4 次的结果里不出现前 3 次的内容；再加一个「搜完之后接着改代码」的轮，确认改代码那部分**能**搜到，而它之前的 kb 调用/结果仍然搜不到。另有一个「先问答、后来在同一轮追加了别的工具调用」的增量用例（跨两次同步），验证 `KbOnly → Work` 能把撤回的行补回来。
+
+## 5b. 输出前脱敏【审核修订：新增】
+
+搜索结果会进入 Agent 的上下文（发给 Anthropic 或 OpenAI），而且是跨 Agent 的，所以**在建索引时**脱敏，`messages.text` 里存的就是脱敏后的文本，FTS 也不收录这些值。新文件 `kb/redact.rs`，第 4 期整理时复用。
+
+| 类别 | 例子 | 处理 |
+|---|---|---|
+| 键值对 | `password=…`、`"passwd": "…"`、`secret`、`token`、`api_key`、`apiKey`、`access_key`、`client_secret`、`private_key`、`--password x`、环境变量 `export FOO_TOKEN=…` | 键名保留，值换成 `[REDACTED]`；键名必须**以敏感词结尾**才算，所以 `token_count`、`max_tokens`、`tokens` 不会被误伤 |
+| 授权头 | `Authorization: Bearer …`、`Basic …`、单独的 `Bearer <长串>` | `[REDACTED]` |
+| 常见密钥格式 | `sk-…`（含 `sk-ant-…`）、`ghp_/gho_/ghu_/ghs_/ghr_…`、`github_pat_…`、`AKIA…`/`ASIA…`、`xox[baprs]-…`、`AIza…` | `[REDACTED]` |
+| JWT | `eyJ….eyJ….…` | `[REDACTED]` |
+| 私钥块 | `-----BEGIN … PRIVATE KEY-----` 到 `END`（或到文本结尾） | `[REDACTED]` |
+| URL 里的凭据 | `https://user:pass@host` | `https://[REDACTED]@host` |
+
+- 顺序：**先脱敏、后截断**，脱敏在比上限多 512 字节的窗口上做，避免密钥正好被截断点劈开留下前半截。
+- 其它出口也过一遍：`--kb-show --full` 读镜像原文后、搜索结果里的标题和片段（纵深防御）。
+- 单元测试覆盖上面每一类，加反例（`token_count`、`max_tokens`、普通英文句子里的 "secret garden"、没有值的 `password:`）。
+- 副作用：按密钥值搜索会失效，这是预期行为。
 
 ## 6. 在 Agent 里能不能跑起来（本机实测）
 
@@ -318,6 +345,7 @@ Codex 在沙箱里读取 `~/AgentKB` 本身**没有问题**（读权限不受限
 
 ## 7. 检索效果测试集（步骤 5 做，这里先定规则）
 
+- 【审核修订】期望会话**不能**用 `scratch/p3/agent-test/*` 这类测试会话（它们已进真实库），挑题时避开。
 - 从本机真实会话挑 **15 个**「以后真会问」的问题，中文为主，含 2 个字的词、类名、报错信息各至少 2 个；每个写明**应该命中哪个会话**（session id）。问法像用户回想时的口吻，**不照抄会话里的原话**。
 - 题目在**看到检索结果之前**写好并提交到 `docs/agent-kb/P3-eval.md`（附期望会话 id），之后只允许调一轮排序系数（第 2.3 节第 4 点），改前改后的命中率都写进报告。
 - 指标：前 5 条会话里是否包含期望会话；未命中的逐条分析（切词问题 / 索引没收 / 排序问题 / 题目本身含糊）。
@@ -346,6 +374,7 @@ allowed-tools: Bash(/Applications/AgentKB.app/Contents/MacOS/AgentKB --kb-search
 5. 回答：先给结论，再列出处——会话标题、日期、项目，以及结果里的 `resume.command`。`resume.available` 为 false 时说明原会话已删除，只能用 `--kb-show` 看备份内容。
 
 注意：
+- 调用命令时不要加管道、`cd` 或其他命令拼接（会让预授权的前缀匹配失效，又弹确认）。
 - 不要自己 grep 或读取 `~/.claude`、`~/.codex`、`~/AgentKB`，只用上面两个命令。
 - 结果是过去的记录，可能已过时（看 `data_as_of` 和会话日期），据此动手前先到代码里核实。
 - 搜索产生的内容不会被再次索引，不用担心循环。
@@ -398,9 +427,9 @@ allowed-tools: Bash(/Applications/AgentKB.app/Contents/MacOS/AgentKB --kb-search
 
 ## 10. 改动清单与新依赖
 
-**新增文件（Rust，`src-tauri/src/kb/`）**：`index/messages.rs`（抽取规则）、`index/tokenize.rs`（切词）、`search.rs`（查询、合并、排序、片段、高亮；CLI 和 GUI 共用）、`skill.rs`（模板、状态、安装/卸载/测试）。
+**新增文件（Rust，`src-tauri/src/kb/`）**：`redact.rs`（脱敏，第 4 期复用）、`index/messages.rs`（抽取规则 + 轮状态机）、`index/tokenize.rs`（切词）、`search.rs`（查询、合并、排序、片段、高亮；CLI 和 GUI 共用）、`skill.rs`（模板、状态、安装/卸载/测试）。
 
-**修改文件（Rust）**：`db.rs`（迁移 v2、`purge_messages`、插入消息的函数）、`index/mod.rs` + `index/claude.rs` + `index/codex.rs`（Indexer 产出消息行、新增状态字段）、`sync.rs`（`INDEXER_VERSION` → "4"、`commit_file`/`reindex_one` 写消息、`--kb-reindex`）、`cli.rs`（`--kb-search`、`--kb-show`、`--kb-reindex`）、`commands.rs` + `lib.rs`（`kb_search`、`kb_skill_status/install/uninstall/test` 命令）、`mod.rs`（模块声明、`AGENTKB_VERSION` → "0.3.0"）。
+**修改文件（Rust）**：`db.rs`（迁移 v2、`purge_messages`、插入消息的函数）、`index/mod.rs` + `index/claude.rs` + `index/codex.rs`（Indexer 产出消息行、新增状态字段）、`sync.rs`（`INDEXER_VERSION` → "4"、`commit_file`/`reindex_one` 写消息、`--kb-reindex`）、`index/text.rs`（无）、`cli.rs`（`--kb-search`、`--kb-show`、`--kb-reindex`）、`commands.rs` + `lib.rs`（`kb_search`、`kb_skill_status/install/uninstall/test` 命令）、`mod.rs`（模块声明、`AGENTKB_VERSION` → "0.3.0"）。
 
 **新增/修改文件（前端 `src/kb/`）**：`KbSearch.tsx`、`useKbStore.ts`（搜索状态）、`api.ts`/`types.ts`、`openSession.ts`（`focus`）、`KbSettings.tsx`（「让 Agent 能查历史」区块）、`KbWizard.tsx`（最后一页）、`KbHome.tsx`（搜索框；首页说明换行修复；skill 过期/升级后首次提示）；i18n `kb.json` 五个语言。
 
@@ -418,3 +447,4 @@ allowed-tools: Bash(/Applications/AgentKB.app/Contents/MacOS/AgentKB --kb-search
 - 中文分词是词典切词，新词/行话（内部系统名）可能切碎，英文标识符不受影响；用户词典留作后续。
 - 索引依赖抽取规则，Claude/Codex 日志格式变化时抽取会漏（未知类型已有计数，`unknown_types`）；`INDEXER_VERSION` 机制保证修规则后一次重建。
 - 测试会话会被 AgentKB 收进真实库（6 节开头的说明）；我不会删除它们。
+- 【审核修订】第一次在真实 `~/AgentKB` 上建索引之前先备份 `kb.db`，并在报告里写真实库的索引大小和耗时；Agent 真实测试沿用本文第 6 节的做法（项目级 skill / 临时 `CODEX_HOME`），不往真实 `~/.claude/skills`、`~/.codex/skills` 装东西。
