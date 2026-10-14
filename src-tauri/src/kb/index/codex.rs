@@ -17,6 +17,9 @@ const KNOWN_TYPES: &[&str] = &[
     "compacted",
     "world_state",
     "token_count",
+    // Newer rollout bookkeeping records (no conversation content).
+    "inter_agent_communication_metadata",
+    "token_usage_record",
 ];
 
 const FALLBACK_ATTEMPTS: u32 = 50;
@@ -63,6 +66,10 @@ struct Payload {
     source: Option<Value>,
     #[serde(default, deserialize_with = "lenient_string")]
     parent_thread_id: Option<String>,
+    #[serde(default, deserialize_with = "lenient_string")]
+    agent_nickname: Option<String>,
+    #[serde(default, deserialize_with = "lenient_string")]
+    agent_path: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Default)]
@@ -75,6 +82,9 @@ pub struct CodexIndexer {
     turn_cwd: Option<String>,
     client: Option<String>,
     parent: Option<String>,
+    /// `Ohm · review_final_vip_fresh`: how a sub-agent session is named when
+    /// it has no prompt text to title it by.
+    agent_label: Option<String>,
     message_count: u64,
     first_ts: Option<String>,
     last_ts: Option<String>,
@@ -109,6 +119,34 @@ fn parent_of(payload: &Payload) -> Option<String> {
             .as_str()
             .map(str::to_owned)
     })
+}
+
+/// Nickname and the last segment of the agent path, from the top level of
+/// `session_meta.payload` or from `source.subagent.thread_spawn`.
+fn agent_label_of(payload: &Payload) -> Option<String> {
+    let spawn = payload
+        .source
+        .as_ref()
+        .and_then(|s| s.get("subagent"))
+        .and_then(|s| s.get("thread_spawn"));
+    let pick = |own: &Option<String>, key: &str| {
+        own.clone()
+            .or_else(|| spawn?.get(key)?.as_str().map(str::to_owned))
+            .filter(|v| !v.is_empty())
+    };
+    let nickname = pick(&payload.agent_nickname, "agent_nickname");
+    let leaf = pick(&payload.agent_path, "agent_path").and_then(|path| {
+        path.trim_end_matches('/')
+            .rsplit('/')
+            .next()
+            .filter(|leaf| !leaf.is_empty())
+            .map(str::to_owned)
+    });
+    match (nickname, leaf) {
+        (Some(n), Some(l)) => Some(format!("{n} · {l}")),
+        (Some(only), None) | (None, Some(only)) => Some(only),
+        (None, None) => None,
+    }
 }
 
 impl CodexIndexer {
@@ -162,6 +200,7 @@ impl CodexIndexer {
                 self.cwd = payload.cwd.clone().filter(|c| !c.is_empty());
                 self.client = client_of(payload.originator.as_deref(), payload.source.as_ref());
                 self.parent = parent_of(&payload);
+                self.agent_label = agent_label_of(&payload);
             }
             "turn_context" => {
                 if let Some(cwd) = payload.cwd.filter(|c| !c.is_empty()) {
@@ -203,8 +242,12 @@ impl CodexIndexer {
             client: self.client.clone(),
             project_name: cwd.as_deref().and_then(project_name),
             cwd,
-            title: self.fallback.clone(),
-            title_source: self.fallback.as_ref().map(|_| "first_message".to_string()),
+            title: self.fallback.clone().or_else(|| self.agent_label.clone()),
+            title_source: match (&self.fallback, &self.agent_label) {
+                (Some(_), _) => Some("first_message".to_string()),
+                (None, Some(_)) => Some("agent_meta".to_string()),
+                (None, None) => None,
+            },
             started_at: self.first_ts.clone(),
             last_activity_at: self.last_ts.clone(),
             message_count: self.message_count,
@@ -280,6 +323,40 @@ mod tests {
         b.feed(nested.as_bytes());
         assert_eq!(b.record().parent_session_id.as_deref(), Some("NESTED"));
         assert_eq!(b.record().client.as_deref(), Some("subagent"));
+    }
+
+    #[test]
+    fn subagent_without_a_prompt_is_titled_by_nickname_and_agent_path() {
+        let line = format!(
+            r#"{{"type":"session_meta","payload":{{"id":"{ID}","parent_thread_id":"P","agent_nickname":"Ohm","agent_path":"/root/final_global_cr/review_final_vip_fresh","source":{{"subagent":{{"thread_spawn":{{"parent_thread_id":"P"}}}}}}}}}}"#
+        );
+        let mut indexer = CodexIndexer::new(meta());
+        indexer.feed(line.as_bytes());
+        let record = indexer.record();
+        assert_eq!(
+            record.title.as_deref(),
+            Some("Ohm · review_final_vip_fresh")
+        );
+        assert_eq!(record.title_source.as_deref(), Some("agent_meta"));
+
+        // A real prompt wins over the agent label.
+        indexer.feed(br#"{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"audit the VIP flow"}]}}"#);
+        assert_eq!(
+            indexer.record().title.as_deref(),
+            Some("audit the VIP flow")
+        );
+
+        // Nickname only / nested-only forms.
+        let mut nested = CodexIndexer::new(meta());
+        nested.feed(format!(r#"{{"type":"session_meta","payload":{{"id":"{ID}","source":{{"subagent":{{"thread_spawn":{{"parent_thread_id":"P","agent_nickname":"Bernoulli","agent_path":"/root/x/y"}}}}}}}}}}"#).as_bytes());
+        assert_eq!(nested.record().title.as_deref(), Some("Bernoulli · y"));
+    }
+
+    #[test]
+    fn new_rollout_bookkeeping_types_are_known() {
+        let mut indexer = CodexIndexer::new(meta());
+        indexer.feed(b"{\"type\":\"token_usage_record\",\"payload\":{}}\n{\"type\":\"inter_agent_communication_metadata\",\"payload\":{}}\n");
+        assert!(indexer.unknown.is_empty(), "{:?}", indexer.unknown);
     }
 
     #[test]

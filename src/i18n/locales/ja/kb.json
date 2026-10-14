@@ -31,7 +31,7 @@
   "kb.sessions.open": "Open session {{title}}",
   "kb.sessions.deletedBadge": "Source deleted",
   "kb.sessions.deletedHint": "The original file no longer exists; this is the backed-up copy.",
-  "kb.sessions.messages": "{{count}} messages",
+  "kb.sessions.messages": "{{count}} dialogue messages",
   "kb.toast.syncDone": "Collected {{files}} changed file(s), {{bytes}} copied",
   "kb.toast.syncUpToDate": "Already up to date",
   "kb.toast.syncBusy": "A collection is already running",
@@ -41,5 +41,8 @@
   "kb.toast.scheduleRemoved": "Scheduled collection disabled",
   "kb.toast.scheduleFailed": "Could not change the schedule: {{message}}",
   "kb.toast.openFailed": "Could not open the session: {{message}}",
-  "kb.error.loadFailed": "Could not load the knowledge base: {{message}}"
+  "kb.error.loadFailed": "Could not load the knowledge base: {{message}}",
+  "kb.sessions.messagesHint": "Counts user and assistant messages only, not tool calls, so it is lower than the count in the viewer.",
+  "kb.sessions.includeEmpty": "Include empty sessions",
+  "kb.sessions.subagentBadge": "Sub-agent"
 }

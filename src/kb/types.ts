@@ -64,6 +64,7 @@ export interface KbSessionQuery {
   source?: KbSource;
   only_deleted?: boolean;
   include_subagents?: boolean;
+  include_empty?: boolean;
   limit?: number;
   offset?: number;
 }

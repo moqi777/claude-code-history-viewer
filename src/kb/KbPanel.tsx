@@ -35,6 +35,7 @@ export const KbPanel = () => {
   const sessions = useKbStore((s) => s.sessions);
   const filter = useKbStore((s) => s.filter);
   const includeSubagents = useKbStore((s) => s.includeSubagents);
+  const includeEmpty = useKbStore((s) => s.includeEmpty);
   const isLoading = useKbStore((s) => s.isLoading);
   const isSyncing = useKbStore((s) => s.isSyncing);
   const isSchedulePending = useKbStore((s) => s.isSchedulePending);
@@ -162,6 +163,14 @@ export const KbPanel = () => {
             />
             {t("kb.sessions.includeSubagents")}
           </label>
+          <label className="flex items-center gap-2 text-sm text-muted-foreground">
+            <input
+              type="checkbox"
+              checked={includeEmpty}
+              onChange={(e) => void useKbStore.getState().setIncludeEmpty(e.target.checked)}
+            />
+            {t("kb.sessions.includeEmpty")}
+          </label>
         </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto rounded-md border" aria-busy={isLoading}>
@@ -261,7 +270,10 @@ const SessionRow = ({ session, onOpen }: { session: KbSession; onOpen: () => voi
           <Badge variant="outline">{session.provider}</Badge>
           {session.entrypoint != null && <span>{session.entrypoint}</span>}
           <span>{session.project_name || "—"}</span>
-          <span>{t("kb.sessions.messages", { count: session.message_count })}</span>
+          <span title={t("kb.sessions.messagesHint")}>
+            {t("kb.sessions.messages", { count: session.message_count })}
+          </span>
+          {session.is_subagent && <Badge variant="muted">{t("kb.sessions.subagentBadge")}</Badge>}
           <span>{formatTime(session.last_modified)}</span>
         </span>
       </button>

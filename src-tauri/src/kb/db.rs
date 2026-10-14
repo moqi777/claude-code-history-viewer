@@ -401,6 +401,22 @@ pub fn set_title(
     Ok(())
 }
 
+pub fn get_meta(conn: &Connection, key: &str) -> Result<Option<String>, String> {
+    conn.query_row("SELECT value FROM meta WHERE key=?1", [key], |r| r.get(0))
+        .optional()
+        .map_err(|e| err("read meta", e))
+}
+
+pub fn set_meta(conn: &Connection, key: &str, value: &str) -> Result<(), String> {
+    conn.execute(
+        "INSERT INTO meta (key, value) VALUES (?1, ?2) \
+         ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+        params![key, value],
+    )
+    .map_err(|e| err("write meta", e))?;
+    Ok(())
+}
+
 pub fn begin_run(conn: &Connection, trigger: &str, now: &str) -> Result<i64, String> {
     conn.execute(
         "INSERT INTO sync_runs (started_at, trigger) VALUES (?1, ?2)",

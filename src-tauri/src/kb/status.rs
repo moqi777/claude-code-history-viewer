@@ -146,6 +146,8 @@ pub struct SessionFilter {
     pub source: Option<String>,
     pub only_deleted: Option<bool>,
     pub include_subagents: Option<bool>,
+    /// Sessions with no user/assistant messages (metadata-only files).
+    pub include_empty: Option<bool>,
     pub limit: Option<u32>,
     pub offset: Option<u32>,
 }
@@ -168,6 +170,7 @@ pub fn list_sessions(env: &KbEnv, filter: &SessionFilter) -> Result<Vec<KbSessio
              WHERE (?1 IS NULL OR s.source = ?1) \
                AND (?2 = 0 OR f.source_status = 'deleted') \
                AND (?3 = 1 OR s.is_subagent = 0) \
+               AND (?6 = 1 OR s.message_count > 0) \
              ORDER BY COALESCE(s.last_activity_at, f.last_synced_at) DESC, s.id DESC \
              LIMIT ?4 OFFSET ?5",
         )
@@ -180,6 +183,7 @@ pub fn list_sessions(env: &KbEnv, filter: &SessionFilter) -> Result<Vec<KbSessio
                 i64::from(filter.include_subagents.unwrap_or(false)),
                 i64::from(limit),
                 i64::from(filter.offset.unwrap_or(0)),
+                i64::from(filter.include_empty.unwrap_or(false)),
             ],
             |r| {
                 let mirror_rel: String = r.get(2)?;

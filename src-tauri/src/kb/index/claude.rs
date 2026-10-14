@@ -28,11 +28,28 @@ const KNOWN_TYPES: &[&str] = &[
     "agent-name",
     "pr-link",
     "tag",
+    // Metadata records of newer Claude Code versions (no conversation content).
+    "bridge-session",
+    "atis-latch",
+    "cost-state",
+    "file-history-delta",
+    "artifact-autoreact-ledger",
+    "artifact-comment-monitor",
+    "frame-link",
 ];
 
 /// Fallback-title parsing is skipped after this many user lines without a
 /// usable text, so sessions made of huge tool results stay cheap.
 const FALLBACK_ATTEMPTS: u32 = 50;
+
+fn short_agent_id(session_id: &str) -> String {
+    session_id
+        .strip_prefix("agent-")
+        .unwrap_or(session_id)
+        .chars()
+        .take(8)
+        .collect()
+}
 
 pub fn file_meta(path: &Path) -> FileMeta {
     let session_id = path
@@ -188,6 +205,12 @@ impl ClaudeIndexer {
         let (title, title_source) = match (&self.ai_title, &self.fallback) {
             (Some(t), _) => (Some(t.clone()), Some("ai-title")),
             (None, Some(t)) => (Some(t.clone()), Some("first_message")),
+            // A sub-agent resumed mid-task can hold only tool results: there is
+            // no prompt to title it by, so label it by its agent id.
+            (None, None) if self.meta.is_subagent => (
+                Some(format!("agent {}", short_agent_id(&self.meta.session_id))),
+                Some("agent_meta"),
+            ),
             (None, None) => (None, None),
         };
         SessionRecord {
@@ -284,6 +307,38 @@ mod tests {
         whole.feed(SAMPLE.as_bytes());
         assert_eq!(resumed.record(), whole.record());
         assert_eq!(resumed.unknown, whole.unknown);
+    }
+
+    #[test]
+    fn subagent_without_any_user_text_is_titled_by_its_agent_id() {
+        let meta = file_meta(&PathBuf::from(
+            "/p/proj/PARENT/subagents/agent-a8b3c72952e6cfe40.jsonl",
+        ));
+        let mut indexer = ClaudeIndexer::new(meta);
+        indexer.feed(
+            br#"{"type":"user","timestamp":"2026-01-01T00:00:01Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t","content":"ok"}]}}
+{"type":"assistant","timestamp":"2026-01-01T00:00:02Z","message":{"role":"assistant","content":[]}}
+"#,
+        );
+        let record = indexer.record();
+        assert_eq!(record.title.as_deref(), Some("agent a8b3c729"));
+        assert_eq!(record.title_source.as_deref(), Some("agent_meta"));
+        assert_eq!(record.message_count, 2);
+    }
+
+    #[test]
+    fn new_metadata_record_types_are_known_not_unknown() {
+        let mut indexer = ClaudeIndexer::new(meta());
+        for kind in [
+            "atis-latch",
+            "file-history-delta",
+            "bridge-session",
+            "cost-state",
+            "frame-link",
+        ] {
+            indexer.feed(format!("{{\"type\":\"{kind}\"}}\n").as_bytes());
+        }
+        assert!(indexer.unknown.is_empty(), "{:?}", indexer.unknown);
     }
 
     #[test]

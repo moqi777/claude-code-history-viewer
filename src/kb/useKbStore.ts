@@ -21,6 +21,7 @@ export interface KbState {
   sessions: KbSession[];
   filter: KbSourceFilter;
   includeSubagents: boolean;
+  includeEmpty: boolean;
   isLoading: boolean;
   isSyncing: boolean;
   isSchedulePending: boolean;
@@ -32,6 +33,7 @@ export interface KbActions {
   close: () => void;
   setFilter: (filter: KbSourceFilter) => Promise<void>;
   setIncludeSubagents: (include: boolean) => Promise<void>;
+  setIncludeEmpty: (include: boolean) => Promise<void>;
   refresh: () => Promise<void>;
   syncNow: () => Promise<{ summary?: KbRunSummary; error?: string }>;
   toggleSchedule: () => Promise<{ error?: string }>;
@@ -43,8 +45,10 @@ const errorMessage = (e: unknown): string =>
 export const queryFor = (
   filter: KbSourceFilter,
   includeSubagents: boolean,
+  includeEmpty = false,
 ): KbSessionQuery => ({
   include_subagents: includeSubagents,
+  ...(includeEmpty ? { include_empty: true } : {}),
   ...(filter === "claude" || filter === "codex" ? { source: filter } : {}),
   ...(filter === "deleted" ? { only_deleted: true } : {}),
 });
@@ -55,6 +59,7 @@ const initialState: KbState = {
   sessions: [],
   filter: "all",
   includeSubagents: false,
+  includeEmpty: false,
   isLoading: false,
   isSyncing: false,
   isSchedulePending: false,
@@ -85,14 +90,19 @@ export const useKbStore = create<KbState & KbActions>((set, get) => ({
     await get().refresh();
   },
 
+  setIncludeEmpty: async (includeEmpty) => {
+    set({ includeEmpty });
+    await get().refresh();
+  },
+
   refresh: async () => {
     const epoch = ++refreshEpoch;
     set({ isLoading: true });
     try {
-      const { filter, includeSubagents } = get();
+      const { filter, includeSubagents, includeEmpty } = get();
       const [overview, sessions] = await Promise.all([
         kbApi.getStatus(),
-        kbApi.listSessions(queryFor(filter, includeSubagents)),
+        kbApi.listSessions(queryFor(filter, includeSubagents, includeEmpty)),
       ]);
       if (epoch !== refreshEpoch) return;
       set({ overview, sessions, loadError: null, isLoading: false });

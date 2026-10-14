@@ -11,6 +11,8 @@ use std::path::{Path, PathBuf};
 
 use rusqlite::{Connection, OpenFlags};
 
+use super::text::clean_native_title;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TitleSource {
     Threads,
@@ -101,6 +103,7 @@ fn read_session_index(path: &Path) -> HashMap<String, String> {
         if name.is_empty() {
             continue;
         }
+        let name = clean_native_title(name);
         let updated = value
             .get("updated_at")
             .and_then(|v| v.as_str())
@@ -108,7 +111,7 @@ fn read_session_index(path: &Path) -> HashMap<String, String> {
             .to_string();
         let newer = best.get(id).map_or(true, |(prev, _)| updated >= *prev);
         if newer {
-            best.insert(id.to_string(), (updated, name.to_string()));
+            best.insert(id.to_string(), (updated, name));
         }
     }
     best.into_iter().map(|(id, (_, name))| (id, name)).collect()
@@ -140,7 +143,7 @@ fn query_threads(conn: &Connection) -> rusqlite::Result<Vec<(String, String)>> {
         let (id, title) = row?;
         let title = title.trim();
         if !title.is_empty() {
-            out.push((id, title.to_string()));
+            out.push((id, clean_native_title(title)));
         }
     }
     Ok(out)

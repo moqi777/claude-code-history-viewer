@@ -25,6 +25,7 @@ describe("useKbStore", () => {
     expect(queryFor("all", false)).toEqual({ include_subagents: false });
     expect(queryFor("codex", true)).toEqual({ include_subagents: true, source: "codex" });
     expect(queryFor("deleted", false)).toEqual({ include_subagents: false, only_deleted: true });
+    expect(queryFor("all", false, true)).toEqual({ include_subagents: false, include_empty: true });
   });
 
   it("open() shows the panel and loads status and sessions", async () => {
@@ -59,6 +60,16 @@ describe("useKbStore", () => {
     expect(mocks.listSessions).toHaveBeenLastCalledWith({
       include_subagents: false,
       only_deleted: true,
+    });
+  });
+
+  it("empty sessions are hidden by default and requested explicitly", async () => {
+    await useKbStore.getState().refresh();
+    expect(mocks.listSessions).toHaveBeenLastCalledWith({ include_subagents: false });
+    await useKbStore.getState().setIncludeEmpty(true);
+    expect(mocks.listSessions).toHaveBeenLastCalledWith({
+      include_subagents: false,
+      include_empty: true,
     });
   });
 

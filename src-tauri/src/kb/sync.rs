@@ -23,6 +23,12 @@ use super::Source;
 /// so a status probe or a just-finishing run never costs a scheduled round.
 pub const LOCK_WAIT: Duration = Duration::from_secs(3);
 
+/// Bump when the indexers' output changes (title rules, counting, known types…).
+/// The next sync then rebuilds every session row from the mirror, which is the
+/// source of truth, so improvements reach sessions that never change again.
+pub const INDEXER_VERSION: &str = "2";
+const INDEXER_VERSION_KEY: &str = "indexer_version";
+
 /// Warn (in the log) about unexpectedly huge single lines.
 const HUGE_LINE_BYTES: u64 = 100 * 1024 * 1024;
 
@@ -159,6 +165,7 @@ fn collect(
         .errors
         .extend(discovery.errors.iter().cloned().map(SyncError::from));
 
+    reindex_if_outdated(env, conn, log, summary)?;
     reconcile_sources(env, conn, &discovery, summary)?;
 
     // Reload: moves changed `source_path`s.
@@ -293,6 +300,81 @@ fn reconcile_sources(
     summary.moved_sources += plan.moves.len() as u64;
     summary.deleted_sources += plan.deleted.len() as u64;
     Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Re-deriving the index from the mirror
+// ---------------------------------------------------------------------------
+
+fn reindex_if_outdated(
+    env: &KbEnv,
+    conn: &Connection,
+    log: &SyncLog,
+    summary: &mut Summary,
+) -> Result<(), String> {
+    if db::get_meta(conn, INDEXER_VERSION_KEY)?.as_deref() == Some(INDEXER_VERSION) {
+        return Ok(());
+    }
+    let rows = db::load_files(conn)?;
+    log.line(&format!(
+        "indexer version changed: rebuilding {} session rows from the mirror",
+        rows.len()
+    ));
+    let mut failed = false;
+    for row in &rows {
+        if let Err(message) = reindex_one(env, conn, row) {
+            failed = true;
+            log.line(&format!("ERROR reindex {}: {message}", row.source_path));
+            summary.errors.push(SyncError {
+                path: row.source_path.clone(),
+                stage: "reindex".into(),
+                message,
+            });
+        }
+    }
+    // Stay outdated after a failure so the next sync retries.
+    if !failed {
+        db::set_meta(conn, INDEXER_VERSION_KEY, INDEXER_VERSION)?;
+    }
+    Ok(())
+}
+
+fn reindex_one(env: &KbEnv, conn: &Connection, row: &FileRow) -> Result<(), String> {
+    let mirror_path = env.data.mirror_path(&row.mirror_rel)?;
+    let file = std::fs::File::open(&mirror_path)
+        .map_err(|e| format!("cannot open mirror {}: {e}", mirror_path.display()))?;
+    let mut indexer = Indexer::new(
+        row.source,
+        FileMeta::from_path(row.source, Path::new(&row.source_path)),
+    );
+    if row.is_compressed {
+        let reader = zstd::stream::Decoder::new(file)
+            .map_err(|e| format!("cannot decompress mirror: {e}"))?;
+        let tail = super::index::for_each_line_chunk(reader, |chunk| {
+            indexer.feed(chunk);
+            Ok(())
+        })?;
+        indexer.feed(&tail.tail);
+    } else {
+        let upto = u64::try_from(row.mirror_offset).unwrap_or(0);
+        super::index::for_each_line_chunk(std::io::Read::take(file, upto), |chunk| {
+            indexer.feed(chunk);
+            Ok(())
+        })?;
+    }
+    let unknown = serde_json::to_string(indexer.unknown_types()).unwrap_or_else(|_| "{}".into());
+    let tx = conn
+        .unchecked_transaction()
+        .map_err(|e| format!("begin: {e}"))?;
+    db::upsert_session(
+        &tx,
+        row.id,
+        row.source,
+        &indexer.record(),
+        &indexer.state_json(),
+        &unknown,
+    )?;
+    tx.commit().map_err(|e| format!("commit: {e}"))
 }
 
 // ---------------------------------------------------------------------------
@@ -451,19 +533,25 @@ fn refresh_codex_titles(
     let rows = db::load_codex_titles(conn)?;
     let mut updates = Vec::new();
     for row in &rows {
-        let (title, source) = match native.titles.get(&row.session_id) {
-            Some((title, source)) => (Some(title.as_str()), source.as_str()),
-            None => (
-                row.fallback_title.as_deref(),
-                if row.fallback_title.is_some() {
-                    "first_message"
-                } else {
-                    ""
-                },
-            ),
-        };
-        if row.title.as_deref() != title || row.title_source.as_deref().unwrap_or("") != source {
-            updates.push((row.id, title, source));
+        let had_native = matches!(
+            row.title_source.as_deref(),
+            Some("threads" | "session_index")
+        );
+        match native.titles.get(&row.session_id) {
+            Some((title, source)) => {
+                if row.title.as_deref() != Some(title.as_str())
+                    || row.title_source.as_deref() != Some(source.as_str())
+                {
+                    updates.push((row.id, Some(title.as_str()), source.as_str()));
+                }
+            }
+            // The native title disappeared (thread deleted): fall back to what
+            // the indexer derived from the content.
+            None if had_native => {
+                updates.push((row.id, row.fallback_title.as_deref(), "first_message"));
+            }
+            // Otherwise the indexer-derived title is already stored.
+            None => {}
         }
     }
     if updates.is_empty() {
@@ -964,5 +1052,142 @@ mod tests {
         let s = sb.sync();
         assert_eq!(s.status, "ok");
         assert_eq!(s.unknown_types.get("from-the-future"), Some(&1));
+    }
+
+    #[test]
+    fn agent_label_titles_are_stable_across_syncs_and_native_titles_revert_when_lost() {
+        let sb = Sandbox::new();
+        let meta = format!(
+            r#"{{"timestamp":"2026-05-29T11:15:04Z","type":"session_meta","payload":{{"id":"{CODEX_ID}","cwd":"/x","parent_thread_id":"P","agent_nickname":"Ohm","agent_path":"/root/a/review"}}}}"#
+        );
+        write(&sb.codex_file(), &format!("{meta}\n"));
+        let title = |db: &Connection| -> (Option<String>, Option<String>) {
+            db.query_row("SELECT title, title_source FROM sessions", [], |r| {
+                Ok((r.get(0)?, r.get(1)?))
+            })
+            .unwrap()
+        };
+        sb.sync();
+        let first = title(&sb.db());
+        assert_eq!(
+            first,
+            (Some("Ohm · review".into()), Some("agent_meta".into()))
+        );
+        sb.sync();
+        assert_eq!(title(&sb.db()), first, "no flip-flop between refreshes");
+
+        // A native title appears, then the thread is deleted from Codex's db.
+        let state = sb.codex.join("state_5.sqlite");
+        let conn = Connection::open(&state).unwrap();
+        conn.execute_batch(&format!(
+            "CREATE TABLE threads (id TEXT PRIMARY KEY, title TEXT NOT NULL);
+             INSERT INTO threads VALUES ('{CODEX_ID}', 'Native');"
+        ))
+        .unwrap();
+        sb.sync();
+        assert_eq!(
+            title(&sb.db()),
+            (Some("Native".into()), Some("threads".into()))
+        );
+        conn.execute("DELETE FROM threads", []).unwrap();
+        drop(conn);
+        sb.sync();
+        assert_eq!(title(&sb.db()).0.as_deref(), Some("Ohm · review"));
+    }
+
+    #[test]
+    fn outdated_indexer_version_rebuilds_rows_from_the_mirror_once() {
+        let sb = Sandbox::new();
+        write(&sb.claude_file(), &claude_text());
+        sb.sync();
+        let conn = sb.db();
+        // Pretend an older program indexed this session badly.
+        conn.execute(
+            "UPDATE sessions SET title='[Image #1] stale', title_source='first_message', message_count=99, indexer_state='{}'",
+            [],
+        )
+        .unwrap();
+        conn.execute("UPDATE meta SET value='1' WHERE key='indexer_version'", [])
+            .unwrap();
+        drop(conn);
+
+        let s = sb.sync();
+        assert_eq!(s.status, "ok", "{:?}", s.errors);
+        let (title, count): (String, i64) = sb
+            .db()
+            .query_row("SELECT title, message_count FROM sessions", [], |r| {
+                Ok((r.get(0)?, r.get(1)?))
+            })
+            .unwrap();
+        assert_eq!((title.as_str(), count), ("hello there", 2));
+        assert_eq!(
+            db::get_meta(&sb.db(), "indexer_version")
+                .unwrap()
+                .as_deref(),
+            Some(INDEXER_VERSION)
+        );
+        assert_eq!(s.copied_bytes, 0, "rebuilding the index copies nothing");
+    }
+
+    #[test]
+    fn a_failed_rebuild_is_retried_on_the_next_sync() {
+        let sb = Sandbox::new();
+        write(&sb.claude_file(), &claude_text());
+        sb.sync();
+        sb.db()
+            .execute("UPDATE meta SET value='1' WHERE key='indexer_version'", [])
+            .unwrap();
+        let mirror = sb.mirror_of(&format!("claude/projects/-Users-me-proj/{CLAUDE_ID}.jsonl"));
+        let saved = fs::read(&mirror).unwrap();
+        fs::remove_file(&mirror).unwrap();
+        let failed = sb.sync();
+        assert!(failed.errors.iter().any(|e| e.stage == "reindex"));
+        assert_eq!(
+            db::get_meta(&sb.db(), "indexer_version")
+                .unwrap()
+                .as_deref(),
+            Some("1")
+        );
+
+        fs::write(&mirror, saved).unwrap();
+        let ok = sb.sync();
+        assert!(
+            ok.errors.iter().all(|e| e.stage != "reindex"),
+            "{:?}",
+            ok.errors
+        );
+        assert_eq!(
+            db::get_meta(&sb.db(), "indexer_version")
+                .unwrap()
+                .as_deref(),
+            Some(INDEXER_VERSION)
+        );
+    }
+
+    #[test]
+    fn empty_sessions_are_hidden_from_the_list_unless_asked_for() {
+        let sb = Sandbox::new();
+        write(&sb.claude_file(), &claude_text());
+        let empty = sb
+            .claude
+            .join("projects/-Users-me-proj/22222222-3333-4444-5555-666666666666.jsonl");
+        write(&empty, "{\"type\":\"mode\",\"mode\":\"x\"}\n");
+        sb.sync();
+
+        let default = super::super::status::list_sessions(
+            &sb.env,
+            &super::super::status::SessionFilter::default(),
+        )
+        .unwrap();
+        assert_eq!(default.len(), 1);
+        let all = super::super::status::list_sessions(
+            &sb.env,
+            &super::super::status::SessionFilter {
+                include_empty: Some(true),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(all.len(), 2);
     }
 }
