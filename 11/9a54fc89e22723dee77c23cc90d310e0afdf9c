@@ -1,0 +1,44 @@
+docs/agent-kb/p3-transcripts/codex-3.txt
+  s_cca7c29607588b::t_19310592297f8d 1-24
+docs/agent-kb/p3-transcripts/codex-4-immutable.txt
+  s_cca7c29607588b::t_19310592297f8d 1-20
+docs/agent-kb/p3-transcripts/claude-1.txt
+  s_cca7c29607588b::t_19310592297f8d 1-30
+docs/agent-kb/p3-transcripts/claude-3.txt
+  s_cca7c29607588b::t_19310592297f8d 1-35
+docs/agent-kb/p3-transcripts/claude-2.txt
+  s_cca7c29607588b::t_19310592297f8d 1-26
+docs/agent-kb/p3-transcripts/final-claude-self-1.txt
+  s_cca7c29607588b::t_04dd2e21390380 1-28
+src-tauri/src/kb/search.rs
+  s_cca7c29607588b::t_798a9999cbd7a8 1018-1026
+docs/agent-kb/p3-transcripts/final-claude-work-turn.txt
+  s_cca7c29607588b::t_04dd2e21390380 1-35
+docs/agent-kb/P3-design.md
+  s_cca7c29607588b::t_04dd2e21390380 450-462
+docs/agent-kb/P3-report.md
+  s_cca7c29607588b::t_9876f8d6f92c36 61,91,102,122,132
+  s_cca7c29607588b::t_36116ca979cc56 1-60,62-90,92-101,103-121,123-131,133-157
+docs/agent-kb/p3-transcripts/codex-1.txt
+  s_cca7c29607588b::t_19310592297f8d 1-17
+docs/agent-kb/p3-transcripts/final-codex-self-1.txt
+  s_cca7c29607588b::t_04dd2e21390380 1-26
+docs/agent-kb/p3-transcripts/codex-2.txt
+  s_cca7c29607588b::t_19310592297f8d 1-25
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.11",
+  "base_commit_sha": "119a54fc89e22723dee77c23cc90d310e0afdf9c",
+  "prompts": {},
+  "sessions": {
+    "s_cca7c29607588b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ef228e77-8d37-45df-ab42-2d4c28a0387d",
+        "model": "unknown"
+      },
+      "human_author": "moqing <moqing@tsign.cn>"
+    }
+  }
+}
