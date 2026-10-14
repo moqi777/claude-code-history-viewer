@@ -2,6 +2,7 @@ pub mod cli;
 pub mod cli_args;
 pub mod commands;
 pub mod export;
+pub mod kb;
 pub mod models;
 pub mod providers;
 pub mod utils;
@@ -96,6 +97,12 @@ pub fn run() {
         }
     }
 
+    // Headless knowledge-base commands (`--kb-sync`, `--kb-schedule …`). Like
+    // `--export`, handled before any GUI so launchd can run them with no window.
+    if let Some(code) = kb::cli::try_run(&std::env::args().collect::<Vec<_>>()) {
+        std::process::exit(code);
+    }
+
     // Check for --serve flag (WebUI server mode)
     #[cfg(feature = "webui-server")]
     {
@@ -185,6 +192,11 @@ fn run_tauri() {
             >)
         .invoke_handler(tauri::generate_handler![
             crate::cli::get_startup_session_hint,
+            kb::commands::kb_get_status,
+            kb::commands::kb_sync_now,
+            kb::commands::kb_list_sessions,
+            kb::commands::kb_schedule_install,
+            kb::commands::kb_schedule_uninstall,
             get_claude_folder_path,
             validate_claude_folder,
             validate_custom_claude_dir,

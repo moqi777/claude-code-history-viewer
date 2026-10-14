@@ -160,7 +160,11 @@ fn validate_session_path(session_path: &Path, raw_session_path: &str) -> Result<
         .map_err(|e| format!("Failed to resolve session path: {e}"))?;
 
     let mut canonical_session_dirs = Vec::new();
-    for dir in [get_sessions_dir()?, get_archived_sessions_dir()?] {
+    // An uninstalled Codex must not hide the knowledge-base mirror below.
+    for dir in [get_sessions_dir(), get_archived_sessions_dir()]
+        .into_iter()
+        .flatten()
+    {
         if !dir.exists() || !dir.is_dir() {
             continue;
         }
@@ -169,6 +173,10 @@ fn validate_session_path(session_path: &Path, raw_session_path: &str) -> Result<
                 .map_err(|e| format!("Failed to resolve Codex session directory: {e}"))?,
         );
     }
+
+    // Sessions backed up by the knowledge base are served from its mirror, which
+    // keeps working after Codex itself deleted or archived the original.
+    canonical_session_dirs.extend(crate::kb::paths::codex_mirror_roots_canonical());
 
     if canonical_session_dirs.is_empty() {
         return Err("No Codex session directories found".to_string());

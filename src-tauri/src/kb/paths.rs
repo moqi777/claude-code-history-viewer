@@ -1,0 +1,155 @@
+//! Layout of the KB data directory and path-safety helpers.
+
+use std::path::{Component, Path, PathBuf};
+
+/// `~/AgentKB/` (or wherever the config points). Pure path arithmetic.
+#[derive(Debug, Clone)]
+pub struct DataPaths {
+    root: PathBuf,
+}
+
+impl DataPaths {
+    pub fn new(root: impl Into<PathBuf>) -> Self {
+        Self { root: root.into() }
+    }
+
+    pub fn root(&self) -> &Path {
+        &self.root
+    }
+    pub fn raw(&self) -> PathBuf {
+        self.root.join("raw")
+    }
+    pub fn raw_codex_sessions(&self) -> PathBuf {
+        self.raw().join("codex").join("sessions")
+    }
+    pub fn raw_codex_archived(&self) -> PathBuf {
+        self.raw().join("codex").join("archived_sessions")
+    }
+    pub fn db(&self) -> PathBuf {
+        self.root.join("kb.db")
+    }
+    pub fn lock(&self) -> PathBuf {
+        self.root.join("kb.lock")
+    }
+    pub fn logs(&self) -> PathBuf {
+        self.root.join("logs")
+    }
+
+    /// Absolute mirror path for a `mirror_rel` stored in the database.
+    pub fn mirror_path(&self, mirror_rel: &str) -> Result<PathBuf, String> {
+        safe_join(&self.raw(), mirror_rel)
+    }
+}
+
+/// Join `rel` (always `/`-separated) onto `base`, refusing anything that could
+/// leave `base`: absolute paths, `..`, drive prefixes and empty components.
+pub fn safe_join(base: &Path, rel: &str) -> Result<PathBuf, String> {
+    if rel.is_empty() {
+        return Err("empty relative path".to_string());
+    }
+    let mut out = base.to_path_buf();
+    for part in rel.split('/') {
+        let mut components = Path::new(part).components();
+        match (components.next(), components.next()) {
+            (Some(Component::Normal(name)), None) if !part.contains('\\') => out.push(name),
+            _ => return Err(format!("unsafe relative path: {rel}")),
+        }
+    }
+    Ok(out)
+}
+
+/// The two mirror roots Codex sessions are served from, canonicalised, for the
+/// Codex provider's session-path allow list. Missing directories are skipped;
+/// any config problem yields an empty list rather than an error, because the
+/// caller is a path validator that must keep working without the KB.
+pub fn codex_mirror_roots_canonical() -> Vec<PathBuf> {
+    // A test that never sandboxed HOME must not trip `home_dir()`'s guard.
+    #[cfg(test)]
+    if std::env::var_os("CCHV_TEST_HOME").is_none() {
+        return Vec::new();
+    }
+    let Ok(config) = crate::kb::config::KbConfig::load() else {
+        return Vec::new();
+    };
+    let paths = DataPaths::new(config.data_dir);
+    [paths.raw_codex_sessions(), paths.raw_codex_archived()]
+        .into_iter()
+        .filter_map(|dir| dir.canonicalize().ok())
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn safe_join_accepts_nested_relative_paths() {
+        let joined = safe_join(Path::new("/raw"), "claude/projects/p/a.jsonl").unwrap();
+        assert_eq!(joined, Path::new("/raw/claude/projects/p/a.jsonl"));
+    }
+
+    #[test]
+    fn safe_join_rejects_escapes() {
+        for bad in ["", "../x", "a/../b", "/abs", "a//b", "a\\b", "./a", "a/."] {
+            assert!(safe_join(Path::new("/raw"), bad).is_err(), "{bad}");
+        }
+    }
+
+    const ID: &str = "019e7371-a6b9-7a50-9825-b7acd6255914";
+
+    /// Sandboxed HOME whose KB config points at `<home>/AgentKB`, with Codex
+    /// itself not installed (no `~/.codex`).
+    fn kb_home() -> tempfile::TempDir {
+        let home = tempfile::tempdir().unwrap();
+        std::env::set_var("CCHV_TEST_HOME", home.path());
+        std::env::remove_var("CODEX_HOME");
+        let config = crate::kb::config::config_path().unwrap();
+        std::fs::create_dir_all(config.parent().unwrap()).unwrap();
+        let data = home.path().join("AgentKB");
+        std::fs::write(config, serde_json::json!({ "data_dir": data }).to_string()).unwrap();
+        home
+    }
+
+    fn write_rollout(dir: &Path) -> PathBuf {
+        std::fs::create_dir_all(dir).unwrap();
+        let path = dir.join(format!("rollout-2026-05-29T11-14-48-{ID}.jsonl"));
+        let meta = format!(
+            r#"{{"timestamp":"2026-05-29T11:15:04Z","type":"session_meta","payload":{{"id":"{ID}","cwd":"/x"}}}}"#
+        );
+        let msg = r#"{"timestamp":"2026-05-29T11:15:06Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"hello"}]}}"#;
+        std::fs::write(&path, format!("{meta}\n{msg}\n")).unwrap();
+        path
+    }
+
+    #[test]
+    fn mirrored_codex_sessions_open_from_both_mirror_roots() {
+        let home = kb_home();
+        let data = DataPaths::new(home.path().join("AgentKB"));
+        let live = write_rollout(&data.raw_codex_sessions().join("2026/05/29"));
+        let archived = write_rollout(&data.raw_codex_archived());
+
+        for path in [live, archived] {
+            let messages = crate::providers::codex::load_messages(path.to_str().unwrap()).unwrap();
+            assert!(!messages.is_empty(), "{}", path.display());
+        }
+    }
+
+    #[test]
+    fn codex_session_paths_outside_the_mirror_and_codex_roots_are_still_rejected() {
+        let home = kb_home();
+        let data = DataPaths::new(home.path().join("AgentKB"));
+        write_rollout(&data.raw_codex_sessions());
+        let outside = write_rollout(&home.path().join("elsewhere"));
+        let error = crate::providers::codex::load_messages(outside.to_str().unwrap()).unwrap_err();
+        assert!(
+            error.contains("outside Codex session directories"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn mirror_roots_that_do_not_exist_yet_are_skipped() {
+        let _home = kb_home();
+        assert!(codex_mirror_roots_canonical().is_empty());
+    }
+}

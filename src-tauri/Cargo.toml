@@ -56,6 +56,8 @@ rusqlite = { version = "0.32", features = ["bundled"] }
 zstd = "0.13"
 notify = { version = "7.0", default-features = false, features = ["macos_fsevent"] }
 notify-debouncer-mini = "0.5"
+fs4 = "1.1"
+sha2 = "0.10"
 
 # WebUI server mode (optional)
 argon2 = { version = "0.5", optional = true }
