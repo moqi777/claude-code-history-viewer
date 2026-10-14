@@ -13,7 +13,6 @@ import { Settings, MessageSquare, Folder, Archive, SlidersHorizontal, DatabaseBa
 import { useTranslation } from "react-i18next";
 import { useModal } from "@/contexts/modal";
 import { DesktopOnly } from "@/contexts/platform";
-import { useKbStore } from "@/kb";
 import { ThemeMenuGroup } from "./ThemeMenuGroup";
 import { LanguageMenuGroup } from "./LanguageMenuGroup";
 import { FilterMenuGroup } from "./FilterMenuGroup";
@@ -26,12 +25,14 @@ interface SettingDropdownProps {
   onOpenArchive?: () => void;
   archiveDisabled?: boolean;
   onOpenSettingsManager?: () => void;
+  onOpenKb?: () => void;
 }
 
 export const SettingDropdown = ({
   onOpenArchive,
   archiveDisabled = false,
   onOpenSettingsManager,
+  onOpenKb,
 }: SettingDropdownProps) => {
   const { t } = useTranslation();
   const { openModal } = useModal();
@@ -73,7 +74,7 @@ export const SettingDropdown = ({
             </>
           )}
           <DesktopOnly>
-            <DropdownMenuItem onClick={() => useKbStore.getState().open()}>
+            <DropdownMenuItem onClick={onOpenKb}>
               <DatabaseBackup className="mr-2 h-4 w-4 text-foreground" />
               <span>{t("kb.menuItem")}</span>
             </DropdownMenuItem>

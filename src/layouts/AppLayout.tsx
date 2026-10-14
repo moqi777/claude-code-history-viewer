@@ -32,7 +32,7 @@ import { BottomTabBar } from "@/components/mobile/BottomTabBar";
 import { MobileNavigatorSheet } from "@/components/mobile/MobileNavigatorSheet";
 import { Header } from "@/layouts/Header/Header";
 import { ModalContainer } from "@/layouts/Header/SettingDropdown/ModalContainer";
-import { KbPanel } from "@/kb";
+import { KbHome, KbRoot } from "@/kb";
 import { useIsLgUp, useIsXlUp } from "@/hooks/useMediaQuery";
 import { useResizablePanel } from "@/hooks/useResizablePanel";
 import { SessionsPane } from "@/components/SessionsPane/SessionsPane";
@@ -238,6 +238,7 @@ export const AppLayout: React.FC<AppLayoutProps> = (props) => {
     !isMobile &&
     selectedProject != null &&
     !computed.isSettingsView &&
+    !computed.isKbView &&
     !computed.isArchiveView;
   const {
     width: sessionsPaneWidth,
@@ -315,6 +316,7 @@ export const AppLayout: React.FC<AppLayoutProps> = (props) => {
     its own rather than through `currentView`.
   */
   const isTranscriptView = !(
+    computed.isKbView ||
     computed.isArchiveView ||
     computed.isSettingsView ||
     computed.isBoardView ||
@@ -326,7 +328,10 @@ export const AppLayout: React.FC<AppLayoutProps> = (props) => {
   // Global stats renders inside the analytics branch; the flag can linger
   // while Settings/Archive are open from the app menu.
   const showsGlobalStats =
-    isViewingGlobalStats && !computed.isSettingsView && !computed.isArchiveView;
+    isViewingGlobalStats &&
+    !computed.isSettingsView &&
+    !computed.isKbView &&
+    !computed.isArchiveView;
   /*
     Gated on `xl` in JavaScript, not merely in CSS. The wrapper below is
     `hidden xl:block`, but a hidden wrapper still mounts its children, so
@@ -708,7 +713,9 @@ export const AppLayout: React.FC<AppLayoutProps> = (props) => {
 
             {/* Content */}
             <div className="flex-1 overflow-hidden">
-              {computed.isArchiveView ? (
+              {computed.isKbView ? (
+                <KbHome />
+              ) : computed.isArchiveView ? (
                 <div className="h-full flex flex-col p-3 md:p-6">
                   <ArchiveManager
                     className="flex-1 min-h-0"
@@ -953,7 +960,7 @@ export const AppLayout: React.FC<AppLayoutProps> = (props) => {
 
       {/* Modals */}
       <ModalContainer />
-      <KbPanel />
+      <KbRoot />
     </TooltipProvider>
   );
 };

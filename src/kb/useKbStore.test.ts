@@ -1,43 +1,64 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { overviewFixture, sessionFixture } from "./fixtures";
-import { queryFor, useKbStore } from "./useKbStore";
+import { configFixture } from "./testkit";
+import { defaultFilters, queryFor, useKbStore } from "./useKbStore";
 
-const mocks = vi.hoisted(() => ({
-  getStatus: vi.fn(),
-  syncNow: vi.fn(),
-  listSessions: vi.fn(),
-  installSchedule: vi.fn(),
-  uninstallSchedule: vi.fn(),
-}));
-vi.mock("./api", () => ({ kbApi: mocks }));
+const mocks = vi.hoisted(() => ({ current: {} as ReturnType<typeof import("./testkit").apiMocks> }));
+vi.mock("./api", async () => {
+  const { apiMocks } = await import("./testkit");
+  mocks.current = apiMocks();
+  return { kbApi: mocks.current };
+});
+
+const api = () => mocks.current;
 
 const reset = () => {
   useKbStore.setState(useKbStore.getInitialState(), true);
-  for (const mock of Object.values(mocks)) mock.mockReset();
-  mocks.getStatus.mockResolvedValue(overviewFixture());
-  mocks.listSessions.mockResolvedValue([sessionFixture()]);
+  for (const mock of Object.values(api())) mock.mockReset();
+  api().getStatus.mockResolvedValue(overviewFixture());
+  api().listSessions.mockResolvedValue([sessionFixture()]);
+  api().getFacets.mockResolvedValue({ clients: [], projects: [] });
+  api().getBackupPresence.mockResolvedValue({ state: "disabled" });
 };
 
 describe("useKbStore", () => {
   beforeEach(reset);
 
-  it("builds the backend query from the filter", () => {
-    expect(queryFor("all", false)).toEqual({ include_subagents: false });
-    expect(queryFor("codex", true)).toEqual({ include_subagents: true, source: "codex" });
-    expect(queryFor("deleted", false)).toEqual({ include_subagents: false, only_deleted: true });
-    expect(queryFor("all", false, true)).toEqual({ include_subagents: false, include_empty: true });
+  it("builds the backend query from the filters", () => {
+    const now = Date.parse("2026-10-14T00:00:00Z");
+    expect(queryFor(defaultFilters, now)).toEqual({ include_subagents: false });
+    expect(queryFor({ ...defaultFilters, source: "codex", includeSubagents: true }, now)).toEqual({
+      include_subagents: true,
+      source: "codex",
+    });
+    expect(queryFor({ ...defaultFilters, onlyDeleted: true }, now)).toEqual({
+      include_subagents: false,
+      only_deleted: true,
+    });
+    expect(queryFor({ ...defaultFilters, includeEmpty: true }, now)).toEqual({
+      include_subagents: false,
+      include_empty: true,
+    });
+    expect(
+      queryFor({ ...defaultFilters, client: "cli", project: "p", query: " fix ", range: "7d" }, now),
+    ).toEqual({
+      include_subagents: false,
+      client: "cli",
+      project: "p",
+      query: "fix",
+      since: "2026-10-07T00:00:00.000Z",
+    });
   });
 
-  it("open() shows the panel and loads status and sessions", async () => {
-    useKbStore.getState().open();
-    expect(useKbStore.getState().isOpen).toBe(true);
-    await vi.waitFor(() => expect(useKbStore.getState().sessions).toHaveLength(1));
+  it("refresh loads status and sessions", async () => {
+    await useKbStore.getState().refresh();
+    expect(useKbStore.getState().sessions).toHaveLength(1);
     expect(useKbStore.getState().overview?.data_dir).toBe("/Users/me/AgentKB");
     expect(useKbStore.getState().loadError).toBeNull();
   });
 
   it("a failed load is reported in state, not thrown", async () => {
-    mocks.getStatus.mockRejectedValue(new Error("db locked"));
+    api().getStatus.mockRejectedValue(new Error("db locked"));
     await useKbStore.getState().refresh();
     expect(useKbStore.getState().loadError).toBe("db locked");
     expect(useKbStore.getState().isLoading).toBe(false);
@@ -45,8 +66,8 @@ describe("useKbStore", () => {
 
   it("only the newest overlapping refresh may write", async () => {
     let releaseFirst: (v: unknown) => void = () => {};
-    mocks.listSessions
-      .mockImplementationOnce(() => new Promise((resolve) => { releaseFirst = resolve; }))
+    api()
+      .listSessions.mockImplementationOnce(() => new Promise((resolve) => { releaseFirst = resolve; }))
       .mockResolvedValueOnce([sessionFixture({ summary: "newest" })]);
     const first = useKbStore.getState().refresh();
     await useKbStore.getState().refresh();
@@ -55,50 +76,78 @@ describe("useKbStore", () => {
     expect(useKbStore.getState().sessions[0]?.summary).toBe("newest");
   });
 
-  it("changing the filter re-queries with it", async () => {
-    await useKbStore.getState().setFilter("deleted");
-    expect(mocks.listSessions).toHaveBeenLastCalledWith({
+  it("changing a filter re-queries with it", async () => {
+    await useKbStore.getState().setFilters({ onlyDeleted: true });
+    expect(api().listSessions).toHaveBeenLastCalledWith({
       include_subagents: false,
+      only_deleted: true,
+    });
+    await useKbStore.getState().setFilters({ includeEmpty: true });
+    expect(api().listSessions).toHaveBeenLastCalledWith({
+      include_subagents: false,
+      include_empty: true,
       only_deleted: true,
     });
   });
 
-  it("empty sessions are hidden by default and requested explicitly", async () => {
-    await useKbStore.getState().refresh();
-    expect(mocks.listSessions).toHaveBeenLastCalledWith({ include_subagents: false });
-    await useKbStore.getState().setIncludeEmpty(true);
-    expect(mocks.listSessions).toHaveBeenLastCalledWith({
-      include_subagents: false,
-      include_empty: true,
-    });
-  });
-
   it("syncNow runs once at a time, refreshes, and reports failures as a result", async () => {
-    mocks.syncNow.mockResolvedValue({ status: "ok", changed_files: 1, errors: [] });
+    api().syncNow.mockResolvedValue({ status: "ok", changed_files: 1, errors: [] });
     const first = useKbStore.getState().syncNow();
     expect(useKbStore.getState().isSyncing).toBe(true);
     expect(await useKbStore.getState().syncNow()).toEqual({ error: "busy" });
     expect((await first).summary?.status).toBe("ok");
-    expect(mocks.syncNow).toHaveBeenCalledTimes(1);
+    expect(api().syncNow).toHaveBeenCalledTimes(1);
     expect(useKbStore.getState().isSyncing).toBe(false);
 
-    mocks.syncNow.mockRejectedValue("boom");
+    api().syncNow.mockRejectedValue("boom");
     expect(await useKbStore.getState().syncNow()).toEqual({ error: "boom" });
     expect(useKbStore.getState().isSyncing).toBe(false);
   });
 
-  it("toggleSchedule uninstalls when installed and installs otherwise", async () => {
-    await useKbStore.getState().refresh();
-    mocks.uninstallSchedule.mockResolvedValue({});
-    expect(await useKbStore.getState().toggleSchedule()).toEqual({});
-    expect(mocks.uninstallSchedule).toHaveBeenCalled();
+  it("backupNow is serialised, refreshes and reports a failure as a result", async () => {
+    api().backupNow.mockResolvedValue({ status: "ok", copied_files: 3, errors: [] });
+    const first = useKbStore.getState().backupNow();
+    expect(await useKbStore.getState().backupNow()).toEqual({ error: "busy" });
+    expect((await first).summary?.copied_files).toBe(3);
+    api().backupNow.mockRejectedValue(new Error("disk gone"));
+    expect(await useKbStore.getState().backupNow()).toEqual({ error: "disk gone" });
+    expect(useKbStore.getState().isBackingUp).toBe(false);
+  });
 
-    mocks.getStatus.mockResolvedValue(
-      overviewFixture({ schedule: { ...overviewFixture().schedule, installed: false, loaded: false } }),
-    );
-    await useKbStore.getState().refresh();
-    mocks.installSchedule.mockRejectedValue(new Error("launchctl failed"));
-    expect(await useKbStore.getState().toggleSchedule()).toEqual({ error: "launchctl failed" });
-    expect(useKbStore.getState().isSchedulePending).toBe(false);
+  it("repairSchedule reinstalls the task and surfaces a failure", async () => {
+    api().installSchedule.mockResolvedValue({});
+    expect(await useKbStore.getState().repairSchedule()).toEqual({});
+    expect(api().installSchedule).toHaveBeenCalledTimes(1);
+    api().installSchedule.mockRejectedValue(new Error("launchctl failed"));
+    expect(await useKbStore.getState().repairSchedule()).toEqual({ error: "launchctl failed" });
+    expect(useKbStore.getState().isRepairing).toBe(false);
+  });
+
+  it("dismissing the schedule notice asks the backend then refreshes", async () => {
+    api().dismissNotice.mockResolvedValue(undefined);
+    await useKbStore.getState().dismissScheduleNotice();
+    expect(api().dismissNotice).toHaveBeenCalledWith("schedule_repaired");
+    expect(api().getStatus).toHaveBeenCalled();
+  });
+
+  it("the wizard and settings open and close without touching the config", () => {
+    useKbStore.getState().openWizard("rerun");
+    expect(useKbStore.getState().wizard).toEqual({ open: true, mode: "rerun" });
+    useKbStore.getState().closeWizard();
+    expect(useKbStore.getState().wizard.open).toBe(false);
+    useKbStore.getState().openSettings();
+    expect(useKbStore.getState().settingsOpen).toBe(true);
+    expect(api().saveConfig).not.toHaveBeenCalled();
+  });
+
+  it("restoring defaults sets the broken file aside, then reloads the state", async () => {
+    api().restoreDefaultConfig.mockResolvedValue("/x/config.json.corrupt-1");
+    api().getConfigState.mockResolvedValue({
+      state: "missing",
+      config: configFixture(),
+      config_path: "/x/config.json",
+    });
+    expect(await useKbStore.getState().restoreDefaultConfig()).toEqual({});
+    expect(useKbStore.getState().configState?.state).toBe("missing");
   });
 });

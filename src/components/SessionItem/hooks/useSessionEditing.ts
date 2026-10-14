@@ -36,10 +36,15 @@ export function useSessionEditing(session: ClaudeSession) {
   const selectedProject = useAppStore((state) => state.selectedProject);
   const loadedSessions = useAppStore((state) => state.sessions);
   const projects = useAppStore((state) => state.projects);
+  // AgentKB's backup view lists backed-up copies: deleting or renaming those
+  // would destroy the backup (and rename would write Codex's own state).
+  const isBackupView = useAppStore(
+    (state) => state.selectedProject?.path.startsWith("kb://") === true,
+  );
   const supportsNativeRename =
-    !isServerReadOnly && providerSupportsNativeRename(providerId);
+    !isServerReadOnly && !isBackupView && providerSupportsNativeRename(providerId);
   const supportsSessionDeletion =
-    !isServerReadOnly && providerSupportsSessionDeletion(providerId);
+    !isServerReadOnly && !isBackupView && providerSupportsSessionDeletion(providerId);
   const supportsRevealInFinder = isAbsolutePath(session.file_path);
   const isArchivedCodexSession =
     providerId === "codex" &&

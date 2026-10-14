@@ -14,6 +14,7 @@ export function useAnalyticsComputed() {
       isSettingsView: analytics.currentView === "settings",
       isBoardView: analytics.currentView === "board",
       isArchiveView: analytics.currentView === "archive",
+      isKbView: analytics.currentView === "kb",
       hasAnyError: !!(
         analytics.projectSummaryError ||
         analytics.sessionComparisonError ||

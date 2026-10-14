@@ -1,17 +1,57 @@
 import { api } from "@/services/api";
 import type {
+  KbBackupPresence,
+  KbBackupSummary,
+  KbConfig,
+  KbConfigStateInfo,
+  KbDataDirReport,
+  KbFacets,
+  KbMigrateCheck,
+  KbMirrorReport,
+  KbMoveOutcome,
   KbOverview,
   KbRunSummary,
+  KbSaveOutcome,
+  KbScheduleEnvReport,
   KbScheduleStatus,
   KbSession,
   KbSessionQuery,
+  KbSourceProbe,
+  KbVolume,
+  KbWizardResult,
 } from "./types";
 
 export const kbApi = {
   getStatus: () => api<KbOverview>("kb_get_status"),
+  getBackupPresence: () => api<KbBackupPresence>("kb_get_backup_presence"),
   syncNow: () => api<KbRunSummary>("kb_sync_now"),
+  backupNow: () => api<KbBackupSummary>("kb_backup_now"),
   listSessions: (filter: KbSessionQuery) =>
     api<KbSession[]>("kb_list_sessions", { filter }),
+  getFacets: () => api<KbFacets>("kb_session_facets"),
+  dismissNotice: (key: "schedule_repaired") => api<void>("kb_dismiss_notice", { key }),
   installSchedule: () => api<KbScheduleStatus>("kb_schedule_install"),
   uninstallSchedule: () => api<KbScheduleStatus>("kb_schedule_uninstall"),
+
+  getConfigState: () => api<KbConfigStateInfo>("kb_get_config_state"),
+  getConfig: () => api<KbConfig>("kb_get_config"),
+  saveConfig: (config: KbConfig) => api<KbSaveOutcome>("kb_save_config", { config }),
+  restoreDefaultConfig: () => api<string>("kb_restore_default_config"),
+
+  probeSources: (config?: KbConfig) =>
+    api<KbSourceProbe[]>("kb_probe_sources", { config: config ?? null }),
+  testDataDir: (path: string) => api<KbDataDirReport>("kb_test_data_dir", { path }),
+  testScheduleEnv: () => api<KbScheduleEnvReport>("kb_test_schedule_env"),
+  listExternalVolumes: () => api<KbVolume[]>("kb_list_external_volumes"),
+  testMirror: (targetDir: string, expectedUuid?: string | null) =>
+    api<KbMirrorReport>("kb_test_mirror", {
+      targetDir,
+      expectedUuid: expectedUuid ?? null,
+    }),
+
+  wizardCommit: (draft: KbConfig) => api<KbWizardResult>("kb_wizard_commit", { draft }),
+  changeDataDirCheck: (newDir: string) =>
+    api<KbMigrateCheck>("kb_change_data_dir_check", { newDir }),
+  changeDataDirRun: (newDir: string, useExisting: boolean) =>
+    api<KbMoveOutcome>("kb_change_data_dir_run", { newDir, useExisting }),
 };

@@ -63,6 +63,11 @@ export function useAnalyticsNavigation() {
     }
   }, [setAnalyticsCurrentView, clearAnalyticsErrors]);
 
+  const switchToKb = useCallback(() => {
+    setAnalyticsCurrentView("kb");
+    clearAnalyticsErrors();
+  }, [setAnalyticsCurrentView, clearAnalyticsErrors]);
+
   const switchToTokenStats = useCallback(async () => {
     const project = useAppStore.getState().selectedProject;
     if (!project) {
@@ -454,6 +459,7 @@ export function useAnalyticsNavigation() {
         await switchToBoard();
         break;
       case "messages":
+      case "kb":
         break;
       case "archive":
         if (!useAppStore.getState().archive.isLoadingArchives) {
@@ -490,6 +496,7 @@ export function useAnalyticsNavigation() {
     switchToSettings,
     switchToBoard,
     switchToArchive,
+    switchToKb,
     setStatsMode,
     setMetricMode,
     refreshAnalytics,

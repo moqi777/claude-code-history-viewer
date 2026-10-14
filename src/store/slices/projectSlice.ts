@@ -561,6 +561,10 @@ export const createProjectSlice: StateCreator<
     if (get().isRefreshingAllConversations) {
       return;
     }
+    // AgentKB backup view: its stand-in project is not in the scan results.
+    if (get().selectedProject?.path.startsWith("kb://")) {
+      return;
+    }
 
     const previouslySelectedProject = get().selectedProject;
     const previouslySelectedSession = get().selectedSession;
@@ -713,6 +717,10 @@ export const createProjectSlice: StateCreator<
    * the caller to handle (`refreshAllConversations` clears it).
    */
   reloadProjectSessions: async (project: ClaudeProject) => {
+    // AgentKB's stand-in project (`kb://…`) has no directory to load from.
+    if (project.path.startsWith("kb://")) {
+      return;
+    }
     const requestId = nextRequestId("selectProject");
     set((state) => ({
       selectedProject: project,

@@ -7,6 +7,8 @@ import {
   FileEdit,
   Columns,
   Search,
+  ArrowLeft,
+  DatabaseBackup,
 } from "lucide-react";
 
 import { TooltipButton } from "@/shared/TooltipButton";
@@ -52,6 +54,8 @@ export const Header = ({ analyticsActions, analyticsComputed }: HeaderProps) => 
 
   const computed = analyticsComputed;
   const isClaudeProject = (selectedProject?.provider ?? "claude") === "claude";
+  // A backed-up session opened from the AgentKB page (stand-in `kb://` project).
+  const isKbProject = selectedProject?.path.startsWith("kb://") === true;
   const isRefreshingConversations =
     isRefreshingAllConversations ||
     isLoadingProjects ||
@@ -193,6 +197,17 @@ export const Header = ({ analyticsActions, analyticsComputed }: HeaderProps) => 
           </div>
         )}
 
+        {isKbProject && (
+          <button
+            type="button"
+            onClick={() => analyticsActions.switchToKb()}
+            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors border border-border/50 text-xs"
+          >
+            <ArrowLeft className="w-3.5 h-3.5" aria-hidden="true" />
+            {t("kb.backToHome")}
+          </button>
+        )}
+
         {/* Search button with shortcut hint */}
         <button
           onClick={() => openModal("globalSearch")}
@@ -215,7 +230,7 @@ export const Header = ({ analyticsActions, analyticsComputed }: HeaderProps) => 
 
         {/* Project views — one segmented control, Messages first so the way
             back from any analytics view is always visible. */}
-        {selectedProject && (
+        {selectedProject && !isKbProject && (
           <div
             role="group"
             aria-label={t("header.views", "Views")}
@@ -279,6 +294,25 @@ export const Header = ({ analyticsActions, analyticsComputed }: HeaderProps) => 
           </div>
         )}
 
+        {/* AgentKB home: status, backups and the backed-up session list. */}
+        {isTauri() && (
+          <button
+            type="button"
+            onClick={() => analyticsActions.switchToKb()}
+            aria-label={t("kb.title")}
+            aria-pressed={computed.isKbView}
+            title={t("kb.title")}
+            className={cn(
+              "p-2 rounded-md transition-colors",
+              computed.isKbView
+                ? "bg-accent/15 text-accent"
+                : "text-muted-foreground hover:text-foreground hover:bg-muted"
+            )}
+          >
+            <DatabaseBackup className="w-4 h-4" aria-hidden="true" />
+          </button>
+        )}
+
         {/* Refresh — rescans projects and reloads the selected session, so a
             second per-session refresh button is redundant. */}
         <TooltipButton
@@ -306,6 +340,9 @@ export const Header = ({ analyticsActions, analyticsComputed }: HeaderProps) => 
             if (!computed.isArchiveView) analyticsActions.switchToArchive();
           }}
           archiveDisabled={!isClaudeProject}
+          onOpenKb={() => {
+            if (!computed.isKbView) analyticsActions.switchToKb();
+          }}
         />
       </div>
     </header>

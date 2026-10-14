@@ -1,2 +1,4 @@
-export { KbPanel } from "./KbPanel";
+export { KbHome } from "./KbHome";
+export { KbRoot } from "./KbRoot";
 export { useKbStore } from "./useKbStore";
+export { isKbProject } from "./openSession";
