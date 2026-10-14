@@ -1,0 +1,9 @@
+docs/agent-kb/P2.1-report.md
+  ai_agent 22-24
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.11",
+  "base_commit_sha": "add120a10a5ea4b6bbfb2658403c5523475cd772",
+  "prompts": {}
+}
