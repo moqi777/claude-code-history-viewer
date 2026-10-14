@@ -1,6 +1,6 @@
 # P1 设计说明：后台收集 + 原样备份 + 会话索引
 
-> 状态：**待 leader 审核**（步骤 1 检查点）。审核通过前不写任何实现代码。
+> 状态：**v2，已按 `P1-design-review.md` 修订（有条件通过），进入实现。** 修订点见第 13 节，正文中对应处标 **[审核 2.x]**。
 > 依据：`PLAN.md` 第 3、6 节；`P1-collect-and-backup.md` 步骤 1 的 7 个问题。
 > 文中的"依据"都是我在本仓库（分支 `agent-kb`，基于 `main` @ `7f48907`，v1.32.0）实际读过的文件和函数。
 
@@ -60,7 +60,7 @@
      canonical_session_dirs.extend(crate::kb::paths::codex_mirror_roots_canonical());
      // 并且把 "No Codex session directories found" 的判断放到 extend 之后
      ```
-     `codex_mirror_roots_canonical()` 返回 `<数据目录>/raw/codex/sessions` 的规范化路径（目录不存在则空 Vec）。
+     `codex_mirror_roots_canonical()` 返回 `<数据目录>/raw/codex/sessions` **和** `<数据目录>/raw/codex/archived_sessions` 两个根的规范化路径（目录不存在的跳过）。**[审核 2.2]** 测试覆盖"首次就在归档目录发现的会话，镜像在 `raw/codex/archived_sessions`，能通过 `validate_session_path`"。
    - `commands/multi_provider.rs::merge_tool_execution_messages` 是私有函数，只在底座入口里用；因为我们走底座入口，**不需要改它**。
 3. **Codex 移入归档目录的镜像位置**：镜像文件始终留在最初被镜像的位置（`raw/codex/sessions/YYYY/MM/DD/...`），只更新 `sessions.source_path`。不会出现 `raw/codex/archived_sessions/` 的第二份副本。代价：镜像不是源目录的"精确镜像"，而是"按首次发现位置"。会话 id 才是身份。（决策点 2）
 4. **前端入口**：`AnalyticsViewType` 里加一个视图 `"kb"`（`src/types/analytics.ts`），点击会话时构造一个合成的 `ClaudeSession` 调 `selectSession`（`messageSlice.ts` 已有合成会话的先例，见 1072–1079 行）。
@@ -101,13 +101,15 @@
 | 文件名取 id | `session_id_from_rollout_filename`（`pub(crate)`） | **能** |
 | 整文件元数据 | `extract_session_info`（`pub(crate)`）：返回 id、cwd、消息数、首末时间、摘要 | **能，但只能用于"整文件重算"**。它会 mmap 整个文件，适合新文件/被重写的文件；追加场景不能用它做增量（见 2.4） |
 | 首个 `session_meta` 规则 | 注释里的 issue #451（fork 会回放源会话的 session_meta，**必须取第一个**） | **必须遵守**，增量解析里同样只取首个 |
-| 标题 | `load_native_title_index(base)`（私有）读 `state_5.sqlite` 的 `threads`，并丢掉 `title == first_user_message` 的行 | 不能直接调。我自己写同样的只读查询（`SQLITE_OPEN_READ_ONLY`），但**不丢** `title == first_user_message` 的行（任务规定标题取 `threads.title`，取不到再回退） |
+| 标题 | `load_native_title_index(base)`（私有）读 `state_5.sqlite` 的 `threads`，并丢掉 `title == first_user_message` 的行 | 不能直接调。我自己写只读查询，但**不丢** `title == first_user_message` 的行（任务规定标题取 `threads.title`，取不到再回退）。**[审核 2.1] 打开方式**：先 `mode=ro`；遇 CANTOPEN 且 `-wal` 不存在时改用 `immutable=1` 重试；两种都失败则回退 `session_index.jsonl` 并在摘要 `errors` 里记一条 `stage="title_db"` 的警告，不让同步失败。底座 `load_native_title_index` 有同样问题，**不修**，记入遗留 |
 | 标题库文件名 | `STATE_DB_FILENAME = "state_5.sqlite"` 写死 | 不复用。自己在 `~/.codex` 下找版本号最大的 `state_*.sqlite`（决策点 4） |
-| 父会话 | 底座没有 | 新写：`session_meta.payload.source` 若是 JSON 对象且含 `parent_thread_id` / `subagent.thread_spawn.parent_thread_id` 则为父会话 id。**我会先在你本机真实数据上确认确切字段路径**（任务文件只说"一段 JSON，带 `parent_thread_id`"）|
+| 父会话 | 底座没有 | 新写。**[审核 3，leader 已核实]**：优先读 `session_meta.payload.parent_thread_id`（顶层），读不到再读 `payload.source.subagent.thread_spawn.parent_thread_id`；普通会话 `source` 是字符串（`cli`、`vscode`），两种类型都要能处理 |
 | 客户端 | 底座没有 | 新写：`originator`（`codex-tui` → cli，`Codex Desktop` → desktop）与 `source`（`cli` / `vscode`）组合；未识别的原样存字符串 |
 | 标题兜底 | `session_index.jsonl`（`{id, thread_name, updated_at}`） | 新写，约 15 行；同一 id 多行取 `updated_at` 最大的 |
 
-**消息数口径**：任务要求"只统计 user 和 assistant"。底座 `extract_session_info` 的 `message_count` 还把 function_call 等也数进去了，**口径不同**，所以不直接用它的 `message_count`。我自己数：`response_item` 且 `payload.type == "message"` 且 `role ∈ {user, assistant}`。其余字段（cwd、id、首末时间）按底座规则。
+**消息数口径**：任务要求"只统计 user 和 assistant"。底座 `extract_session_info` 的 `message_count` 还把 function_call 等也数进去了，**口径不同**，所以不直接用它的 `message_count`。我自己数：`response_item` 且 `payload.type == "message"` 且 `role ∈ {user, assistant}`，**且不是系统注入文本**（见下）。
+
+**[审核 2.5] 系统注入文本过滤**：新增 `kb/index/text.rs::is_injected_user_text(&str) -> bool` 和 `fallback_title(&str) -> Option<String>`，Claude / Codex 共用，第 3 期建消息表复用。规则：`trim_start()` 后以 `<` 开头，或以 `# AGENTS.md` 开头，视为注入；Claude 另外跳过 `isMeta == true` 的行。兜底标题 = 第一条**非注入**用户文本的前 50 个字符（按字符不按字节）。Codex 的消息计数同样排除注入的 user 消息（assistant 不受影响）。其余字段（cwd、id、首末时间）按底座规则。
 
 ### 2.4 增量解析怎么做
 
@@ -179,12 +181,12 @@ if let Some(code) = kb::cli::try_run(&std::env::args().collect::<Vec<_>>()) {
 **方案**：`<数据目录>/kb.lock`，用 `fs4` 的 `try_lock_exclusive()`（macOS/Linux 底层是 `flock(LOCK_EX | LOCK_NB)`，Windows 是 `LockFileEx`）。
 
 - 拿到锁 → 在文件里写 `pid` + 起始时间（仅供诊断显示"谁在收集"）→ 同步 → 文件句柄 drop 时锁释放
-- 拿不到 → 立即返回 `Locked`，不等待
+- 拿不到 → **[审核 2.4 方案 a]** 每 100ms 重试一次，最多 3 秒；仍拿不到才返回 `Locked`（headless 输出 skipped）。这样前端的状态探测与定时同步撞车时，探测只会占锁几毫秒，不会让定时同步丢一轮。GUI 的"立即收集"同样用 3 秒重试
 - **崩溃后的残留锁**：内核在持有进程死亡（含 `kill -9`、断电后重启）时自动释放 flock。所以**没有"残留锁"这个问题，也不需要 pid 探活或超时清理**。锁文件本身可以一直留在磁盘上，里面的旧 pid 只是诊断信息，不参与判断
 - 同进程内（GUI"立即收集" vs 同一进程里别的线程）：flock 是按"打开文件描述"算的，同一进程里**各自 `open` 一次**的两个句柄也会互斥，所以测试"同时运行两次"可以在单进程里用两个线程验证，不需要真起两个进程
 - NFS 等网络盘上 flock 可能不可靠：数据目录若在网络盘，文档里提示（P2 配置页处理），P1 不处理
 
-**GUI 的"立即收集"**：`kb_sync_now` 命令用 `spawn_blocking` 调同一个 `kb::sync::run_once()`；`Locked` 时返回 `{"status":"locked"}`，前端显示"收集中"。前端另有 `kb_sync_status` 命令（只读，轮询 `try_lock` 探测锁是否被占 + 读 `sync_runs` 最后一行），避免按钮状态只靠"我自己点过"。
+**GUI 的"立即收集"**：`kb_sync_now` 命令用 `spawn_blocking` 调同一个 `kb::sync::run_once()`；`Locked` 时返回 `{"status":"locked"}`，前端显示"收集中"。前端另有 `kb_sync_status` 命令（只读，读 `sync_runs` 最后一行与锁文件里的 pid 信息，**不碰锁**，同时使用方案 a 的重试作为双保险），避免按钮状态只靠"我自己点过"。
 
 **数据库并发**：持锁者独占写；GUI 的列表/状态查询用只读连接，WAL 模式下读不被写阻塞；统一设 `busy_timeout = 5000`。
 
@@ -324,7 +326,7 @@ CREATE TABLE sync_runs (
 
 | crate | 版本 | 为什么 | 备选与否决理由 |
 |---|---|---|---|
-| `fs4` | `0.13`（实现时确认能满足 `rust-version = "1.77.2"` 的版本，必要时降） | 跨平台安全封装的文件锁（`try_lock_exclusive`） | `libc::flock`：`Cargo.toml` 设了 `unsafe_code = "deny"`，要为它加 `#[allow(unsafe_code)]`，不值得。`std::fs::File::try_lock`：1.89 才稳定，而 `rust-version` 是 1.77.2，会破坏 MSRV。`fd-lock`：也可以，但 `fs4` 的 API 更直接 |
+| `fs4` | 版本待定：实现时确认满足 `rust-version = "1.77.2"` 的最高版本，**最终版本写入 P1-report** | 跨平台安全封装的文件锁（`try_lock_exclusive`） | `libc::flock`：`Cargo.toml` 设了 `unsafe_code = "deny"`，要为它加 `#[allow(unsafe_code)]`，不值得。`std::fs::File::try_lock`：1.89 才稳定，而 `rust-version` 是 1.77.2，会破坏 MSRV。`fd-lock`：也可以，但 `fs4` 的 API 更直接 |
 | `sha2` | `0.10`（与 Cargo.lock 现有 0.10.9 一致） | 开头 4KB 的哈希，判断文件是否被重写 | 已在依赖树里（Tauri 的传递依赖），**升为直接依赖不增加编译量**。不用 `std::hash`：它不保证稳定，存进数据库的哈希必须跨版本一致 |
 
 **不加**：`plist`（Cargo.lock 里有，但只是传递依赖；我们的 plist 是固定模板，手写 XML + 转义 5 个字符即可，约 30 行）；`sysinfo`（内存峰值用 `/usr/bin/time -l` 在验证时测，不进产品代码）；`flate2`/压缩（本期不压缩）；任何联网相关 crate。
@@ -358,6 +360,7 @@ CREATE TABLE sync_runs (
       - 从 offset 读到最后一个 \n 为止，append → fsync(文件)；新建目录时 fsync(父目录)
       - 同一事务：更新 files.mirror_offset/src_size/src_mtime/head_hash，更新 sessions
 4. 源文件消失 → files.source_status='deleted'，deleted_at=now，镜像不动
+   **[审核 2.3] 顺序**：一次同步先枚举**全部**源文件到内存；再用会话 id 把"旧路径没了 + 新路径出现"配成移动（只更新 source_path）；**只有配不上的**才标记 deleted。整个过程在一次事务里，库里不会出现"先 deleted 再恢复"的中间状态。测试覆盖该顺序
 5. 源文件重新出现（同路径）→ 回到 'present'，按 2/3 正常处理
 ```
 
@@ -378,8 +381,8 @@ CREATE TABLE sync_runs (
 
 ### 8.4 launchd
 
-- Label：`com.claude.history-viewer.kb-sync`（沿用 `tauri.conf.json` 的 `identifier = com.claude.history-viewer`；任务文件写的是 `<应用标识>.kb-sync.plist`）。**注意**：这是底座上游的 identifier；如果你以后要给二开 App 换标识符，这个 Label 会跟着变，已安装的任务需要重装。P2 处理
-- 路径：`~/Library/LaunchAgents/com.claude.history-viewer.kb-sync.plist`
+- **[审核 2.6]** Label 固定为 `io.github.moqi777.agentkb.sync`，是 `kb::schedule::LAUNCHD_LABEL` 常量，**不**跟 `tauri.conf.json` 的 identifier 绑定（避免与同时安装的原版 App 互相覆盖）
+- 路径：`~/Library/LaunchAgents/io.github.moqi777.agentkb.sync.plist`
 - 写入用"临时文件 + rename"原子写
 - 加载：`launchctl bootstrap gui/$(id -u) <plist>`；卸载：`launchctl bootout gui/$(id -u)/<label>`；`status`：`launchctl print gui/$(id -u)/<label>`，解析 `state`、`last exit code`；再结合 `sync_runs` 最后一行给出"上次运行时间和结果"
 - `install` 对已存在的任务**先 bootout 再 bootstrap**（幂等，间隔变更也能生效）
@@ -419,7 +422,9 @@ CREATE TABLE sync_runs (
 
 这是新版 clippy 的新增检查，上游 CI 用的工具链可能较旧。后果：lib 编译不过 clippy，**依赖 lib 的其余目标（bin、集成测试）被一并挡住，其真实状态未被检出**，所以"clippy 全绿"这条在 P1 里最多做到"相对基线无新增"。
 
-处理建议（请你定）：
+**[审核] 已决定选 B**：单独一个提交只改这两处注释（已完成，提交 `794ed00`），P1 门槛为"clippy 全绿"。下面保留原分析：
+
+原处理建议：
 - A. 不碰，P1 验收时用"新增 0 条 clippy 告警"替代（我会对比 `kb/` 下的告警数，并在本地临时给 `zcode.rs` 打补丁验证后还原，以便看到被挡住的目标）
 - B. 单独开一个只改这两处注释的小提交（改动 2 行，纯文档注释），让 clippy 在我们的分支上能全绿。这会多一个和上游潜在冲突的点，但上游大概率也会很快修
 
@@ -452,11 +457,28 @@ CREATE TABLE sync_runs (
 
 ## 12. 需要你确认的清单（回复时可直接写"同意"或指出修改）
 
-- [ ] **clippy 基线（第 9 节）**：选 A 还是 B
-- [ ] **决策点 1**：P1 就支持 Codex `.jsonl.zst`（整文件复制）
-- [ ] **决策点 2**：Codex 会话被归档后，镜像留在原位置，不新增 `archived_sessions` 副本
-- [ ] **决策点 3**：配置/HOME 走 `crate::utils::{home_dir,config_dir}`
-- [ ] **决策点 4**：自己找最新的 `state_*.sqlite`，不动底座常量
-- [ ] 展示方案采用 A（`kb.db` 驱动列表 + `codex.rs` 加白名单，Claude 零改动）
-- [ ] 引入 `fs4`、`sha2` 两个直接依赖
-- [ ] `--kb-reindex` 不进 P1
+- [x] **clippy 基线（第 9 节）**：选 A 还是 B
+- [x] **决策点 1**：P1 就支持 Codex `.jsonl.zst`（整文件复制）
+- [x] **决策点 2**：Codex 会话被归档后，镜像留在原位置，不新增 `archived_sessions` 副本
+- [x] **决策点 3**：配置/HOME 走 `crate::utils::{home_dir,config_dir}`
+- [x] **决策点 4**：自己找最新的 `state_*.sqlite`，不动底座常量
+- [x] 展示方案采用 A（`kb.db` 驱动列表 + `codex.rs` 加白名单，Claude 零改动）
+- [x] 引入 `fs4`、`sha2` 两个直接依赖
+- [x] `--kb-reindex` 不进 P1
+
+---
+
+## 13. 审核意见落实（v2 修订记录）
+
+| 审核项 | 落实 |
+|---|---|
+| 1 clippy 选 B | 已提交 `794ed00`，仅 `zcode.rs` 2 处文档注释；`cargo clippy --all-targets --all-features -- -D warnings` 在 `dist/` 存在时全绿 |
+| 1 其余决定 | `.jsonl.zst` 整文件复制；归档后镜像留原位；`crate::utils::{home_dir,config_dir}`；自找最新 `state_*.sqlite`；展示方案 A；`fs4`/`sha2`；不做 `--kb-reindex` |
+| 2.1 标题库打开 | 第 2.3 节：`mode=ro` → 无 `-wal` 时 `immutable=1` → 回退 `session_index.jsonl` + `errors` 警告；单测：WAL 库删掉 `-wal`/`-shm` 仍能读标题。底座 `load_native_title_index` 同问题，不修，入遗留 |
+| 2.2 白名单两个根 | 第 1.3 节；测试覆盖归档目录首发现的会话 |
+| 2.3 先识别移动再判删除 | 第 8.2 节；测试覆盖顺序 |
+| 2.4 锁重试 | 第 4 节：方案 a，3 秒 / 100ms 重试；状态查询不碰锁 |
+| 2.5 兜底标题 | 第 2.3 节：`is_injected_user_text` + `fallback_title`，两个来源共用，Codex/Claude 计数排除注入消息 |
+| 2.6 launchd Label | 第 8.4 节：`io.github.moqi777.agentkb.sync` 常量 |
+| 3 Codex 父会话字段 | 第 2.3 节表格已按 leader 核实的字段路径更新 |
+| 4 注意事项 | 超大行：首次全量记录最长行，>100MB 停下汇报；前端入口位置在报告中说明；`pnpm build` 写入报告验证命令 |
