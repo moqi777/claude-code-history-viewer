@@ -2,7 +2,7 @@
 //! each changed file → refresh Codex titles → record the run.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use rusqlite::Connection;
@@ -17,6 +17,7 @@ use super::lock::SyncLock;
 use super::log::{self, SyncLog};
 use super::mirror::{self, Decision, Observed};
 use super::paths::DataPaths;
+use super::progress::{Progress, ProgressSink};
 use super::Source;
 
 /// A sync that meets a held lock keeps retrying this long before it gives up,
@@ -32,20 +33,43 @@ const INDEXER_VERSION_KEY: &str = "indexer_version";
 /// Warn (in the log) about unexpectedly huge single lines.
 const HUGE_LINE_BYTES: u64 = 100 * 1024 * 1024;
 
+/// The external backup disk, as recorded when it was chosen.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MirrorTarget {
+    pub target_dir: PathBuf,
+    pub volume_uuid: String,
+}
+
 #[derive(Debug, Clone)]
 pub struct KbEnv {
     pub data: DataPaths,
     pub roots: SourceRoots,
     pub exclude_prefixes: Vec<String>,
+    /// `Some` only when the disk backup is enabled and fully configured.
+    pub mirror: Option<MirrorTarget>,
+    pub progress: ProgressSink,
 }
 
 impl KbEnv {
     pub fn from_config(config: &KbConfig) -> Self {
+        let mirror = config.mirror.enabled.then(|| {
+            Some(MirrorTarget {
+                target_dir: config.mirror.target_dir.clone()?,
+                volume_uuid: config.mirror.volume_uuid.clone()?,
+            })
+        });
         Self {
             data: DataPaths::new(config.data_dir.clone()),
             roots: SourceRoots::resolve(config),
             exclude_prefixes: config.exclude_prefixes.clone(),
+            mirror: mirror.flatten(),
+            progress: ProgressSink::default(),
         }
+    }
+
+    pub fn with_progress(mut self, progress: ProgressSink) -> Self {
+        self.progress = progress;
+        self
     }
 }
 
@@ -85,6 +109,9 @@ pub struct Summary {
     pub bad_lines: u64,
     pub longest_line_bytes: u64,
     pub duration_ms: u64,
+    /// Present when a backup disk is configured.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub backup: Option<super::backup::BackupSummary>,
 }
 
 impl Summary {
@@ -120,6 +147,13 @@ pub fn run_sync(env: &KbEnv, trigger: &str) -> Result<Summary, String> {
         ..Summary::default()
     };
     let result = collect(env, &conn, &log, &mut summary);
+    // Collection first, so the backup copies what was just collected. A backup
+    // problem is reported but never turns a good collection into a failed one.
+    if result.is_ok() && env.mirror.is_some() {
+        let backup = super::backup::run(env, &conn, &log, &super::volume::MacQuery);
+        summary.errors.extend(backup.errors.iter().cloned());
+        summary.backup = Some(backup);
+    }
     summary.duration_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
     match result {
         Ok(()) => {
@@ -173,7 +207,18 @@ fn collect(
     let by_path: HashMap<&str, &FileRow> =
         rows.iter().map(|r| (r.source_path.as_str(), r)).collect();
 
-    for file in &discovery.files {
+    let total = discovery.files.len() as u64;
+    for (index, file) in discovery.files.iter().enumerate() {
+        if index % 25 == 0 {
+            env.progress.emit(&Progress {
+                op: "sync".into(),
+                phase: "collect".into(),
+                done: index as u64,
+                total,
+                bytes_done: summary.copied_bytes,
+                bytes_total: 0,
+            });
+        }
         let prior = by_path.get(file.path_str.as_str()).copied();
         if let Err(message) = process_file(env, conn, file, prior, log, summary) {
             log.line(&format!("ERROR {}: {message}", file.path_str));
@@ -597,6 +642,8 @@ mod tests {
                     codex: Some(codex.clone()),
                 },
                 exclude_prefixes: vec![],
+                mirror: None,
+                progress: ProgressSink::default(),
             };
             Self {
                 _dir: dir,

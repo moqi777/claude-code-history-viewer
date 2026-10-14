@@ -6,19 +6,27 @@
 //! binary runs both with a window and headless (`--kb-sync`, `--kb-schedule`);
 //! see [`cli::try_run`].
 
+pub mod backup;
 pub mod cli;
 pub mod commands;
 pub mod config;
 pub mod db;
 pub mod discover;
+pub mod fsutil;
 pub mod index;
 pub mod lock;
 pub mod log;
 pub mod mirror;
 pub mod paths;
+pub mod progress;
 pub mod schedule;
 pub mod status;
 pub mod sync;
+pub mod volume;
+
+/// `AgentKB`'s own version, independent of the base viewer's `package.json`
+/// version (which stays in step with upstream). Phase N ships `0.N.0`.
+pub const AGENTKB_VERSION: &str = "0.2.0";
 
 /// Where a session file came from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
