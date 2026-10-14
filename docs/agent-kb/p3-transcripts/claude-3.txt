@@ -1,0 +1,35 @@
+SESSION c9b96a70-03a7-4b08-b3de-96751411dfc1
+USER: 以前有没有碰到过 Dubbo 提示找不到可用 provider 的报错？当时是怎么查的？
+[TOOL_USE] {"skill": "agentkb", "args": "Dubbo 找不到可用 provider 报错 (No provider available) 当时怎么排查的"} [Skill]
+[TOOL_RESULT] Launching skill: agentkb
+[TOOL_USE] {"command": "/Users/mo7/Dev/JavaCode/claude-code-history-viewer/src-tauri/target/release/bundle/macos/AgentKB.app/Contents/MacOS/AgentKB --kb-search \"Dubbo No provider available\"", "description": "Search past sessions for Dubbo provider error"} [Bash]
+[TOOL_RESULT] {"agentkb_marker":"agentkb-result-v1","query":"Dubbo No provider available","tokens":["dubbo","no","provider","available"],"mode_used":"any","read_mode":"normal","data_as_of":"2026-10-14T17:41:58.593586+00:00","matched_sessions":33,"returne
+[ASSISTANT] Two relevant sessions. Let me read their context.
+[TOOL_USE] {"command": "/Users/mo7/Dev/JavaCode/claude-code-history-viewer/src-tauri/target/release/bundle/macos/AgentKB.app/Contents/MacOS/AgentKB --kb-show codex:019ecb1b-195b-7140-a15e-0635caa7f68b --around 337", "description": "Show context of first Dubbo session"} [Bash]
+[TOOL_RESULT] {"agentkb_marker":"agentkb-result-v1","read_mode":"normal","data_as_of":"2026-10-14T17:41:58.593586+00:00","session":{"source":"codex","session_id":"019ecb1b-195b-7140-a15e-0635caa7f68b","title":"/Users/mo7/Dev/JavaCode/ai-fullstack-assessm
+[TOOL_USE] {"command": "/Users/mo7/Dev/JavaCode/claude-code-history-viewer/src-tauri/target/release/bundle/macos/AgentKB.app/Contents/MacOS/AgentKB --kb-show codex:019ef2b4-4112-7613-ba87-748059d14d11 --around 29", "description": "Show context of second Dubbo session"} [Bash]
+[TOOL_RESULT] {"agentkb_marker":"agentkb-result-v1","read_mode":"normal","data_as_of":"2026-10-14T17:41:58.593586+00:00","session":{"source":"codex","session_id":"019ef2b4-4112-7613-ba87-748059d14d11","title":"org.apache.dubbo.rpc.RpcException: Failed to
+[TOOL_USE] {"command": "/Users/mo7/Dev/JavaCode/claude-code-history-viewer/src-tauri/target/release/bundle/macos/AgentKB.app/Contents/MacOS/AgentKB --kb-show codex:019ef301-9ea9-7842-bd7d-e9739d8027dd --around 336", "description": "Show context of third related session"} [Bash]
+[TOOL_RESULT] {"agentkb_marker":"agentkb-result-v1","read_mode":"normal","data_as_of":"2026-10-14T17:41:58.593586+00:00","session":{"source":"codex","session_id":"019ef301-9ea9-7842-bd7d-e9739d8027dd","title":"A previous agent produced the plan below to 
+[ASSISTANT] 碰到过，都是 2026 年 6 月在 `ai-fullstack-assessment-l1` 项目里，用 Codex 做的。报错都是低代码 BFF 用 Dubbo GenericService 调 `RelativePartyRpc` 时出的 `No provider available`。
+
+**结论：** 这个报错里有一个关键点，`invokers: 1[...]` 和 `validInvokers: 1[...]` 都有实例。这说明应用已经注册到 Eureka，但 consumer 发起调用时，没有把这个接口当成可用 provider。问题出在 RPC 发现和路由这一层，跟业务方法和入参无关（GenericService 的入参本来就是数组）。
+
+**当时的排查顺序：**
+
+1. **本地服务有没有注册出去。** 本地配置里原来是 `eureka.client.registerWithEureka=false`，BFF 当然找不到。改成 `true` 以后还核对了三件事：
+   - `appGroupName` 写成和 BFF 日志一致的 `LOCALRUN`；
+   - 注册出去的 IP 要是 BFF 能访问的真实内网 IP，不能是 `198.18.0.1` 这种代理网卡地址；
+   - 固定 `server.port=8080`。
+2. **路由和分组是否匹配。** BFF 的 RPC 节点要指定 appGroup 为 `LOCALRUN`。另外工程里配了 `rpc.router=dev,group`，实例可能在这一步被分组或环境路由筛掉。
+3. **接口有没有真的暴露。** 在启动日志里搜 `RelativePartyRpc`、`export`、`register`、`metadata`。项目用的是 `@EnableEsignRpc` + `@RpcApiImpl`，可能只暴露了 Mandarin HTTP 桥，没有向 nacos `dubbo-metadata` 上报 Dubbo 接口元数据。改完接口也要 `mvn compile` 再重启，必要时在 BFF 平台上刷新 RPC 元数据。
+4. **网络能不能通。** 确认 BFF 所在机器能访问到本机 `IP:8080`。
+5. **`rpc-route-ip` 请求头。** 后来发现这个环境里，这个头的值实际要填节点实例 ID，不是 IP，比如 `726e99dc-...`。最后一次是把这个头去掉不传，准备复测。
+
+**还没定论的地方：** 记录里没有看到最终是哪一条解决的。当时还整理了一段问题打算发到群里问中间件同事，核心是：本地 Mandarin provider 能不能被 BFF 的 Dubbo GenericService 直接调用，还是必须部署到测试环境。这段问题在会话 1 里。
+
+**出处：**
+- 会话 1：「你是后端会话」（2026-06-15 ~ 06-18，ai-fullstack-assessment-l1）：`codex resume 019ecb1b-195b-7140-a15e-0635caa7f68b`
+- 会话 2：「org.apache.dubbo.rpc.RpcException … 这是什么问题」（2026-06-23）：`codex resume 019ef2b4-4112-7613-ba87-748059d14d11`
+- 会话 3：「相对方页面 UI 自动化阻塞修复」，`rpc-route-ip` 那部分（2026-06-23 ~ 0
+DENIALS: []

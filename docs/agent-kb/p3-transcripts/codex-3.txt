@@ -1,0 +1,24 @@
+SANDBOX read-only
+USER: 以前评审过 fastjson 升级的改动，发现过哪些空指针风险？
+THREAD 01a13b85-0b7a-7dd0-990f-58513367c08b
+[ASSISTANT] 我会先检索历史会话里关于 fastjson 升级评审的记录，再整理其中提到的空指针风险和对应代码场景。
+[CMD] /bin/zsh -lc 'cat /Users/mo7/Dev/JavaCode/claude-code-history-viewer/scratch/p3/agent-test/P3X/.agents/skills/agentkb/SKILL.md' | exit 0 | --- name: agentkb description: Search the user's past Claude Code and Codex conversations (backed up by AgentKB) to recall how something was solved or decided before. Use when the user says "之前 / 上次 /
+[CMD] /bin/zsh -lc '/Users/mo7/Dev/JavaCode/claude-code-history-viewer/src-tauri/target/release/bundle/macos/AgentKB.app/Contents/MacOS/AgentKB --kb-search "fastjson 升级" --limit 5' | exit 0 | {"agentkb_marker":"agentkb-result-v1","query":"fastjson 升级","tokens":["fastjson","升级"],"mode_used":"all","read_mode":"normal","data_as_of":"2026-10-14T17:41:58.593586+00:00","matched_sessions":9,"retu
+[CMD] /bin/zsh -lc '/Users/mo7/Dev/JavaCode/claude-code-history-viewer/src-tauri/target/release/bundle/macos/AgentKB.app/Contents/MacOS/AgentKB --kb-search "fastjson 空指针" --limit 5' | exit 0 | {"agentkb_marker":"agentkb-result-v1","query":"fastjson 空指针","tokens":["fastjson","空","指针"],"mode_used":"any","read_mode":"normal","data_as_of":"2026-10-14T17:41:58.593586+00:00","matched_sessions":21
+[CMD] /bin/zsh -lc '/Users/mo7/Dev/JavaCode/claude-code-history-viewer/src-tauri/target/release/bundle/macos/AgentKB.app/Contents/MacOS/AgentKB --kb-search "JSON升级 NPE" --limit 5' | exit 0 | {"agentkb_marker":"agentkb-result-v1","query":"JSON升级 NPE","tokens":["json","升级","npe"],"mode_used":"any","read_mode":"normal","data_as_of":"2026-10-14T17:41:58.593586+00:00","matched_sessions":13,"re
+[CMD] /bin/zsh -lc '/Users/mo7/Dev/JavaCode/claude-code-history-viewer/src-tauri/target/release/bundle/macos/AgentKB.app/Contents/MacOS/AgentKB --kb-show codex:01a03daf-9dee-78b1-bbb4-4d10b2196ccc --around 12' | exit 0 | {"agentkb_marker":"agentkb-result-v1","read_mode":"normal","data_as_of":"2026-10-14T17:41:58.593586+00:00","session":{"source":"codex","session_id":"01a03daf-9dee-78b1-bbb4-4d10b2196ccc","title":"# 任务
+[CMD] /bin/zsh -lc '/Users/mo7/Dev/JavaCode/claude-code-history-viewer/src-tauri/target/release/bundle/macos/AgentKB.app/Contents/MacOS/AgentKB --kb-show codex:01a03daf-9dee-78b1-bbb4-4d10b2196ccc --around 68' | exit 0 | {"agentkb_marker":"agentkb-result-v1","read_mode":"normal","data_as_of":"2026-10-14T17:41:58.593586+00:00","session":{"source":"codex","session_id":"01a03daf-9dee-78b1-bbb4-4d10b2196ccc","title":"# 任务
+[CMD] /bin/zsh -lc '/Users/mo7/Dev/JavaCode/claude-code-history-viewer/src-tauri/target/release/bundle/macos/AgentKB.app/Contents/MacOS/AgentKB --kb-search "DeprecatedLoanManagerImpl JsonUtil" --limit 5' | exit 0 | {"agentkb_marker":"agentkb-result-v1","query":"DeprecatedLoanManagerImpl JsonUtil","tokens":["deprecatedloanmanagerimpl","deprecated","loan","manager","impl","jsonutil","json","util"],"mode_used":"all
+[CMD] /bin/zsh -lc '/Users/mo7/Dev/JavaCode/claude-code-history-viewer/src-tauri/target/release/bundle/macos/AgentKB.app/Contents/MacOS/AgentKB --kb-search "SignFlowManagerImpl JsonUtil" --limit 5' | exit 0 | {"agentkb_marker":"agentkb-result-v1","query":"SignFlowManagerImpl JsonUtil","tokens":["signflowmanagerimpl","sign","flow","manager","impl","jsonutil","json","util"],"mode_used":"all","read_mode":"nor
+[CMD] /bin/zsh -lc '/Users/mo7/Dev/JavaCode/claude-code-history-viewer/src-tauri/target/release/bundle/macos/AgentKB.app/Contents/MacOS/AgentKB --kb-search "LoanOrderServiceImpl JsonUtil" --limit 5' | exit 0 | {"agentkb_marker":"agentkb-result-v1","query":"LoanOrderServiceImpl JsonUtil","tokens":["loanorderserviceimpl","loan","order","service","impl","jsonutil","json","util"],"mode_used":"all","read_mode":"
+[CMD] /bin/zsh -lc '/Users/mo7/Dev/JavaCode/claude-code-history-viewer/src-tauri/target/release/bundle/macos/AgentKB.app/Contents/MacOS/AgentKB --kb-search "立刻解引用 空白值 null" --limit 10' | exit 0 | {"agentkb_marker":"agentkb-result-v1","query":"立刻解引用 空白值 null","tokens":["立刻","解","引用","空白","值","null"],"mode_used":"any","read_mode":"normal","data_as_of":"2026-10-14T17:41:58.593586+00:00","matched_
+[ASSISTANT] 以前那次评审里，确认的空指针风险主要来自新增的 `JsonUtil`：
+
+- `JsonUtil.parseObject(...)` 将 fastjson2 对纯空白字符串抛出的异常改成返回 `null`。
+- `SignFlowManagerImpl` 有路径拿到结果后直接访问字段；如果数据库或配置值是空白，会变成 NPE。
+- `LoanOrderServiceImpl` 的部分解析调用也存在同样问题，返回值随后被直接解引用。
+- 其余调用点大多有非空校验、断言或异常兜底，未确认有同等级的可达 NPE。
+
+当时的结论是：不能只把空白解析统一改成 `null`，应逐个调用方补非空处理，或让必填数据继续抛出明确异常。
+
+出处：会话“Code Review 一次 fastjson 大版本升级的改动”，2026-08-26，项目 `clm`。可用 `codex resume 01a03daf-9dee-78b1-bbb4-4d10b2196ccc` 恢复。

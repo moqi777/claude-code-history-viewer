@@ -42,7 +42,6 @@ CREATE VIRTUAL TABLE messages_fts USING fts5(
   content='', contentless_delete=1,         -- 只存倒排，原文在 messages.text
   tokenize='unicode61 remove_diacritics 0'
 );
-ALTER TABLE sessions ADD COLUMN kb_turns INTEGER NOT NULL DEFAULT 0;  -- 被「自己搜自己」规则排除的轮数，仅诊断
 ```
 
 - `messages` 与 `sessions` 通过 `file_id` 关联（`sessions.file_id` 本来就 UNIQUE，见 `db.rs` v1），`files` 保存游标，三者一一对应。会话元数据（标题、项目、客户端、时间、源文件状态）**不复制**，查询时 JOIN `sessions`/`files`，所以 Codex 原生标题刷新（`sync.rs::refresh_codex_titles`）、源文件被删（`source_status`）自动反映到搜索结果。
@@ -448,3 +447,16 @@ allowed-tools: Bash(/Applications/AgentKB.app/Contents/MacOS/AgentKB --kb-search
 - 索引依赖抽取规则，Claude/Codex 日志格式变化时抽取会漏（未知类型已有计数，`unknown_types`）；`INDEXER_VERSION` 机制保证修规则后一次重建。
 - 测试会话会被 AgentKB 收进真实库（6 节开头的说明）；我不会删除它们。
 - 【审核修订】第一次在真实 `~/AgentKB` 上建索引之前先备份 `kb.db`，并在报告里写真实库的索引大小和耗时；Agent 真实测试沿用本文第 6 节的做法（项目级 skill / 临时 `CODEX_HOME`），不往真实 `~/.claude/skills`、`~/.codex/skills` 装东西。
+
+## 12. 实现中相对设计的调整（实现完成后补记）
+
+| # | 调整 | 原因 |
+|---|---|---|
+| 1 | 去掉了设计里的 `sessions.kb_turns` 诊断列 | 没有用到，少一个迁移 |
+| 2 | `INDEXER_VERSION` 最终是 `"5"`（设计写的是 `"4"`） | 真跑 Codex 后发现：Codex 的 Agent 先 `cat …/skills/agentkb/SKILL.md` 才加载技能，这条命令在状态机里被当成「真正的工具调用」，使纯问答轮被整轮索引。`is_kb_command` 现在把读取 `skills/agentkb/SKILL.md` 也算查询本身，抽取规则变了，所以升版本强制重建 |
+| 3 | 重建索引时先 `DROP` 再重建 `messages_fts` | 实测 FTS5 的 contentless 表在删除行后不归还统计信息，每重建一次 bm25 分数就漂移几个百分点（排名不变，分数变）。现在 `reindex_if_outdated` 先 `db::reset_message_index`，重建后的分数与第一次一致（真实数据上连续两次重建分数逐位相同） |
+| 4 | 新增 `AGENTKB_DATA_DIR` 环境变量（仅 `--kb-search` / `--kb-show` 读）和 `--kb-skill-print claude\|codex` | 前者让测试和「搜索一份恢复出来的备份」不必改配置；后者打印 App 将要安装的 SKILL.md（只打印，不写任何文件），方便核对和测试。安装/卸载仍然只有 App 里点按钮这一条路，没有加命令行入口 |
+| 5 | 向导里的技能一步放在**完成页**（首次收集成功之后），不是第 5 个编号步骤 | 编号步骤里「确认」才是提交点；技能与配置无关，放在最后一页最符合「向导最后加一页、可跳过」，也不会因为用户没装就拖住提交 |
+| 6 | 首页原有的「搜索标题」输入框被全文搜索框取代 | 两个搜索框并存会让人分不清；标题本来就来自第一条消息，全文搜索已覆盖（删除了 `kb.filters.search` 键） |
+| 7 | `--kb-show` 与 `--kb-search` 一样，失败时自动重试一次（间隔 150 ms） | 审核意见 1：immutable 模式下出错要重试 |
+| 8 | 子 Agent 会话默认包含并 ×0.8 | 与设计 2.3 第 5 点一致；GUI 里沿用「包含子代理会话」复选框（默认不含），CLI 用 `--no-subagents` 排除 |

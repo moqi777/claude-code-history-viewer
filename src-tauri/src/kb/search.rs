@@ -1015,8 +1015,15 @@ pub fn show(index: &Index, params: &ShowParams) -> Result<ShowResponse, SearchEr
 }
 
 pub fn show_in(data: &DataPaths, params: &ShowParams) -> Result<ShowResponse, SearchError> {
-    let index = Index::open(data)?;
-    show(&index, params)
+    let attempt = || Index::open(data).and_then(|index| show(&index, params));
+    match attempt() {
+        // Same single retry as `search_in`: a writer may have started in between.
+        Err(SearchError::Other(_) | SearchError::NotReady(_)) => {
+            std::thread::sleep(Duration::from_millis(150));
+            attempt()
+        }
+        other => other,
+    }
 }
 
 // ---------------------------------------------------------------------------
