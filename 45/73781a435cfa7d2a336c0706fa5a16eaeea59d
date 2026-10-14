@@ -1,0 +1,30 @@
+docs/agent-kb/P3-design-review.md
+  s_d58d4b162ae7dc::t_6494090c711f0d 1-44
+docs/agent-kb/P3-design.md
+  s_cca7c29607588b::t_a54c90a42ed5f7 3,16-19
+  ai_agent 181,271,275-289,291-305,348,377,430,432,450
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.11",
+  "base_commit_sha": "4573781a435cfa7d2a336c0706fa5a16eaeea59d",
+  "prompts": {},
+  "sessions": {
+    "s_cca7c29607588b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ef228e77-8d37-45df-ab42-2d4c28a0387d",
+        "model": "claude-sonnet-5-5"
+      },
+      "human_author": "moqing <moqing@tsign.cn>"
+    },
+    "s_d58d4b162ae7dc": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "c4c081c6-aaf3-412b-8f62-de2a98c156fc",
+        "model": "unknown"
+      },
+      "human_author": "moqing <moqing@tsign.cn>"
+    }
+  }
+}
