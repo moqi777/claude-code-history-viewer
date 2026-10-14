@@ -143,7 +143,7 @@ export const KbHome = () => {
             <DatabaseBackup className="h-5 w-5" aria-hidden="true" />
             {t("kb.title")}
           </h2>
-          <p className="text-sm text-muted-foreground">{t("kb.description")}</p>
+          <p className="text-sm text-muted-foreground [text-wrap:balance]">{t("kb.description")}</p>
           {overview != null && (
             <p className="text-xs text-muted-foreground">
               {t("kb.version", { version: overview.agentkb_version, base: overview.base_version })}
