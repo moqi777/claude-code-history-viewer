@@ -50,4 +50,5 @@ export const volumeFixture = {
   name: "Backup1",
   internal: false,
   fs_type: "exfat",
+  writable: true,
 };

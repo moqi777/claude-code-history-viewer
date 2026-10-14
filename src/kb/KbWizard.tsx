@@ -10,7 +10,9 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui";
+import { supportedLanguages, type SupportedLanguage } from "@/i18n";
 import { useAppStore } from "@/store/useAppStore";
+import { useLanguageStore } from "@/store/useLanguageStore";
 import { kbApi } from "./api";
 import { DataDirField, IntervalField, MirrorField, SourcesField, VerdictLine } from "./fields";
 import { formatBytes } from "./format";
@@ -29,6 +31,33 @@ type Phase =
   | { kind: "failed"; message: string };
 
 type WizardOutcome = KbWizardResult;
+
+/** Language names are shown in their own language, so the picker needs no translation. */
+const LanguagePicker = () => {
+  const { t } = useTranslation();
+  const language = useLanguageStore((s) => s.language);
+  const setLanguage = useLanguageStore((s) => s.setLanguage);
+  return (
+    <div
+      className="flex flex-wrap items-center gap-2"
+      role="group"
+      aria-label={t("common.settings.language.title")}
+    >
+      <span className="text-sm text-muted-foreground">{t("common.settings.language.title")}</span>
+      {Object.entries(supportedLanguages).map(([code, name]) => (
+        <Button
+          key={code}
+          size="sm"
+          variant={language === code ? "default" : "outline"}
+          aria-pressed={language === code}
+          onClick={() => void setLanguage(code as SupportedLanguage)}
+        >
+          {name}
+        </Button>
+      ))}
+    </div>
+  );
+};
 
 const errorText = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 
@@ -135,6 +164,7 @@ export const KbWizard = () => {
             {step === "sources" && (
               <>
                 <p className="text-sm">{t("kb.wizard.welcome")}</p>
+                <LanguagePicker />
                 <SourcesField draft={draft} onChange={setDraft} />
               </>
             )}

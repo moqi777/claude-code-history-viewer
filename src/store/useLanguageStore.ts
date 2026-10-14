@@ -15,8 +15,9 @@ interface LanguageStore {
 
 const getSupportedLanguage = (lang: string): SupportedLanguage => {
   if (lang.startsWith("zh")) {
-    const region = lang.split("-")[1]?.toUpperCase();
-    if (region === "TW" || region === "HK" || region === "MO") {
+    const parts = lang.toUpperCase().split("-").slice(1);
+    // macOS reports `zh-Hant-TW` / `zh-Hans-CN`: script and region both count.
+    if (parts.some((p) => p === "HANT" || p === "TW" || p === "HK" || p === "MO")) {
       return "zh-TW";
     }
     return "zh-CN";
@@ -58,17 +59,20 @@ export const useLanguageStore = create<LanguageStore>((set, get) => ({
     try {
       let language: SupportedLanguage | null = null;
 
-      const i18nextLang = localStorage.getItem("i18nextLng");
-      if (i18nextLang) {
-        language = getSupportedLanguage(i18nextLang);
+      // The saved setting wins. localStorage's `i18nextLng` is only trustworthy
+      // outside Tauri: the detector writes the WebView's own locale there on
+      // first start, which would hide the system language.
+      try {
+        const store = await storageAdapter.load("settings.json", { defaults: {}, autoSave: true });
+        language = (await store.get("language")) as SupportedLanguage | null;
+      } catch (e) {
+        console.log("Store not available:", e);
       }
 
-      if (!language) {
-        try {
-          const store = await storageAdapter.load("settings.json", { defaults: {}, autoSave: true });
-          language = (await store.get("language")) as SupportedLanguage | null;
-        } catch (e) {
-          console.log("Store not available:", e);
+      if (!language && !isTauri()) {
+        const i18nextLang = localStorage.getItem("i18nextLng");
+        if (i18nextLang) {
+          language = getSupportedLanguage(i18nextLang);
         }
       }
 

@@ -172,15 +172,19 @@ export const DataDirField = ({
     onReport?.(result);
   }, [result, onReport]);
 
-  // Test straight away (and again when the path changes): the wizard shows the
-  // "existing data" note without the user having to ask.
+  // Test straight away (and again when the path changes): the verdict line
+  // already announces existing data without the user having to ask.
   const lastTested = useRef<string | null>(null);
   useEffect(() => {
     if (lastTested.current === value) return;
     lastTested.current = value;
     reset();
     const timer = window.setTimeout(() => void test(), 300);
-    return () => window.clearTimeout(timer);
+    return () => {
+      window.clearTimeout(timer);
+      // A cancelled timer must not count as "already tested" (StrictMode remount).
+      lastTested.current = null;
+    };
   }, [value, test, reset]);
 
   const choose = async () => {
@@ -208,11 +212,6 @@ export const DataDirField = ({
         </Button>
       </div>
       <VerdictLine verdict={verdict} busy={busy && verdict == null} />
-      {result?.existing != null && (
-        <p className="text-sm text-success" role="status">
-          {t("kb.field.existingDataNote")}
-        </p>
-      )}
       {children}
     </Field>
   );
@@ -236,7 +235,10 @@ export const IntervalField = ({
   const { t } = useTranslation();
   const minutes = draft.interval_secs / 60;
   const isPreset = (PRESET_MINUTES as readonly number[]).includes(minutes);
-  const [custom, setCustom] = useState(!isPreset);
+  // Derived, not copied from the first render: the draft may still be loading
+  // when this mounts, and 5/10/15 must always select their own button.
+  const [customChosen, setCustom] = useState(false);
+  const custom = customChosen || !isPreset;
   const [customText, setCustomText] = useState(String(Math.round(minutes)));
   const { verdict, busy, test } = useTest(
     () => kbApi.testScheduleEnv(),

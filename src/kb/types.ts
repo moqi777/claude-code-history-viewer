@@ -116,6 +116,7 @@ export interface KbVolume {
   name: string | null;
   internal: boolean;
   fs_type: string;
+  writable: boolean;
 }
 
 export type KbUnsupportedReason =

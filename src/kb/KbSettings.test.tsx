@@ -84,6 +84,18 @@ describe("KbSettings", () => {
     await waitFor(() => expect(save().disabled).toBe(true));
   });
 
+  it.each([5, 10, 15])("an interval of %i minutes selects its own preset button, not 'custom'", async (minutes) => {
+    await openSettings({ ...configFixture(), interval_secs: minutes * 60 });
+    const preset = screen.getByRole("button", { name: `kb.field.minutes {"count":${minutes}}` });
+    expect(preset.getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByRole("button", { name: "kb.field.custom" }).getAttribute("aria-pressed")).toBe("false");
+  });
+
+  it("an interval that is not a preset selects 'custom'", async () => {
+    await openSettings({ ...configFixture(), interval_secs: 7 * 60 });
+    expect(screen.getByRole("button", { name: "kb.field.custom" }).getAttribute("aria-pressed")).toBe("true");
+  });
+
   it("a custom interval below one minute cannot be saved", async () => {
     await openSettings();
     fireEvent.click(screen.getByRole("button", { name: "kb.field.custom" }));

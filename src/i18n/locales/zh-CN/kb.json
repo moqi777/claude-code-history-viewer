@@ -101,7 +101,6 @@
   "kb.field.redetect": "重新检测",
   "kb.field.dataDir": "数据目录",
   "kb.field.dataDirHint": "备份和索引存放的位置。已有的 AgentKB 目录会被原样继续使用。",
-  "kb.field.existingDataNote": "检测到已有数据，将继续使用。",
   "kb.field.choose": "选择…",
   "kb.field.chooseFolder": "选择文件夹",
   "kb.field.test": "测试",

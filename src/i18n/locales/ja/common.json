@@ -6,7 +6,7 @@
   "common.a11y.skipToRecentEdits": "最近の編集へスキップ",
   "common.a11y.skipToSettings": "設定へ移動",
   "common.add": "追加",
-  "common.appDescription": "Claude Codeの会話履歴を探索・分析します",
+  "common.appDescription": "Claude Code と Codex のセッション履歴をバックアップ・管理します",
   "common.appName": "AgentKB",
   "common.back": "戻る",
   "common.cancel": "キャンセル",

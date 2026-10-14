@@ -15,6 +15,28 @@ static PLACEHOLDER: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r"\[(?:Image|Pasted (?:text|image))[^\]]*\]").expect("valid placeholder regex")
 });
 
+/// The `/status`-style block that VS Code's Codex integration pastes in front
+/// of (or into) the first message: `Version:`, `Session name:`, `Session ID:`…
+static STATUS_BLOCK: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(
+        r"(?m)^[ \t]*Version:[ \t]+\S+[ \t]*\n(?:[ \t]*(?:Session name|Session ID|Session kind|Peer address|cwd|Model|Account)[ \t]*:.*(?:\n|$))+",
+    )
+    .expect("valid status block regex")
+});
+
+/// `text` without pasted status blocks (only blocks that carry a session id).
+fn strip_status_blocks(text: &str) -> String {
+    STATUS_BLOCK
+        .replace_all(text, |caps: &regex::Captures| {
+            if caps[0].contains("Session ID:") {
+                String::new()
+            } else {
+                caps[0].to_string()
+            }
+        })
+        .into_owned()
+}
+
 /// True for text a tool injected into the conversation rather than the user.
 pub fn is_injected_user_text(text: &str) -> bool {
     let trimmed = text.trim_start();
@@ -28,7 +50,7 @@ pub fn fallback_title(text: &str) -> Option<String> {
     if trimmed.is_empty() || is_injected_user_text(trimmed) {
         return None;
     }
-    let collapsed = strip_placeholders(trimmed);
+    let collapsed = strip_placeholders(&strip_status_blocks(trimmed));
     (!collapsed.is_empty()).then(|| collapsed.chars().take(FALLBACK_TITLE_CHARS).collect())
 }
 
@@ -99,6 +121,30 @@ mod tests {
         );
         let long = "字".repeat(80);
         assert_eq!(fallback_title(&long).unwrap().chars().count(), 50);
+    }
+
+    #[test]
+    fn fallback_title_skips_a_pasted_status_block() {
+        let first = "Version:           2.1.296\n   Session name:      月付项目\n   Session ID:        52261b64\n   Session kind:      interactive\n   Peer address:      uds:/tmp/x.sock\n   cwd:               /Users/me/proj\n\n你看一下 Claude 在这个目录下面的会话";
+        assert_eq!(
+            fallback_title(first).as_deref(),
+            Some("你看一下 Claude 在这个目录下面的会话")
+        );
+        let after_text = "看一下当前目录下的历史会话\n Version:           2.1.295\n   Session name:      x\n   Session ID:        3081\n\n\n协助我排查覆盖率";
+        assert_eq!(
+            fallback_title(after_text).as_deref(),
+            Some("看一下当前目录下的历史会话 协助我排查覆盖率")
+        );
+        assert_eq!(
+            fallback_title("Version: 2 is out\nwhat changed?").as_deref(),
+            Some("Version: 2 is out what changed?"),
+            "a lone Version line is ordinary text"
+        );
+        assert_eq!(
+            fallback_title("Version: 1\nSession ID: 9\n"),
+            None,
+            "nothing but the block: try the next message"
+        );
     }
 
     #[test]

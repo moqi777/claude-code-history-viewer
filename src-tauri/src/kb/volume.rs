@@ -26,6 +26,8 @@ pub struct VolumeInfo {
     pub name: Option<String>,
     pub internal: bool,
     pub fs_type: String,
+    /// False for read-only volumes such as mounted installer images.
+    pub writable: bool,
 }
 
 pub trait SystemQuery {
@@ -173,7 +175,10 @@ pub fn list_external(query: &dyn SystemQuery) -> Vec<VolumeInfo> {
         let path = entry.path();
         if let Probe::External { volume } = probe(&path, query) {
             // Only volumes mounted exactly here, not a folder on another disk.
-            if volume.mount_point == path && !out.iter().any(|v| v.uuid == volume.uuid) {
+            if volume.mount_point == path
+                && volume.writable
+                && !out.iter().any(|v| v.uuid == volume.uuid)
+            {
                 out.push(volume);
             }
         }
@@ -265,6 +270,11 @@ pub fn parse_diskutil_info(mount: &Path, plist_bytes: &[u8]) -> Result<VolumeInf
             .and_then(plist::Value::as_boolean)
             .unwrap_or(true),
         fs_type: text("FilesystemType").unwrap_or_default(),
+        // Missing means unknown: do not hide a disk over a missing key.
+        writable: dict
+            .get("WritableVolume")
+            .and_then(plist::Value::as_boolean)
+            .unwrap_or(true),
     })
 }
 
@@ -301,6 +311,7 @@ pub mod fake {
             name: Some(mount.rsplit('/').next().unwrap_or("").to_string()),
             internal,
             fs_type: fs.into(),
+            writable: true,
         }
     }
 
@@ -476,6 +487,24 @@ mod tests {
         assert_eq!(info.uuid, "D62F7387-D951-4AF4-9536-94103B9E94E9");
         assert!(!info.internal);
         assert_eq!(info.name.as_deref(), Some("KBProbe"));
+        assert!(
+            info.writable,
+            "a missing WritableVolume key must not hide a disk"
+        );
         assert!(parse_diskutil_info(Path::new("/x"), b"nope").is_err());
+    }
+
+    #[test]
+    fn a_read_only_installer_image_is_not_writable() {
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<plist version="1.0"><dict>
+<key>VolumeUUID</key><string>AAAA</string>
+<key>VolumeName</key><string>AweSun Installer</string>
+<key>Internal</key><false/>
+<key>WritableVolume</key><false/>
+<key>FilesystemType</key><string>hfs</string>
+</dict></plist>"#;
+        let info = parse_diskutil_info(Path::new("/Volumes/AweSun Installer"), xml).unwrap();
+        assert!(!info.writable);
     }
 }

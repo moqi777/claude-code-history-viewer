@@ -49,6 +49,7 @@ import {
   type AppError,
 } from "@/types";
 import type { UseAnalyticsReturn } from "@/types/analytics";
+import { AGENTKB_VERSION } from "@/kb/branding";
 import type { SearchState, SearchFilterType } from "@/store/slices/types";
 import type { WorktreeGroup, DirectoryGroup } from "@/utils/worktreeUtils";
 import type { ProjectTokenStatsPagination } from "@/store/slices/messageSlice";
@@ -181,7 +182,6 @@ export const AppLayout: React.FC<AppLayoutProps> = (props) => {
     analyticsState,
     analyticsActions,
     computed,
-    appVersion,
     isDesktop,
     isMobile,
     isViewingGlobalStats,
@@ -869,9 +869,7 @@ export const AppLayout: React.FC<AppLayoutProps> = (props) => {
           <div className="flex items-center gap-3 font-mono tabular-nums">
             <span>
               {isDesktop
-                ? t("status.versionLabel", "v{{version}}", {
-                    version: appVersion,
-                  })
+                ? `AgentKB ${AGENTKB_VERSION}`
                 : t("status.webMode", "Web")}
             </span>
             <span className="text-border">&bull;</span>

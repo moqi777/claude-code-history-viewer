@@ -246,6 +246,12 @@ impl KbConfig {
         self.validate()?;
         let mut to_write = self.clone();
         to_write.version = CONFIG_VERSION;
+        // A disabled backup disk leaves no trace of whichever disk was once picked.
+        if !to_write.mirror.enabled {
+            to_write.mirror.target_dir = None;
+            to_write.mirror.volume_uuid = None;
+            to_write.mirror.volume_name = None;
+        }
         let json = serde_json::to_string_pretty(&to_write).map_err(|e| e.to_string())?;
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)
@@ -546,5 +552,23 @@ mod tests {
         assert!(!path.exists());
         assert_eq!(std::fs::read_to_string(moved).unwrap(), "{broken");
         assert_eq!(KbConfig::state_of(&path), ConfigState::Missing);
+    }
+
+    #[test]
+    fn a_disabled_backup_disk_is_saved_without_disk_details() {
+        let _home = sandbox_home();
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.json");
+        let mut config = KbConfig::load_from(&path).unwrap();
+        config.mirror.enabled = false;
+        config.mirror.target_dir = Some(PathBuf::from("/Volumes/Some Disk/AgentKB-backup"));
+        config.mirror.volume_uuid = Some("UUID-1".into());
+        config.mirror.volume_name = Some("Some Disk".into());
+        config.save_to(&path).unwrap();
+        let saved = KbConfig::load_from(&path).unwrap();
+        assert!(!saved.mirror.enabled);
+        assert_eq!(saved.mirror.target_dir, None);
+        assert_eq!(saved.mirror.volume_uuid, None);
+        assert_eq!(saved.mirror.volume_name, None);
     }
 }

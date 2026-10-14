@@ -101,7 +101,6 @@
   "kb.field.redetect": "Detect again",
   "kb.field.dataDir": "Data folder",
   "kb.field.dataDirHint": "Where the backups and the index are kept. An existing AgentKB folder is used as it is.",
-  "kb.field.existingDataNote": "Existing data found; it will be used as it is.",
   "kb.field.choose": "Choose…",
   "kb.field.chooseFolder": "Choose a folder",
   "kb.field.test": "Test",

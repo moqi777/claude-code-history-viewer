@@ -127,7 +127,7 @@ describe("KbWizard", () => {
     await open();
     await sourcesReady();
     next();
-    expect(await screen.findByText("kb.field.existingDataNote")).toBeTruthy();
+    expect(await screen.findByText(/kb\.test\.dataDir\.existing/)).toBeTruthy();
     await waitFor(() => expect(isNextDisabled()).toBe(false));
     next();
     next();
