@@ -46,6 +46,10 @@ pub async fn delete_session(file_path: String) -> Result<(), String> {
         return Err("Only .jsonl session files can be deleted".to_string());
     }
 
+    if crate::kb::paths::is_inside_mirror(path) {
+        return Err("Backed-up sessions cannot be deleted from the viewer".to_string());
+    }
+
     let session_id = path
         .file_stem()
         .and_then(|s| s.to_str())
@@ -101,6 +105,22 @@ mod tests {
     #[cfg(unix)]
     use std::os::unix::fs::symlink;
     use tempfile::TempDir;
+
+    #[tokio::test]
+    #[serial]
+    async fn refuses_to_delete_a_backed_up_session() {
+        let home = TempDir::new().unwrap();
+        std::env::set_var("CCHV_TEST_HOME", home.path());
+        let mirror = home.path().join("AgentKB/raw/claude/projects/p");
+        fs::create_dir_all(&mirror).unwrap();
+        let file = mirror.join("aaaa-bbbb.jsonl");
+        fs::write(&file, b"{}\n").unwrap();
+        let err = delete_session(file.to_string_lossy().into_owned())
+            .await
+            .unwrap_err();
+        assert_eq!(err, "Backed-up sessions cannot be deleted from the viewer");
+        assert!(file.exists(), "the backup must be untouched");
+    }
 
     #[tokio::test]
     async fn reject_relative_path() {

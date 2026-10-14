@@ -78,6 +78,40 @@ pub fn codex_mirror_roots_canonical() -> Vec<PathBuf> {
         .collect()
 }
 
+/// Whether `path` lies inside the `AgentKB` mirror (`<data dir>/raw`). The viewer's
+/// destructive session actions (delete, rename) refuse such paths: the mirror
+/// is the backup, and a rename would also write to the user's Codex state.
+pub fn is_inside_mirror(path: &Path) -> bool {
+    #[cfg(test)]
+    if std::env::var_os("CCHV_TEST_HOME").is_none() {
+        return false;
+    }
+    let Ok(config) = crate::kb::config::KbConfig::load() else {
+        return false;
+    };
+    let raw = DataPaths::new(config.data_dir).raw();
+    canonical_even_if_missing(path).starts_with(canonical_even_if_missing(&raw))
+}
+
+/// Canonicalise the longest existing prefix and re-append the rest, so a path
+/// that does not exist (yet) still compares correctly across symlinks.
+fn canonical_even_if_missing(path: &Path) -> PathBuf {
+    let mut tail = Vec::new();
+    let mut probe = path;
+    loop {
+        if let Ok(real) = probe.canonicalize() {
+            return tail.iter().rev().fold(real, |acc, part| acc.join(part));
+        }
+        match (probe.parent(), probe.file_name()) {
+            (Some(parent), Some(name)) => {
+                tail.push(name.to_owned());
+                probe = parent;
+            }
+            _ => return path.to_path_buf(),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -151,5 +185,20 @@ mod tests {
     fn mirror_roots_that_do_not_exist_yet_are_skipped() {
         let _home = kb_home();
         assert!(codex_mirror_roots_canonical().is_empty());
+    }
+
+    #[test]
+    fn mirror_paths_are_recognised_even_before_the_file_exists() {
+        let home = tempfile::tempdir().unwrap();
+        std::env::set_var("CCHV_TEST_HOME", home.path());
+        let raw = home.path().join("AgentKB/raw/claude/projects/p");
+        std::fs::create_dir_all(&raw).unwrap();
+        assert!(is_inside_mirror(&raw.join("a.jsonl")));
+        assert!(!is_inside_mirror(
+            &home.path().join(".claude/projects/p/a.jsonl")
+        ));
+        assert!(!is_inside_mirror(
+            &home.path().join("AgentKB/raw-other/a.jsonl")
+        ));
     }
 }

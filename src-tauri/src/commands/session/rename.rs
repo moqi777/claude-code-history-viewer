@@ -103,6 +103,10 @@ pub async fn rename_session_native(
         return crate::providers::forgecode::rename_session_title(&file_path, &new_title);
     }
 
+    if crate::kb::paths::is_inside_mirror(std::path::Path::new(&file_path)) {
+        return Err("Backed-up sessions cannot be renamed from the viewer".to_string());
+    }
+
     // 1. Validate file exists
     if !std::path::Path::new(&file_path).exists() {
         return Err(RenameError::FileNotFound(file_path).to_string());
