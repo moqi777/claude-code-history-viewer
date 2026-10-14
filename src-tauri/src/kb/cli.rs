@@ -13,7 +13,7 @@ use super::schedule::{self, TRIGGER_ENV};
 use super::sync::{self, KbEnv};
 
 const USAGE: &str =
-    "usage: --kb-sync | --kb-backup | --kb-schedule install|uninstall|status|ensure";
+    "usage: --kb-sync | --kb-backup | --kb-move-data <new dir> | --kb-schedule install|uninstall|status|ensure";
 
 /// `Some(exit code)` when `args` is a KB command, `None` to let the app start
 /// normally. Only `argv[1]` is inspected, so a stray `--kb-…` value elsewhere
@@ -26,6 +26,7 @@ pub fn try_run(args: &[String]) -> Option<i32> {
     Some(match command.as_str() {
         "--kb-sync" => run_sync_command(),
         "--kb-backup" => run_backup_command(),
+        "--kb-move-data" => run_move_data_command(args.get(2).map(String::as_str)),
         "--kb-schedule" => run_schedule_command(args.get(2).map(String::as_str)),
         other => {
             eprintln!("unknown KB command {other}\n{USAGE}");
@@ -81,6 +82,51 @@ fn run_backup_command() -> i32 {
         Ok(summary) => {
             print_json(&summary);
             i32::from(summary.status == "error")
+        }
+        Err(e) => {
+            eprintln!("{e}");
+            1
+        }
+    }
+}
+
+/// Move the data directory (copy, verify byte for byte, then switch the config).
+/// The same code the settings page runs.
+fn run_move_data_command(new_dir: Option<&str>) -> i32 {
+    let Some(new_dir) = new_dir else {
+        eprintln!("{USAGE}");
+        return 2;
+    };
+    let config = match load_config() {
+        Ok(config) => config,
+        Err(code) => return code,
+    };
+    let file = match super::config::config_path() {
+        Ok(file) => file,
+        Err(e) => {
+            eprintln!("{e}");
+            return 1;
+        }
+    };
+    let target = super::migrate_dir::expand(new_dir);
+    let progress = super::progress::ProgressSink::new(|p| {
+        if p.done == p.total || p.done % 200 == 0 {
+            eprintln!("{} {}: {}/{}", p.op, p.phase, p.done, p.total);
+        }
+    });
+    match super::migrate_dir::apply(&file, &config, &target, &progress) {
+        Ok(report) => {
+            print_json(&report);
+            // The task's log paths live in the data directory.
+            if config.schedule_enabled {
+                if let Ok(updated) = KbConfig::load() {
+                    if let Err(e) = schedule::install_now(&updated) {
+                        eprintln!("moved, but the scheduled task could not be updated: {e}");
+                        return 1;
+                    }
+                }
+            }
+            0
         }
         Err(e) => {
             eprintln!("{e}");

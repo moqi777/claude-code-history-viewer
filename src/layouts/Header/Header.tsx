@@ -340,9 +340,14 @@ export const Header = ({ analyticsActions, analyticsComputed }: HeaderProps) => 
             if (!computed.isArchiveView) analyticsActions.switchToArchive();
           }}
           archiveDisabled={!isClaudeProject}
-          onOpenKb={() => {
-            if (!computed.isKbView) analyticsActions.switchToKb();
-          }}
+          // The knowledge base only exists in the desktop app, not the WebUI server.
+          onOpenKb={
+            isTauri()
+              ? () => {
+                  if (!computed.isKbView) analyticsActions.switchToKb();
+                }
+              : undefined
+          }
         />
       </div>
     </header>

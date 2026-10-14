@@ -73,13 +73,15 @@ export const SettingDropdown = ({
               <DropdownMenuSeparator />
             </>
           )}
-          <DesktopOnly>
-            <DropdownMenuItem onClick={onOpenKb}>
-              <DatabaseBackup className="mr-2 h-4 w-4 text-foreground" />
-              <span>{t("kb.menuItem")}</span>
-            </DropdownMenuItem>
-            <DropdownMenuSeparator />
-          </DesktopOnly>
+          {onOpenKb && (
+            <DesktopOnly>
+              <DropdownMenuItem onClick={onOpenKb}>
+                <DatabaseBackup className="mr-2 h-4 w-4 text-foreground" />
+                <span>{t("kb.menuItem")}</span>
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+            </DesktopOnly>
+          )}
           <DropdownMenuLabel>{t('common.settings.title')}</DropdownMenuLabel>
           <DropdownMenuSeparator />
           <DropdownMenuItem

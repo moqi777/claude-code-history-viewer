@@ -162,10 +162,12 @@ impl Scheduler<'_> {
         std::fs::create_dir_all(&self.launch_agents_dir)
             .map_err(|e| format!("cannot create {}: {e}", self.launch_agents_dir.display()))?;
 
-        // launchd does not inherit the shell environment; carry over the two
-        // that move the source roots.
+        // launchd does not inherit the shell environment; carry over what
+        // locates things: the home directory (so a run started with a different
+        // HOME, such as a sandboxed check, keeps working on that same home) and
+        // the two variables that move the source roots.
         let mut env = vec![(TRIGGER_ENV.to_string(), "schedule".to_string())];
-        for key in ["CLAUDE_CONFIG_DIR", "CODEX_HOME"] {
+        for key in ["HOME", "CLAUDE_CONFIG_DIR", "CODEX_HOME"] {
             if let Ok(value) = std::env::var(key) {
                 env.push((key.to_string(), value));
             }
