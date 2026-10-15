@@ -1,0 +1,53 @@
+src-tauri/src/kb/db.rs
+  s_cca7c29607588b::t_af41e8531503ea 618-626,631-633
+  ai_agent 627-630
+  s_cca7c29607588b::t_c627924542cd35 87-89,432-463
+src/i18n/locales/zh-TW/kb.json
+  s_cca7c29607588b::t_1dc0e845ba6adc 119-120
+src/kb/KbSettings.test.tsx
+  s_cca7c29607588b::t_cddb12a9ba20ec 127-141
+src/i18n/locales/ko/kb.json
+  s_cca7c29607588b::t_1dc0e845ba6adc 119-120
+src-tauri/src/kb/config.rs
+  s_cca7c29607588b::t_c627924542cd35 77-79,96,300-301
+  ai_agent 302-304
+src/i18n/types.generated.ts
+  ai_agent 8
+src-tauri/src/kb/sync.rs
+  s_cca7c29607588b::t_c627924542cd35 32-33,50-51,72,378-380,383,408,443,448,566,598,603,704
+  s_cca7c29607588b::t_756613454faf64 1758-1773,1778-1781,1785-1800,1807-1813,1821-1843
+  ai_agent 452-457,504-512,607-612,1774-1777,1782-1784,1801-1806,1814-1820
+src/i18n/locales/ja/kb.json
+  s_cca7c29607588b::t_1dc0e845ba6adc 119-120
+src/kb/types.ts
+  s_cca7c29607588b::t_1dc0e845ba6adc 160-161
+src-tauri/src/kb/backup.rs
+  s_cca7c29607588b::t_c627924542cd35 455
+src/i18n/locales/zh-CN/kb.json
+  s_cca7c29607588b::t_1dc0e845ba6adc 119-120
+src/kb/KbSettings.tsx
+  s_cca7c29607588b::t_1dc0e845ba6adc 35,51,61,63-67,80,141-150
+src/kb/testkit.ts
+  s_cca7c29607588b::t_1dc0e845ba6adc 48
+src-tauri/src/kb/status.rs
+  s_cca7c29607588b::t_756613454faf64 91
+  s_cca7c29607588b::t_c627924542cd35 226-227,267,287,344,354
+src/i18n/locales/en/kb.json
+  s_cca7c29607588b::t_1dc0e845ba6adc 119-120
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.11",
+  "base_commit_sha": "371b50a08c07784cba868dcca25e5bb9e33123cf",
+  "prompts": {},
+  "sessions": {
+    "s_cca7c29607588b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ef228e77-8d37-45df-ab42-2d4c28a0387d",
+        "model": "claude-sonnet-5-5"
+      },
+      "human_author": "moqing <moqing@tsign.cn>"
+    }
+  }
+}
