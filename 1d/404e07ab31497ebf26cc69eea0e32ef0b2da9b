@@ -1,0 +1,28 @@
+docs/agent-kb/p4-evidence/search-size.txt
+  s_cca7c29607588b::t_3e1e178d0e2b0f 1-16
+docs/agent-kb/P4-report.md
+  s_cca7c29607588b::t_3e1e178d0e2b0f 5
+  s_cca7c29607588b::t_925290c3fd58e9 1-4,6-75,77-133,148-190
+  s_cca7c29607588b::t_60e0c66e47bb7d 76
+  ai_agent 134-147
+docs/agent-kb/p4-evidence/search_size.py
+  s_cca7c29607588b::t_35ec90cd055e00 1-32
+docs/agent-kb/PLAN.md
+  ai_agent 36,64,79-85
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.11",
+  "base_commit_sha": "1d404e07ab31497ebf26cc69eea0e32ef0b2da9b",
+  "prompts": {},
+  "sessions": {
+    "s_cca7c29607588b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ef228e77-8d37-45df-ab42-2d4c28a0387d",
+        "model": "claude-sonnet-5-5"
+      },
+      "human_author": "moqing <moqing@tsign.cn>"
+    }
+  }
+}
