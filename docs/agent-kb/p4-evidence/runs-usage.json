@@ -1,0 +1,72 @@
+{
+ "claude_A": {
+  "is_error": false,
+  "api_error_status": null,
+  "num_turns": 2,
+  "input": 2,
+  "cache_creation": 4099,
+  "cache_read": 0,
+  "output": 940,
+  "cost_usd": 0.025800000000000003,
+  "models": [
+   "claude-sonnet-5-5"
+  ],
+  "terminal_reason": "completed"
+ },
+ "claude_B": {
+  "is_error": false,
+  "api_error_status": null,
+  "num_turns": 2,
+  "input": 2,
+  "cache_creation": 24528,
+  "cache_read": 1478,
+  "output": 642,
+  "cost_usd": 0.10468380000000001,
+  "models": [
+   "claude-sonnet-5-5"
+  ],
+  "terminal_reason": "completed"
+ },
+ "claude_D1": {
+  "is_error": false,
+  "api_error_status": null,
+  "num_turns": 2,
+  "input": 2,
+  "cache_creation": 77727,
+  "cache_read": 1478,
+  "output": 467,
+  "cost_usd": 0.3157298,
+  "models": [
+   "claude-sonnet-5-5"
+  ],
+  "terminal_reason": "completed"
+ },
+ "claude_D2": {
+  "is_error": false,
+  "api_error_status": null,
+  "num_turns": 2,
+  "input": 2,
+  "cache_creation": 72843,
+  "cache_read": 1478,
+  "output": 656,
+  "cost_usd": 0.2980838,
+  "models": [
+   "claude-sonnet-5-5"
+  ],
+  "terminal_reason": "completed"
+ },
+ "codex_E1": {
+  "input_tokens": 14205,
+  "cached_input_tokens": 0,
+  "cache_write_input_tokens": 0,
+  "output_tokens": 551,
+  "reasoning_output_tokens": 0
+ },
+ "codex_F": {
+  "input_tokens": 35602,
+  "cached_input_tokens": 0,
+  "cache_write_input_tokens": 0,
+  "output_tokens": 2985,
+  "reasoning_output_tokens": 30
+ }
+}
