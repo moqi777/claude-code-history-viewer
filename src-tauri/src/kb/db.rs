@@ -155,6 +155,10 @@ const MIGRATIONS: &[&str] = &[
       output_tokens INTEGER,
       duration_ms  INTEGER,
       finished_at  TEXT,
+      -- user/assistant messages of the pieces sent, and how many of them the
+      -- notes point at (the coverage of the digest, for judging it later)
+      messages     INTEGER,
+      covered      INTEGER,
       PRIMARY KEY (round_id, source, session_id)
     );
     ",

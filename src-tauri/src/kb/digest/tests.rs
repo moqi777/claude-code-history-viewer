@@ -121,6 +121,22 @@ fn a_night_off_is_made_up_at_the_first_check_and_the_round_completes() {
     assert!(!due_check(&rig_config(&rig), rig.clock_now(), rig.env().tz).unwrap());
     assert_eq!(rig.run().status, "idle");
     assert_eq!(rig.ai.calls(), 3, "nothing is digested twice");
+
+    // The coverage of every item is recorded, for judging the digest later.
+    let (messages, covered): (i64, i64) = rig
+        .kb
+        .conn
+        .query_row(
+            "SELECT SUM(messages), SUM(covered) FROM digest_items WHERE state='done'",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(
+        messages, 18,
+        "six user/assistant messages in each of three sessions"
+    );
+    assert!(covered > 0 && covered <= messages, "{covered}/{messages}");
 }
 
 fn rig_config(rig: &Rig) -> KbConfig {

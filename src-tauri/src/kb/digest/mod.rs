@@ -540,7 +540,7 @@ fn process_item(
     let cutoff = DateTime::parse_from_rfc3339(&round.cutoff_at)
         .map_err(|e| format!("bad cutoff: {e}"))?
         .with_timezone(&Utc);
-    match digest_session(env, conn, round, &info, ctx, &cli, cutoff) {
+    match digest_session(env, conn, round, &info, ctx, &cli, cutoff, log) {
         Ok(result) => {
             store::mark_done(
                 conn,
@@ -551,12 +551,14 @@ fn process_item(
                     input_tokens: result.input_tokens,
                     output_tokens: result.output_tokens,
                     duration_ms: result.duration_ms,
+                    messages: result.messages,
+                    covered: result.covered,
                 },
                 &plan::rfc3339(env.now()),
             )?;
             store::clear_blocked(conn)?;
             log.line(&format!(
-                "digested {}:{} seq {}-{} calls={} tokens={}/{} turns={} list_cost_usd={:.3} took={}s",
+                "digested {}:{} seq {}-{} calls={} tokens={}/{} turns={} list_cost_usd={:.3} took={}s coverage={}/{}",
                 item.source,
                 item.session_id,
                 result.seq_from,
@@ -566,7 +568,9 @@ fn process_item(
                 result.output_tokens,
                 result.turns,
                 result.cost_usd,
-                result.duration_ms / 1000
+                result.duration_ms / 1000,
+                result.covered,
+                result.messages
             ));
             Ok(Outcome::Done(Stats {
                 calls: result.calls,
@@ -657,11 +661,57 @@ struct Digested {
     duration_ms: u64,
     cost_usd: f64,
     turns: u64,
+    /// User/assistant messages sent, and how many the notes point at.
+    messages: u64,
+    covered: u64,
+}
+
+/// How many user/assistant messages of one piece the notes point at, and how
+/// many there were (a message is pointed at when it lies inside the range of
+/// any entry). Only recorded, never acted on: the first weeks of real use
+/// show whether low coverage is common.
+fn coverage(
+    conn: &Connection,
+    file_id: i64,
+    file: &NotesFile,
+    from_seq: u64,
+    to_seq: u64,
+) -> (u64, u64) {
+    let Ok(mut stmt) = conn.prepare(
+        "SELECT seq FROM messages WHERE file_id=?1 AND seq BETWEEN ?2 AND ?3 \
+         AND kind IN ('user','assistant')",
+    ) else {
+        return (0, 0);
+    };
+    let Ok(rows) = stmt.query_map(
+        rusqlite::params![
+            file_id,
+            i64::try_from(from_seq).unwrap_or(i64::MAX),
+            i64::try_from(to_seq).unwrap_or(i64::MAX)
+        ],
+        |r| r.get::<_, i64>(0),
+    ) else {
+        return (0, 0);
+    };
+    let (mut total, mut covered) = (0, 0);
+    for seq in rows.filter_map(Result::ok) {
+        let seq = u64::try_from(seq).unwrap_or(0);
+        total += 1;
+        if file
+            .entries
+            .iter()
+            .any(|e| e.evidence.seq_from <= seq && seq <= e.evidence.seq_to)
+        {
+            covered += 1;
+        }
+    }
+    (total, covered)
 }
 
 /// Up to `max_chunks_per_session` calls for one session. Each call's result
 /// is on disk (and indexed) before the next call is made, so a failure in
 /// the middle keeps the progress.
+#[allow(clippy::too_many_arguments)]
 fn digest_session(
     env: &DigestEnv,
     conn: &Connection,
@@ -670,6 +720,7 @@ fn digest_session(
     ctx: &mut Context,
     cli: &std::path::Path,
     cutoff: DateTime<Utc>,
+    log: &SyncLog,
 ) -> Result<Digested, Failure> {
     let other = |e: String| Failure::Other(e);
     let mut file = notes::read(&env.data, &info.source, &info.session_id)
@@ -684,6 +735,8 @@ fn digest_session(
         duration_ms: 0,
         cost_usd: 0.0,
         turns: 0,
+        messages: 0,
+        covered: 0,
     };
     let version = ctx.version(cli);
     for _ in 0..env.config.max_chunks_per_session {
@@ -798,6 +851,20 @@ fn digest_session(
         // hash check at the start of the next run.
         let hash = notes::write(&env.data, &file).map_err(other)?;
         notes::index_file(conn, &file, &hash).map_err(other)?;
+        let (messages, covered) = coverage(conn, info.file_id, &file, chunk.from_seq, chunk.to_seq);
+        log.line(&format!(
+            "piece {}:{} seq {}-{} coverage={}/{} tokens={}/{}",
+            info.source,
+            info.session_id,
+            chunk.from_seq,
+            chunk.to_seq,
+            covered,
+            messages,
+            reply.input_tokens,
+            reply.output_tokens
+        ));
+        result.messages += messages;
+        result.covered += covered;
         result.seq_to = chunk.to_seq;
         if !chunk.more {
             break;

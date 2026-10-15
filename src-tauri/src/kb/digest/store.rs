@@ -264,13 +264,15 @@ pub struct Done {
     pub input_tokens: u64,
     pub output_tokens: u64,
     pub duration_ms: u64,
+    pub messages: u64,
+    pub covered: u64,
 }
 
 pub fn mark_done(conn: &Connection, item: &Item, done: &Done, now: &str) -> Result<(), String> {
     conn.execute(
         "UPDATE digest_items SET state='done', last_error=NULL, next_try_at=NULL, seq_from=?4, \
-         seq_to=?5, input_tokens=?6, output_tokens=?7, duration_ms=?8, finished_at=?9 \
-         WHERE round_id=?1 AND source=?2 AND session_id=?3",
+         seq_to=?5, input_tokens=?6, output_tokens=?7, duration_ms=?8, finished_at=?9, \
+         messages=?10, covered=?11 WHERE round_id=?1 AND source=?2 AND session_id=?3",
         params![
             item.round_id,
             item.source,
@@ -280,7 +282,9 @@ pub fn mark_done(conn: &Connection, item: &Item, done: &Done, now: &str) -> Resu
             i64::try_from(done.input_tokens).unwrap_or(i64::MAX),
             i64::try_from(done.output_tokens).unwrap_or(i64::MAX),
             i64::try_from(done.duration_ms).unwrap_or(i64::MAX),
-            now
+            now,
+            i64::try_from(done.messages).unwrap_or(i64::MAX),
+            i64::try_from(done.covered).unwrap_or(i64::MAX)
         ],
     )
     .map_err(|e| err("mark done", e))?;
