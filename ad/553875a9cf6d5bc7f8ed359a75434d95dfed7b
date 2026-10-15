@@ -1,0 +1,30 @@
+src-tauri/src/kb/migrate_dir.rs
+  s_cca7c29607588b::t_f38a2301ef981e 393-394,418,437,443
+  s_cca7c29607588b::t_14696304264770 238-241,255-262,273-276,301
+src-tauri/src/kb/index/messages.rs
+  s_cca7c29607588b::t_bb042218ee97b9 19-27
+src-tauri/src/kb/sync.rs
+  s_cca7c29607588b::t_fdce508c15d3d0 68-73,75,78,227-235,420-445,1254-1307,1310,1318-1356,1358-1359,1361-1369
+  s_cca7c29607588b::t_450b40ebb9115c 1308-1309,1311-1317
+  s_cca7c29607588b::t_bb042218ee97b9 1357,1360
+src-tauri/src/kb/backup.rs
+  s_cca7c29607588b::t_f38a2301ef981e 573-581,587-596
+  s_cca7c29607588b::t_31e87dd4630bd3 344,348-382
+  s_cca7c29607588b::t_c3fe05b43578d6 582-586
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.11",
+  "base_commit_sha": "ad553875a9cf6d5bc7f8ed359a75434d95dfed7b",
+  "prompts": {},
+  "sessions": {
+    "s_cca7c29607588b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ef228e77-8d37-45df-ab42-2d4c28a0387d",
+        "model": "claude-sonnet-5-5"
+      },
+      "human_author": "moqing <moqing@tsign.cn>"
+    }
+  }
+}
