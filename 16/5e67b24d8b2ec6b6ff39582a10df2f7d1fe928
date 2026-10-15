@@ -1,0 +1,49 @@
+docs/agent-kb/p4-evidence/launchd-test/parent.py
+  s_cca7c29607588b::t_b37c2590f8c3fb 1-8
+docs/agent-kb/p4-evidence/schema-codex.json
+  s_cca7c29607588b::t_b37c2590f8c3fb 1
+docs/agent-kb/p4-evidence/diff.py
+  s_cca7c29607588b::t_b37c2590f8c3fb 1-8
+docs/agent-kb/p4-evidence/launchd-test/child-result.json
+  s_cca7c29607588b::t_b37c2590f8c3fb 1-40
+docs/agent-kb/p4-evidence/run_claude.sh
+  s_cca7c29607588b::t_b37c2590f8c3fb 1-16
+docs/agent-kb/p4-evidence/runs-usage.json
+  s_cca7c29607588b::t_b37c2590f8c3fb 1-72
+docs/agent-kb/p4-evidence/launchd-test/job.plist
+  s_cca7c29607588b::t_b37c2590f8c3fb 1-7
+docs/agent-kb/P4-design.md
+  s_cca7c29607588b::t_0c52e3354a8b60 19,270-272,413,420,423-424,441,446,464,636
+  s_cca7c29607588b::t_a57b6f93fac40b 1-18,20-189,191-269,273-412,414-419,421-422,425-440,442-445,447-463,465-635,637-657
+  s_cca7c29607588b::t_b37c2590f8c3fb 190
+docs/agent-kb/p4-evidence/README.md
+  s_cca7c29607588b::t_b37c2590f8c3fb 1-16
+docs/agent-kb/p4-evidence/codex-flags.sh
+  s_cca7c29607588b::t_b37c2590f8c3fb 1-4
+docs/agent-kb/p4-evidence/build_input.py
+  s_cca7c29607588b::t_b37c2590f8c3fb 1-29
+docs/agent-kb/p4-evidence/snap.py
+  s_cca7c29607588b::t_b37c2590f8c3fb 1-11
+docs/agent-kb/p4-evidence/prompt_system.txt
+  s_cca7c29607588b::t_b37c2590f8c3fb 1-21
+docs/agent-kb/p4-evidence/schema.json
+  s_cca7c29607588b::t_b37c2590f8c3fb 1
+docs/agent-kb/p4-evidence/run_codex.sh
+  s_cca7c29607588b::t_b37c2590f8c3fb 1-10
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.11",
+  "base_commit_sha": "165e67b24d8b2ec6b6ff39582a10df2f7d1fe928",
+  "prompts": {},
+  "sessions": {
+    "s_cca7c29607588b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ef228e77-8d37-45df-ab42-2d4c28a0387d",
+        "model": "claude-sonnet-5-5"
+      },
+      "human_author": "moqing <moqing@tsign.cn>"
+    }
+  }
+}
