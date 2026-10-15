@@ -1,0 +1,16 @@
+#1 | sentence: @1 4633B | keywords: @2 5195B
+#2 | sentence: @2 7297B | keywords: @1 5283B
+#3 | sentence: @2 6186B | keywords: @2 4833B
+#4 | sentence: @2 7613B | keywords: @1 2798B
+#5 | sentence: @1 6383B | keywords: @1 6970B
+#6 | sentence: @1 3111B | keywords: @1 5698B
+#7 | sentence: @1 5960B | keywords: @1 3643B
+#8 | sentence: @1 7642B | keywords: @2 6073B
+#9 | sentence: @1 7958B | keywords: @1 2583B
+#10 | sentence: @1 7896B | keywords: @1 9100B
+#11 | sentence: @1 8650B | keywords: @1 4126B
+#12 | sentence: @1 7614B | keywords: @1 5446B
+#13 | sentence: @1 9589B | keywords: @1 7778B
+#14 | sentence: @2 8729B | keywords: miss 6221B
+#15 | sentence: @1 7111B | keywords: @1 5153B
+{'sentence': {'hits': 15, 'avg_bytes': 7091}, 'keywords': {'hits': 14, 'avg_bytes': 5393}}
