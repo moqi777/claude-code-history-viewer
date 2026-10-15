@@ -1,0 +1,60 @@
+src/kb/openSession.test.ts
+  s_cca7c29607588b::t_f4edab7f19e4a9 15-20,27-36,67-69,144-156,164-166
+  s_cca7c29607588b::t_e813dc54d95f21 157-163
+src/kb/KbRoot.tsx
+  s_cca7c29607588b::t_0866b8312a6f2d 4,39-47
+src/i18n/locales/ko/kb.json
+  s_cca7c29607588b::t_0866b8312a6f2d 18
+  s_cca7c29607588b::t_59046efd236b72 312
+src/hooks/useAppKeyboard.ts
+  s_cca7c29607588b::t_7e6ae4c96c106e 4,20,35
+src/i18n/locales/ja/kb.json
+  s_cca7c29607588b::t_0866b8312a6f2d 18
+  s_cca7c29607588b::t_59046efd236b72 312
+src/i18n/locales/zh-CN/kb.json
+  s_cca7c29607588b::t_59046efd236b72 312
+  s_cca7c29607588b::t_0866b8312a6f2d 48
+src/kb/openSearch.ts
+  s_cca7c29607588b::t_7e6ae4c96c106e 1-16
+src/kb/index.ts
+  s_cca7c29607588b::t_608260df51790c 6
+src/layouts/AppLayout.tsx
+  s_cca7c29607588b::t_0866b8312a6f2d 35,158-163,884-888
+src/kb/KbSearch.tsx
+  s_cca7c29607588b::t_7e6ae4c96c106e 1,44-53,69
+src/kb/useKbStore.ts
+  s_cca7c29607588b::t_7e6ae4c96c106e 62-63,89-90,161,344-345
+src/layouts/Header/Header.tsx
+  s_cca7c29607588b::t_7e6ae4c96c106e 215-217,228-230
+  s_cca7c29607588b::t_608260df51790c 25
+src/kb/openSession.ts
+  s_cca7c29607588b::t_ac73f511a43752 84-107,110-111
+src/hooks/useAppKeyboard.test.ts
+  s_cca7c29607588b::t_608260df51790c 5,7,17-18,41-51
+src/kb/KbSearch.test.tsx
+  s_cca7c29607588b::t_d3ed03a425b463 112-122
+src/kb/openSearch.test.ts
+  s_cca7c29607588b::t_608260df51790c 1-34
+src/i18n/locales/en/kb.json
+  s_cca7c29607588b::t_59046efd236b72 312
+  s_cca7c29607588b::t_0866b8312a6f2d 18
+src/i18n/locales/zh-TW/kb.json
+  s_cca7c29607588b::t_0866b8312a6f2d 18
+  s_cca7c29607588b::t_59046efd236b72 312
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.11",
+  "base_commit_sha": "82dd490c5c8a002223800476d526bc5057515f21",
+  "prompts": {},
+  "sessions": {
+    "s_cca7c29607588b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ef228e77-8d37-45df-ab42-2d4c28a0387d",
+        "model": "claude-sonnet-5-5"
+      },
+      "human_author": "moqing <moqing@tsign.cn>"
+    }
+  }
+}
