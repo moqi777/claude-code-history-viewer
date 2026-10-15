@@ -1,0 +1,21 @@
+docs/agent-kb/P3-acceptance.md
+  s_d58d4b162ae7dc::t_8b21be41489d68 54-56
+  s_d58d4b162ae7dc::t_9964873ceb07d6 1-51,53
+  s_d58d4b162ae7dc::t_7f0c2d9520ab4e 52
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.11",
+  "base_commit_sha": "e87f52ae82f519fafc172594dd9816f57a829997",
+  "prompts": {},
+  "sessions": {
+    "s_d58d4b162ae7dc": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "c4c081c6-aaf3-412b-8f62-de2a98c156fc",
+        "model": "unknown"
+      },
+      "human_author": "moqing <moqing@tsign.cn>"
+    }
+  }
+}
