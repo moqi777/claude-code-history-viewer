@@ -1,0 +1,16 @@
+502 网关                               default=  9187 verbose= 92844 notes=2 found=True
+充电功率 命令                              default=  6828 verbose= 11211 notes=1 found=True
+dubbo provider RpcException          default=  4861 verbose= 10844 notes=0 found=True
+重庆 攻略 航班                             default=  4304 verbose=  8957 notes=1 found=True
+Claude 订阅 中转站                        default= 11986 verbose= 20190 notes=3 found=True
+手写 Excel 报价单 还原度                     default=  5708 verbose=  9894 notes=0 found=True
+agent-browser Chrome CDP             default=  3654 verbose= 83171 notes=0 found=True
+访达 右键 新建文件                           default=  7899 verbose= 14821 notes=1 found=True
+熄屏 睡眠 插电                             default=  2610 verbose=  4497 notes=0 found=True
+tedis 依赖                             default= 10820 verbose= 18113 notes=1 found=True
+提醒 渠道 写死                             default=  4137 verbose=  6761 notes=0 found=True
+giftInfo null 新用户                    default=  5472 verbose=  9870 notes=0 found=True
+Ghostty 默认目录 zshrc                   default=  9662 verbose= 16568 notes=1 found=True
+fastjson 升级 空指针                      default=  7991 verbose= 15213 notes=1 found=False
+红手指 AutoHotkey 滚轮                    default=  5197 verbose=  8888 notes=0 found=True
+average default 6688 B, verbose 22123 B, found 14/15
