@@ -69,7 +69,7 @@ describe("KbHome", () => {
     const badges = screen.getAllByText("kb.sessions.deletedBadge");
     expect(badges).toHaveLength(1);
     expect(badges[0]?.closest("button")?.textContent).toContain("Gone from disk");
-    expect(screen.getByText(/kb\.version/).textContent).toContain("0.3.1");
+    expect(screen.getByText(/kb\.version/).textContent).toContain("0.4.0");
   });
 
   it("opens a session through the viewer integration", async () => {
