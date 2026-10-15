@@ -24,9 +24,6 @@ const SCHEMA_CODEX: &str = include_str!("schema-codex.json");
 
 /// One call is given this long before its whole process group is killed.
 pub const CALL_TIMEOUT: Duration = Duration::from_secs(600);
-/// Added to every Codex call, after the isolation flags. Empty until the real
-/// comparison of reasoning levels (P4 step 4) decides on one.
-pub const CODEX_EXTRA_ARGS: &[&str] = &[];
 /// Single-call spending guard. Only meaningful for pay-per-use API accounts;
 /// on a subscription the per-round session cap is what limits usage.
 const CLAUDE_MAX_BUDGET_USD: &str = "2";
@@ -111,6 +108,8 @@ pub struct Call<'a> {
     pub cli: &'a Path,
     /// Empty = the CLI's default model.
     pub model: &'a str,
+    /// Codex only: reasoning effort, empty = its default.
+    pub reasoning: &'a str,
     pub work_dir: &'a Path,
     pub system_prompt: &'a str,
     pub input: &'a str,
@@ -118,7 +117,7 @@ pub struct Call<'a> {
     pub cancel: &'a AtomicBool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Reply {
     /// The answer's JSON text (`{"entries":[…]}`), not yet validated.
     pub answer: String,
@@ -127,6 +126,11 @@ pub struct Reply {
     /// The model that answered, when the CLI says so.
     pub model: Option<String>,
     pub duration_ms: u64,
+    /// List-price cost of the call and the number of model turns it took, when
+    /// the CLI reports them (Claude does). Logged, never used for decisions:
+    /// on a subscription nothing is charged per call.
+    pub cost_usd: Option<f64>,
+    pub turns: Option<u64>,
 }
 
 // ---------------------------------------------------------------------------
@@ -171,6 +175,7 @@ pub fn claude_args(model: &str, system_prompt: &str) -> Vec<OsString> {
 
 pub fn codex_args(
     model: &str,
+    reasoning: &str,
     work_dir: &Path,
     schema_file: &Path,
     out_file: &Path,
@@ -214,8 +219,11 @@ pub fn codex_args(
     ] {
         args.extend(["-c".into(), setting.into()]);
     }
-    for extra in CODEX_EXTRA_ARGS {
-        args.push((*extra).into());
+    if !reasoning.is_empty() {
+        args.extend([
+            "-c".into(),
+            format!("model_reasoning_effort=\"{reasoning}\"").into(),
+        ]);
     }
     args.extend([
         "--json".into(),
@@ -352,7 +360,7 @@ pub fn run(call: &Call<'_>) -> Result<Reply, Failure> {
         Engine::Codex => {
             let schema = scratch.file(call.work_dir, "schema", SCHEMA_CODEX)?;
             let out = scratch.reserve(call.work_dir, "last");
-            let args = codex_args(call.model, call.work_dir, &schema, &out);
+            let args = codex_args(call.model, call.reasoning, call.work_dir, &schema, &out);
             last_file = Some(out);
             (
                 args,
@@ -603,6 +611,8 @@ fn parse_claude(output: &Output) -> Result<Reply, Failure> {
             .and_then(Value::as_object)
             .and_then(|m| m.keys().next().cloned()),
         duration_ms: 0,
+        cost_usd: value.get("total_cost_usd").and_then(Value::as_f64),
+        turns: value.get("num_turns").and_then(Value::as_u64),
     })
 }
 
@@ -671,6 +681,8 @@ fn parse_codex(output: &Output, last_message: Option<&str>) -> Result<Reply, Fai
         output_tokens: token_count(&usage, &["output_tokens", "reasoning_output_tokens"]),
         model: None,
         duration_ms: 0,
+        cost_usd: None,
+        turns: None,
     })
 }
 
@@ -716,7 +728,13 @@ mod tests {
 
     #[test]
     fn codex_runs_with_every_isolation_flag_and_reads_stdin() {
-        let args = codex_args("", Path::new("/w"), Path::new("/w/s"), Path::new("/w/o"));
+        let args = codex_args(
+            "",
+            "",
+            Path::new("/w"),
+            Path::new("/w/s"),
+            Path::new("/w/o"),
+        );
         assert_eq!(args[0], "exec");
         for flag in [
             "--ephemeral",
@@ -736,10 +754,24 @@ mod tests {
         assert!(has_pair(&args, "-C", "/w"));
         assert_eq!(args.last().unwrap(), "-", "prompt comes from stdin");
         assert!(has_pair(
-            &codex_args("gpt-x", Path::new("/w"), Path::new("/s"), Path::new("/o")),
+            &codex_args(
+                "gpt-x",
+                "",
+                Path::new("/w"),
+                Path::new("/s"),
+                Path::new("/o")
+            ),
             "-m",
             "gpt-x"
         ));
+        let low = codex_args("", "low", Path::new("/w"), Path::new("/s"), Path::new("/o"));
+        assert!(has_pair(&low, "-c", r#"model_reasoning_effort="low""#));
+        assert!(
+            !args
+                .iter()
+                .any(|a| a.to_string_lossy().contains("model_reasoning_effort")),
+            "no effort is set unless asked for"
+        );
     }
 
     #[test]

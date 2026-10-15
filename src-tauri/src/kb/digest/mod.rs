@@ -556,14 +556,17 @@ fn process_item(
             )?;
             store::clear_blocked(conn)?;
             log.line(&format!(
-                "digested {}:{} seq {}-{} calls={} tokens={}/{}",
+                "digested {}:{} seq {}-{} calls={} tokens={}/{} turns={} list_cost_usd={:.3} took={}s",
                 item.source,
                 item.session_id,
                 result.seq_from,
                 result.seq_to,
                 result.calls,
                 result.input_tokens,
-                result.output_tokens
+                result.output_tokens,
+                result.turns,
+                result.cost_usd,
+                result.duration_ms / 1000
             ));
             Ok(Outcome::Done(Stats {
                 calls: result.calls,
@@ -652,6 +655,8 @@ struct Digested {
     input_tokens: u64,
     output_tokens: u64,
     duration_ms: u64,
+    cost_usd: f64,
+    turns: u64,
 }
 
 /// Up to `max_chunks_per_session` calls for one session. Each call's result
@@ -677,6 +682,8 @@ fn digest_session(
         input_tokens: 0,
         output_tokens: 0,
         duration_ms: 0,
+        cost_usd: 0.0,
+        turns: 0,
     };
     let version = ctx.version(cli);
     for _ in 0..env.config.max_chunks_per_session {
@@ -699,6 +706,7 @@ fn digest_session(
             engine: ctx.engine,
             cli,
             model: &env.config.model,
+            reasoning: &env.config.codex_reasoning,
             work_dir: &env.data.digest_work(),
             system_prompt: engine::SYSTEM_PROMPT,
             input: &chunk.text,
@@ -706,6 +714,8 @@ fn digest_session(
             cancel: &env.cancel,
         })?;
         result.calls += 1;
+        result.cost_usd += reply.cost_usd.unwrap_or(0.0);
+        result.turns += reply.turns.unwrap_or(0);
         result.input_tokens += reply.input_tokens;
         result.output_tokens += reply.output_tokens;
         result.duration_ms += reply.duration_ms;

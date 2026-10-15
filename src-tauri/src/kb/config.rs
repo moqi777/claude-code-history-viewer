@@ -84,6 +84,9 @@ pub struct DigestConfig {
     /// Fewest user + assistant messages a new session needs.
     pub min_messages: usize,
     pub max_chunks_per_session: usize,
+    /// Codex only: its `model_reasoning_effort` (`low`, `medium`, `high`),
+    /// empty = the CLI's own default. Not in the settings page.
+    pub codex_reasoning: String,
 }
 
 impl Default for DigestConfig {
@@ -99,6 +102,7 @@ impl Default for DigestConfig {
             quiet_minutes: 30,
             min_messages: 4,
             max_chunks_per_session: 3,
+            codex_reasoning: "low".into(),
         }
     }
 }
@@ -129,6 +133,14 @@ impl DigestConfig {
         }
         if self.max_chunks_per_session == 0 || self.max_chunks_per_session > 50 {
             return Err("digest.max_chunks_per_session must be between 1 and 50".into());
+        }
+        if !matches!(
+            self.codex_reasoning.as_str(),
+            "" | "minimal" | "low" | "medium" | "high"
+        ) {
+            return Err(
+                "digest.codex_reasoning must be empty, minimal, low, medium or high".into(),
+            );
         }
         if self.model.len() > 100 || self.model.chars().any(char::is_control) {
             return Err("digest.model is not a valid model name".into());

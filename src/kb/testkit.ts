@@ -67,6 +67,7 @@ export const configFixture = (patch: Partial<KbConfig> = {}): KbConfig => ({
     quiet_minutes: 30,
     min_messages: 4,
     max_chunks_per_session: 3,
+    codex_reasoning: "",
   },
   ...patch,
 });

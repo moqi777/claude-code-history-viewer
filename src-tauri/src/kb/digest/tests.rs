@@ -504,7 +504,7 @@ fn a_long_session_is_sent_in_pieces_and_continues_next_round_when_the_cap_is_rea
     rig.kb.messages(file, 1, &borrowed);
     rig.at("2026-10-16T00:30:00Z");
 
-    // Each 100k-character piece holds about 24 turns; two pieces leave the rest.
+    // Each 50k-character piece holds about 22 turns; two pieces leave the rest.
     let summary = rig.run();
     assert_eq!(summary.calls, 2);
     let note = rig.note("big").unwrap();
@@ -516,13 +516,23 @@ fn a_long_session_is_sent_in_pieces_and_continues_next_round_when_the_cap_is_rea
         "the second piece carries the first note"
     );
 
-    rig.at("2026-10-17T00:30:00Z");
-    let next = rig.run();
-    assert_eq!(
-        next.done, 1,
-        "an unfinished session continues even without new activity"
-    );
+    // Day by day, with no new activity, the unfinished session carries on until it is done.
+    let mut rounds = 1;
+    while rig.note("big").unwrap().status == "partial" && rounds < 8 {
+        rounds += 1;
+        rig.at(&format!("2026-10-{:02}T00:30:00Z", 15 + rounds));
+        let next = rig.run();
+        assert_eq!(
+            next.done, 1,
+            "an unfinished session continues without new activity"
+        );
+        assert!(
+            next.calls <= 2,
+            "each round stays within the per-session cap"
+        );
+    }
     let note = rig.note("big").unwrap();
+    assert!(rounds >= 2, "it did not fit in one round");
     assert_eq!(note.digested_through_seq, 240);
     assert_eq!(note.status, "notes");
 }

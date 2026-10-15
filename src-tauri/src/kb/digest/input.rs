@@ -15,7 +15,7 @@ use crate::kb::redact::redact;
 
 /// Characters of one request, cut at the start of a user turn. Measured: a
 /// 100k-character request is about 70k tokens (see the design, §4.3).
-pub const CHUNK_CHARS: usize = 100_000;
+pub const CHUNK_CHARS: usize = 50_000;
 /// Rough tokens per character of the rendered input, measured on real runs.
 pub const TOKENS_PER_CHAR: f64 = 0.73;
 /// Fixed cost of one call: system prompt and schema.

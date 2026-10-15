@@ -257,7 +257,7 @@ active: 2026-10-15T03:12:43Z .. 2026-10-15T03:17:42Z
 
 ### 4.3 长度上限
 
-**单次输入上限 100,000 字符**（约 7 万 token），在"一个 user 回合的开头"处切，不把一个回合拦腰截断。**审核 3：若步骤 4 的长会话样本里"一段只出 1 条、后面白发"依然存在，先把每段上限降到 50,000 字符再试，不靠反复改提示词；上限做成常量 `CHUNK_CHARS`，只在代码里改。**依据（真实库 188 个可整理会话，按 §4.1 的截断规则算）：
+**单次输入上限 50,000 字符**（约 3.5 万 token；设计时是 100,000，步骤 4 实测后降为 5 万，见 `P4-samples.md` 末节），在"一个 user 回合的开头"处切，不把一个回合拦腰截断。**审核 3：若步骤 4 的长会话样本里"一段只出 1 条、后面白发"依然存在，先把每段上限降到 50,000 字符再试，不靠反复改提示词；上限做成常量 `CHUNK_CHARS`，只在代码里改。**〔步骤 4 结果：10 万字符的一段 #1–503 仍只出 2 条、只覆盖 #1–122；5 万字符的两段各出 3 条和 6 条、基本覆盖整段，已改为 50,000。〕依据（真实库 188 个可整理会话，按 §4.1 的截断规则算）：
 
 | 统计 | 数值 |
 |---|---|
@@ -390,7 +390,7 @@ codex exec \
 | 失败时的样子 | 不存在的模型：退出码 1，事件流里 `{"type":"error","message":"{\"type\":\"error\",\"status\":400,…}"}` 和 `{"type":"turn.failed","error":{"message":…}}` |
 | **额度不足（推断）** | 本机历史有一条真实的 Codex 记录：`You've hit your usage limit. Upgrade to Pro (https://chatgpt.com/explore/pro), visit https://chatgpt.com/codex/settings/usage to purchase more credits or try again at 11:56 PM.`。按上面的形状，应出现在 `turn.failed.error.message` 里。**判定**：`turn.failed` 且消息匹配 `/hit your usage limit|usage limit|"status":\s*429/i` → `quota`；`"status": 401/403` 或含 `login` → `auth`。同样没有真触发过 |
 | token | `turn.completed.usage`：`input_tokens`（含 `cached_input_tokens`）、`output_tokens`、`reasoning_output_tokens`。没有模型名、没有费用 |
-| 耗时 | 9 千字输入 102.8 s，5.4 万字 89.6 s（比 Claude 慢约 10 倍；原因没深究，可能是默认的推理档位）。**〔审核 2.4〕步骤 4 用 1 次调用试 `-c model_reasoning_effort="low"`，比较用时和笔记质量；明显更快且质量没变差就作为 Codex 的固定参数（设置里不露出）。代码里这是 `engine.rs` 的常量 `CODEX_EXTRA_ARGS`，默认先不加，步骤 4 之后按结果定** |
+| 耗时 | 9 千字输入 102.8 s，5.4 万字 89.6 s（比 Claude 慢约 10 倍；原因没深究，可能是默认的推理档位）。**〔审核 2.4〕步骤 4 用 1 次调用试 `-c model_reasoning_effort="low"`，比较用时和笔记质量；明显更快且质量没变差就作为 Codex 的固定参数（设置里不露出）。代码里是配置项 `digest.codex_reasoning`（`config.json`，设置页不露出）。〔步骤 4 结果：同一会话 102.8 s → 26.9 s，条数同为 2、内容相当；默认设为 `low`。〕** |
 
 ### 5.3 会不会在 `~/.claude`、`~/.codex` 里留文件
 

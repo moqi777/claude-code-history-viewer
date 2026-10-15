@@ -164,6 +164,8 @@ export interface KbDigestConfig {
   quiet_minutes: number;
   min_messages: number;
   max_chunks_per_session: number;
+  /** Codex only; empty = its default. Kept in `config.json`, not shown. */
+  codex_reasoning: string;
 }
 
 export type KbDigestEngine = "claude" | "codex";

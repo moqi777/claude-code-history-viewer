@@ -282,6 +282,7 @@ pub fn test_call(env: &DigestEnv) -> TestReport {
         engine: kind,
         cli: &cli,
         model: &env.config.model,
+        reasoning: &env.config.codex_reasoning,
         work_dir: &work,
         system_prompt: engine::SYSTEM_PROMPT,
         input: TEST_INPUT,
