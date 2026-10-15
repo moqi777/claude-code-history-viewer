@@ -74,6 +74,9 @@ pub struct KbConfig {
     pub sources: SourcesConfig,
     /// Source paths starting with one of these are never collected.
     pub exclude_prefixes: Vec<String>,
+    /// Sessions whose working directory is, or is below, one of these stay
+    /// in the backup but are left out of search and the session list.
+    pub exclude_cwd_prefixes: Vec<String>,
     pub mirror: MirrorConfig,
     /// Keys this version does not know, kept so a newer/older sibling program
     /// does not lose them when we save.
@@ -90,6 +93,7 @@ impl Default for KbConfig {
             schedule_enabled: true,
             sources: SourcesConfig::default(),
             exclude_prefixes: Vec::new(),
+            exclude_cwd_prefixes: Vec::new(),
             mirror: MirrorConfig::default(),
             extra: Map::new(),
         }
@@ -291,6 +295,13 @@ impl KbConfig {
         for prefix in &self.exclude_prefixes {
             if !Path::new(prefix).is_absolute() {
                 return Err(format!("exclude path {prefix:?} must be absolute"));
+            }
+        }
+        for prefix in &self.exclude_cwd_prefixes {
+            if !Path::new(prefix).is_absolute() {
+                return Err(format!(
+                    "excluded working directory {prefix:?} must be absolute"
+                ));
             }
         }
         let roots = SourceRoots::resolve(self);

@@ -157,6 +157,8 @@ export interface KbConfig {
   schedule_enabled: boolean;
   sources: { claude: KbSourceConfig; codex: KbSourceConfig };
   exclude_prefixes: string[];
+  /** Working directories whose sessions stay backed up but are not searched or listed. */
+  exclude_cwd_prefixes: string[];
   mirror: KbMirrorConfig;
   [extra: string]: unknown;
 }

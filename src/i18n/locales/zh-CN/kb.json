@@ -116,6 +116,8 @@
   "kb.field.exclude": "排除的目录",
   "kb.field.excludeHint": "每行一个绝对路径。源路径以这些开头的会话不会被收集。",
   "kb.field.excludeInvalid": "每个路径都必须是绝对路径（以 / 开头）。",
+  "kb.field.excludeCwd": "排除的工作目录",
+  "kb.field.excludeCwdHint": "每行一个绝对路径。在这些目录（含子目录）里开的会话照常备份，但不进搜索，也不在会话列表里显示。",
   "kb.field.mirror": "移动硬盘备份",
   "kb.field.mirrorHint": "在 U 盘或移动硬盘上多存一份。不支持网络盘和云盘。备份里的内容永远不会被删除。",
   "kb.field.mirrorEnabled": "同时把备份复制到移动硬盘",

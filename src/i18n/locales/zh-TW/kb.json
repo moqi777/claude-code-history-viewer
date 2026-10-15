@@ -116,6 +116,8 @@
   "kb.field.exclude": "Excluded folders",
   "kb.field.excludeHint": "One absolute path per line. Sessions whose source path starts with one of these are not collected.",
   "kb.field.excludeInvalid": "Every path must be absolute (start with /).",
+  "kb.field.excludeCwd": "Excluded working directories",
+  "kb.field.excludeCwdHint": "One absolute path per line. Sessions started in one of these folders (or below) stay in the backup, but are left out of search and the session list.",
   "kb.field.mirror": "External disk backup",
   "kb.field.mirrorHint": "A second copy on a USB or external drive. Network and cloud drives are not supported. Nothing is ever deleted from the backup.",
   "kb.field.mirrorEnabled": "Also copy the backups to an external disk",

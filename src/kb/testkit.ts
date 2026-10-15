@@ -45,6 +45,7 @@ export const configFixture = (patch: Partial<KbConfig> = {}): KbConfig => ({
     codex: { enabled: true, root: null },
   },
   exclude_prefixes: [],
+  exclude_cwd_prefixes: [],
   mirror: { enabled: false, target_dir: null, volume_uuid: null, volume_name: null },
   ...patch,
 });

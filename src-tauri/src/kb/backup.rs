@@ -452,6 +452,7 @@ mod tests {
             data: DataPaths::new(&data),
             roots: SourceRoots::default(),
             exclude_prefixes: Vec::new(),
+            exclude_cwd_prefixes: Vec::new(),
             mirror: Some(MirrorTarget {
                 target_dir: target.clone(),
                 volume_uuid: "DISK-UUID".into(),

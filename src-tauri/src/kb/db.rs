@@ -84,6 +84,9 @@ const MIGRATIONS: &[&str] = &[
       tokenize='unicode61 remove_diacritics 0'
     );
     ",
+    // v3: sessions whose working directory the user excluded (kept in the
+    // backup, absent from search and the session list).
+    "ALTER TABLE sessions ADD COLUMN cwd_excluded INTEGER NOT NULL DEFAULT 0;",
 ];
 
 /// Same definition as in migration v2, for [`reset_message_index`].
@@ -426,6 +429,40 @@ pub fn purge_messages(tx: &Transaction<'_>, file_id: i64) -> Result<(), String> 
     Ok(())
 }
 
+/// Whether the session's working directory is excluded; its messages leave
+/// the search index when it is.
+pub fn apply_cwd_exclusion(
+    tx: &Transaction<'_>,
+    file_id: i64,
+    cwd: Option<&str>,
+    prefixes: &[String],
+) -> Result<(), String> {
+    let excluded = is_cwd_excluded(cwd, prefixes);
+    tx.execute(
+        "UPDATE sessions SET cwd_excluded=?2 WHERE file_id=?1",
+        params![file_id, i64::from(excluded)],
+    )
+    .map_err(|e| err("mark excluded", e))?;
+    if excluded {
+        purge_messages(tx, file_id)?;
+    }
+    Ok(())
+}
+
+/// `cwd` is `prefix` or below it (compared by whole path components).
+pub fn is_cwd_excluded(cwd: Option<&str>, prefixes: &[String]) -> bool {
+    let Some(cwd) = cwd.filter(|c| !c.is_empty()) else {
+        return false;
+    };
+    prefixes.iter().any(|prefix| {
+        let prefix = prefix.trim_end_matches('/');
+        !prefix.is_empty()
+            && cwd
+                .strip_prefix(prefix)
+                .is_some_and(|rest| rest.is_empty() || rest.starts_with('/'))
+    })
+}
+
 /// Insert or replace the session row of a file. Returns true when it was new.
 pub fn upsert_session(
     tx: &Transaction<'_>,
@@ -578,6 +615,22 @@ pub fn finish_run(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn cwd_exclusion_matches_whole_path_components_only() {
+        let rules = vec!["/a/scratch/".to_string()];
+        let hit = |cwd: &str| super::is_cwd_excluded(Some(cwd), &rules);
+        assert!(hit("/a/scratch"));
+        assert!(hit("/a/scratch/p3/agent-test"));
+        assert!(!hit("/a/scratch-two"));
+        assert!(!hit("/a/scr"));
+        assert!(!super::is_cwd_excluded(None, &rules));
+        assert!(!super::is_cwd_excluded(
+            Some("/a/scratch"),
+            &["/".to_string()]
+        ));
+        assert!(!super::is_cwd_excluded(Some("/x"), &[]));
+    }
+
     use super::*;
 
     #[test]

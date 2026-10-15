@@ -32,6 +32,7 @@ export const KbSettings = () => {
   const [saved, setSaved] = useState<KbConfig | null>(null);
   const [draft, setDraft] = useState<KbConfig | null>(null);
   const [excludeText, setExcludeText] = useState("");
+  const [excludeCwdText, setExcludeCwdText] = useState("");
   const [mirrorOk, setMirrorOk] = useState(true);
   const [saving, setSaving] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -47,6 +48,7 @@ export const KbSettings = () => {
         setSaved(config);
         setDraft(structuredClone(config));
         setExcludeText(config.exclude_prefixes.join("\n"));
+        setExcludeCwdText((config.exclude_cwd_prefixes ?? []).join("\n"));
         setMirrorOk(true);
       })
       .catch((e) => !cancelled && setLoadError(errorText(e)));
@@ -56,9 +58,13 @@ export const KbSettings = () => {
   }, [open]);
 
   const excludes = useMemo(() => parseExcludes(excludeText), [excludeText]);
+  const excludeCwds = useMemo(() => parseExcludes(excludeCwdText), [excludeCwdText]);
   const candidate = useMemo(
-    () => (draft == null ? null : { ...draft, exclude_prefixes: excludes }),
-    [draft, excludes],
+    () =>
+      draft == null
+        ? null
+        : { ...draft, exclude_prefixes: excludes, exclude_cwd_prefixes: excludeCwds },
+    [draft, excludes, excludeCwds],
   );
   const dirty = candidate != null && saved != null && JSON.stringify(candidate) !== JSON.stringify(saved);
   const mirrorChanged =
@@ -71,6 +77,7 @@ export const KbSettings = () => {
   const valid =
     candidate != null &&
     excludesValid(excludes) &&
+    excludesValid(excludeCwds) &&
     candidate.interval_secs >= 60 &&
     (candidate.sources.claude.enabled || candidate.sources.codex.enabled) &&
     (!mirrorChanged || mirrorOk);
@@ -125,6 +132,22 @@ export const KbSettings = () => {
                 className="w-full rounded-md border bg-background p-2 font-mono text-xs"
               />
               {!excludesValid(excludes) && (
+                <p className="text-xs text-destructive" role="alert">
+                  {t("kb.field.excludeInvalid")}
+                </p>
+              )}
+            </Field>
+
+            <Field label={t("kb.field.excludeCwd")} hint={t("kb.field.excludeCwdHint")}>
+              <textarea
+                value={excludeCwdText}
+                onChange={(e) => setExcludeCwdText(e.target.value)}
+                rows={3}
+                aria-label={t("kb.field.excludeCwd")}
+                aria-invalid={!excludesValid(excludeCwds)}
+                className="w-full rounded-md border bg-background p-2 font-mono text-xs"
+              />
+              {!excludesValid(excludeCwds) && (
                 <p className="text-xs text-destructive" role="alert">
                   {t("kb.field.excludeInvalid")}
                 </p>

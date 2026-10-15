@@ -124,6 +124,21 @@ describe("KbSettings", () => {
     expect(mocks.api.saveConfig.mock.calls[0]?.[0].exclude_prefixes).toEqual(["/tmp/a", "/tmp/b"]);
   });
 
+  it("excluded working directories are their own list, also absolute-only", async () => {
+    await openSettings();
+    const box = screen.getByLabelText("kb.field.excludeCwd");
+    fireEvent.change(box, { target: { value: "scratch" } });
+    expect(save().disabled).toBe(true);
+    fireEvent.change(box, { target: { value: "/Users/me/scratch\n" } });
+    expect(save().disabled).toBe(false);
+    mocks.api.saveConfig.mockImplementation(async (config) => ({ config, schedule: null, schedule_error: null }));
+    fireEvent.click(save());
+    await waitFor(() => expect(mocks.api.saveConfig).toHaveBeenCalled());
+    const sent = mocks.api.saveConfig.mock.calls[0]?.[0];
+    expect(sent.exclude_cwd_prefixes).toEqual(["/Users/me/scratch"]);
+    expect(sent.exclude_prefixes).toEqual([]);
+  });
+
   it("a schedule failure after a save is reported, not hidden", async () => {
     await openSettings();
     fireEvent.click(screen.getByRole("button", { name: "kb.field.minutes {\"count\":15}" }));

@@ -88,7 +88,7 @@ pub fn collect(env: &KbEnv) -> Result<KbStatus, String> {
     status.db_exists = true;
 
     let mut stmt = conn
-        .prepare("SELECT source, COUNT(*) FROM sessions GROUP BY source")
+        .prepare("SELECT source, COUNT(*) FROM sessions WHERE cwd_excluded = 0 GROUP BY source")
         .map_err(|e| e.to_string())?;
     let rows = stmt
         .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)))
@@ -223,6 +223,8 @@ pub struct SessionFilter {
     pub include_subagents: Option<bool>,
     /// Sessions with no user/assistant messages (metadata-only files).
     pub include_empty: Option<bool>,
+    /// Sessions whose working directory the user excluded.
+    pub include_excluded: Option<bool>,
     /// `cli`, `vscode`, `exec`… as recorded by the indexer.
     pub client: Option<String>,
     pub project: Option<String>,
@@ -262,6 +264,7 @@ pub fn list_sessions(env: &KbEnv, filter: &SessionFilter) -> Result<Vec<KbSessio
                AND (?10 IS NULL OR COALESCE(s.last_activity_at, f.last_synced_at) <= ?10) \
                AND (?11 IS NULL OR instr(lower(COALESCE(s.title, '')), lower(?11)) > 0) \
                AND (?12 IS NULL OR s.cwd = ?12) \
+               AND (?13 = 1 OR s.cwd_excluded = 0) \
              ORDER BY COALESCE(s.last_activity_at, f.last_synced_at) DESC, s.id DESC \
              LIMIT ?4 OFFSET ?5",
         )
@@ -281,6 +284,7 @@ pub fn list_sessions(env: &KbEnv, filter: &SessionFilter) -> Result<Vec<KbSessio
                 filter.until,
                 filter.query.as_deref().filter(|q| !q.is_empty()),
                 filter.cwd,
+                i64::from(filter.include_excluded.unwrap_or(false)),
             ],
             |r| {
                 let mirror_rel: String = r.get(2)?;
@@ -337,7 +341,7 @@ pub fn facets(env: &KbEnv) -> Result<Facets, String> {
     };
     let mut out = Facets::default();
     let mut stmt = conn
-        .prepare("SELECT DISTINCT client FROM sessions WHERE client IS NOT NULL ORDER BY client")
+        .prepare("SELECT DISTINCT client FROM sessions WHERE client IS NOT NULL AND cwd_excluded = 0 ORDER BY client")
         .map_err(|e| e.to_string())?;
     out.clients = stmt
         .query_map([], |r| r.get::<_, String>(0))
@@ -347,7 +351,7 @@ pub fn facets(env: &KbEnv) -> Result<Facets, String> {
     let mut stmt = conn
         .prepare(
             "SELECT DISTINCT source, project_name FROM sessions \
-             WHERE project_name IS NOT NULL AND project_name <> '' \
+             WHERE project_name IS NOT NULL AND project_name <> '' AND cwd_excluded = 0 \
              ORDER BY project_name COLLATE NOCASE, source",
         )
         .map_err(|e| e.to_string())?;

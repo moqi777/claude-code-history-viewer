@@ -29,6 +29,8 @@ pub const LOCK_WAIT: Duration = Duration::from_secs(3);
 /// source of truth, so improvements reach sessions that never change again.
 pub const INDEXER_VERSION: &str = "6";
 const INDEXER_VERSION_KEY: &str = "indexer_version";
+/// The excluded working directories the index was last built under.
+const EXCLUDE_CWD_KEY: &str = "exclude_cwd_applied";
 
 /// Warn (in the log) about unexpectedly huge single lines.
 const HUGE_LINE_BYTES: u64 = 100 * 1024 * 1024;
@@ -45,6 +47,8 @@ pub struct KbEnv {
     pub data: DataPaths,
     pub roots: SourceRoots,
     pub exclude_prefixes: Vec<String>,
+    /// Working directories left out of search and the session list.
+    pub exclude_cwd_prefixes: Vec<String>,
     /// `Some` only when the disk backup is enabled and fully configured.
     pub mirror: Option<MirrorTarget>,
     pub progress: ProgressSink,
@@ -65,6 +69,7 @@ impl KbEnv {
             data: DataPaths::new(config.data_dir.clone()),
             roots: SourceRoots::resolve(config),
             exclude_prefixes: config.exclude_prefixes.clone(),
+            exclude_cwd_prefixes: config.exclude_cwd_prefixes.clone(),
             mirror: mirror.flatten(),
             progress: ProgressSink::default(),
             force_reindex: false,
@@ -370,8 +375,12 @@ fn reindex_if_outdated(
     log: &SyncLog,
     summary: &mut Summary,
 ) -> Result<(), String> {
+    // Changing the excluded directories rebuilds too: sessions that stop being
+    // excluded need their messages back, which only the mirror can give.
+    let exclusions = env.exclude_cwd_prefixes.join("\n");
     if !env.force_reindex
         && db::get_meta(conn, INDEXER_VERSION_KEY)?.as_deref() == Some(INDEXER_VERSION)
+        && db::get_meta(conn, EXCLUDE_CWD_KEY)?.unwrap_or_default() == exclusions
     {
         return Ok(());
     }
@@ -396,6 +405,7 @@ fn reindex_if_outdated(
     // Stay outdated after a failure so the next sync retries.
     if !failed {
         db::set_meta(conn, INDEXER_VERSION_KEY, INDEXER_VERSION)?;
+        db::set_meta(conn, EXCLUDE_CWD_KEY, &exclusions)?;
     }
     Ok(())
 }
@@ -430,13 +440,20 @@ fn reindex_one(env: &KbEnv, conn: &Connection, row: &FileRow) -> Result<(), Stri
         .map_err(|e| format!("begin: {e}"))?;
     let (replace_all, ops) = indexer.take_message_ops();
     db::apply_message_ops(&tx, row.id, replace_all, &ops)?;
+    let record = indexer.record();
     db::upsert_session(
         &tx,
         row.id,
         row.source,
-        &indexer.record(),
+        &record,
         &indexer.state_json(),
         &unknown,
+    )?;
+    db::apply_cwd_exclusion(
+        &tx,
+        row.id,
+        record.cwd.as_deref(),
+        &env.exclude_cwd_prefixes,
     )?;
     tx.commit().map_err(|e| format!("commit: {e}"))
 }
@@ -484,7 +501,15 @@ fn process_file(
         Ok(())
     })?;
 
-    commit_file(conn, file, prior, &mut indexer, &mirrored.cursor, summary)?;
+    commit_file(
+        env,
+        conn,
+        file,
+        prior,
+        &mut indexer,
+        &mirrored.cursor,
+        summary,
+    )?;
 
     summary.changed_files += 1;
     summary.copied_bytes += mirrored.copied_bytes;
@@ -538,6 +563,7 @@ fn restore_indexer(
 }
 
 fn commit_file(
+    env: &KbEnv,
     conn: &Connection,
     file: &SourceFile,
     prior: Option<&FileRow>,
@@ -569,13 +595,20 @@ fn commit_file(
     let unknown = serde_json::to_string(indexer.unknown_types()).unwrap_or_else(|_| "{}".into());
     let (replace_all, ops) = indexer.take_message_ops();
     db::apply_message_ops(&tx, file_id, replace_all, &ops)?;
+    let record = indexer.record();
     let is_new = db::upsert_session(
         &tx,
         file_id,
         file.source,
-        &indexer.record(),
+        &record,
         &indexer.state_json(),
         &unknown,
+    )?;
+    db::apply_cwd_exclusion(
+        &tx,
+        file_id,
+        record.cwd.as_deref(),
+        &env.exclude_cwd_prefixes,
     )?;
     tx.commit().map_err(|e| format!("commit: {e}"))?;
     if is_new {
@@ -668,6 +701,7 @@ mod tests {
                     codex: Some(codex.clone()),
                 },
                 exclude_prefixes: vec![],
+                exclude_cwd_prefixes: vec![],
                 mirror: None,
                 progress: ProgressSink::default(),
                 force_reindex: false,
@@ -1719,6 +1753,92 @@ mod tests {
             .find(|h| h.kind == "user")
             .unwrap();
         assert!(question.snippet.chars().count() < 220);
+    }
+
+    fn scratch_file(sb: &Sandbox) -> PathBuf {
+        sb.claude
+            .join("projects/-Users-me-scratch-t1/22222222-2222-4222-8222-222222222222.jsonl")
+    }
+
+    fn scratch_text(extra: &str) -> String {
+        serde_json::json!({"type":"user","timestamp":"2026-01-02T00:00:01Z",
+            "cwd":"/Users/me/scratch/t1",
+            "message":{"role":"user","content":format!("quokka test question {extra}")}})
+        .to_string()
+            + "\n"
+    }
+
+    #[test]
+    fn excluded_working_directories_stay_backed_up_but_leave_search_and_the_list() {
+        let mut sb = Sandbox::new();
+        write(
+            &sb.claude_file(),
+            &user_line("2026-01-01T00:00:01Z", "quokka real work"),
+        );
+        write(&scratch_file(&sb), &scratch_text(""));
+        sb.sync();
+        let visible = |sb: &Sandbox| {
+            let filter = crate::kb::status::SessionFilter::default();
+            crate::kb::status::list_sessions(&sb.env, &filter)
+                .unwrap()
+                .len()
+        };
+        assert_eq!((found(&sb, "quokka"), visible(&sb)), (2, 2));
+
+        // A rule that only shares a name prefix does not match (whole components).
+        sb.env.exclude_cwd_prefixes = vec!["/Users/me/scr".into()];
+        sb.sync();
+        assert_eq!(found(&sb, "quokka"), 2);
+
+        sb.env.exclude_cwd_prefixes = vec!["/Users/me/scratch/".into()];
+        sb.sync();
+        assert_eq!(found(&sb, "quokka"), 1, "the test session left the index");
+        assert_eq!(visible(&sb), 1);
+        let all = crate::kb::status::SessionFilter {
+            include_excluded: Some(true),
+            ..Default::default()
+        };
+        assert_eq!(
+            crate::kb::status::list_sessions(&sb.env, &all)
+                .unwrap()
+                .len(),
+            2
+        );
+        assert_eq!(
+            crate::kb::status::facets(&sb.env).unwrap().projects.len(),
+            1
+        );
+        // The raw copy is still there and identical to the source.
+        let row = session_rows(&sb.db());
+        assert_eq!(row.len(), 2);
+        let mirror = sb.mirror_of(
+            "claude/projects/-Users-me-scratch-t1/22222222-2222-4222-8222-222222222222.jsonl",
+        );
+        assert_eq!(
+            fs::read(&mirror).unwrap(),
+            fs::read(scratch_file(&sb)).unwrap()
+        );
+
+        // New lines in an excluded session are collected but not indexed.
+        append(&scratch_file(&sb), &scratch_text("again"));
+        sb.sync();
+        assert_eq!(found(&sb, "quokka"), 1);
+        assert_eq!(
+            fs::read(&mirror).unwrap(),
+            fs::read(scratch_file(&sb)).unwrap()
+        );
+
+        // Dropping the rule brings the messages back from the mirror.
+        sb.env.exclude_cwd_prefixes = vec![];
+        sb.sync();
+        assert_eq!((found(&sb, "quokka"), visible(&sb)), (2, 2));
+        assert_eq!(
+            message_rows(&sb.db())
+                .iter()
+                .filter(|r| r.0 == "22222222-2222-4222-8222-222222222222")
+                .count(),
+            2
+        );
     }
 
     #[test]
