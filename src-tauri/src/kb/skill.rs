@@ -19,7 +19,7 @@ pub const SKILL_DIR_NAME: &str = "agentkb";
 const SKILL_FILE: &str = "SKILL.md";
 const MARKER_PREFIX: &str = "<!-- agentkb-skill v1";
 /// Template revision; bump when the text changes so installed copies show as stale.
-pub const TEMPLATE_VERSION: u32 = 2;
+pub const TEMPLATE_VERSION: u32 = 3;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -100,14 +100,17 @@ description: Search the user's past Claude Code and Codex conversations (backed 
 2. 搜索：`{exe} --kb-search \"<关键词>\"`\n\
    可选：`--source claude|codex`、`--project <名>`、`--since 30d`、`--limit 5`。\n\
    结果默认是精简的：每个会话一条，它的子会话（sub-agent）命中已并进去，只给 `subagent_hits` 计数；标题最多 60 字。\n\
-3. 看结果里每个会话的 `title`、`last_activity_at`、`hits[].snippet`。没找到或不相关：换关键词（同义词、中英文各一次）再搜，**一共最多 3 次**，仍没有就如实告诉用户没找到。\n\
+3. 先看结果里的 `notes`（AgentKB 每天用 AI 整理的笔记：问题、原因、解决办法、结论，带出处）。笔记已经能回答时直接用它回答；再看每个会话的 `title`、`last_activity_at`、`hits[].snippet`。没找到或不相关：换关键词（同义词、中英文各一次）再搜，**一共最多 3 次**，仍没有就如实告诉用户没找到。\n\
 4. 对最相关的 1–2 个会话，读上下文再回答：\n\
    `{exe} --kb-show <source>:<session_id> --around <hits[].seq>`\n\
    若该条 hit 带 `subagent_session_id`，上面的 `<session_id>` 要换成它（命中在子会话里）。\n\
+   笔记的出处用 `notes[].show`（`--around` 指向笔记依据的第一条消息）。笔记是 AI 写的摘要，可能漏掉或理解错；要据此改代码、跑命令之前，先用 `show` 核对原文。\n\
 5. 回答：先给结论，再列出处——会话标题、日期、项目，以及结果里的 `resume.command`。`resume.available` 为 false 时说明原会话已删除，只能用 `--kb-show` 看备份内容。\n\
+   引用笔记时要说明“这是 AgentKB 整理的笔记”以及笔记日期（`digested_at`）。\n\
 \n\
 注意：\n\
 - 需要完整字段或把子会话分开列出时才加 `--verbose` / `--include-subagents`。\n\
+- 只想要原始消息命中时加 `--no-notes`；想多看几条笔记加 `--notes 5`。\n\
 - 调用命令时不要加管道、`cd` 或其他命令拼接（会让预授权的前缀匹配失效，又弹确认）。\n\
 - 不要自己 grep 或读取 `~/.claude`、`~/.codex`、`~/AgentKB`，只用上面两个命令。\n\
 - 结果是过去的记录，可能已过时（看 `data_as_of` 和会话日期），据此动手前先到代码里核实。\n\

@@ -17,6 +17,7 @@
 //!   three attempts, ten minutes apart.
 //! * The AI is never called while a database transaction is open.
 
+pub mod commands;
 pub mod engine;
 pub mod input;
 pub mod plan;
@@ -793,6 +794,31 @@ fn digest_session(
 // Deciding whether a run is worth starting (called after every `--kb-sync`)
 // ---------------------------------------------------------------------------
 
+/// Whether a digest process is running now (its pid, from the lock file).
+pub fn running_pid(data: &DataPaths) -> Option<u32> {
+    super::lock::held_by_live_process(&data.digest_lock()).map(|i| i.pid)
+}
+
+/// Ask a running digest to stop (the app's "stop" button): SIGTERM to the
+/// pid in the lock file. True when a signal was sent.
+#[allow(unsafe_code)] // `kill(2)` on the pid the lock file names
+pub fn request_stop(data: &DataPaths) -> bool {
+    #[cfg(unix)]
+    {
+        let Some(pid) = running_pid(data).and_then(|p| i32::try_from(p).ok()) else {
+            return false;
+        };
+        // SAFETY: plain syscall; the pid belongs to a live process that holds
+        // our lock (checked just above).
+        unsafe { libc::kill(pid, libc::SIGTERM) == 0 }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = data;
+        false
+    }
+}
+
 /// True when `--kb-digest --auto` has something to do: digest on, not paused,
 /// nobody running, and either the latest round was never planned or an open
 /// round has an item whose time has come.
@@ -824,6 +850,39 @@ pub fn due_check(config: &KbConfig, now: DateTime<Utc>, tz: FixedOffset) -> Resu
     Ok(store::get_round(&conn, &round_id)?.is_none())
 }
 
+static TERMINATED: AtomicBool = AtomicBool::new(false);
+
+#[cfg(unix)]
+extern "C" fn on_sigterm(_signal: libc::c_int) {
+    TERMINATED.store(true, Ordering::SeqCst);
+}
+
+/// Make SIGTERM (the app's "stop" button) set `cancel`: the run kills the AI
+/// process, puts the session back as pending, and leaves cleanly.
+#[allow(unsafe_code)] // installing a signal handler that only stores to an atomic
+pub fn stop_on_sigterm(cancel: &Arc<AtomicBool>) {
+    #[cfg(unix)]
+    {
+        // SAFETY: the handler is async-signal-safe (one atomic store).
+        unsafe {
+            libc::signal(
+                libc::SIGTERM,
+                on_sigterm as extern "C" fn(libc::c_int) as libc::sighandler_t,
+            );
+        }
+        let cancel = Arc::clone(cancel);
+        std::thread::spawn(move || loop {
+            if TERMINATED.load(Ordering::SeqCst) {
+                cancel.store(true, Ordering::SeqCst);
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(100));
+        });
+    }
+    #[cfg(not(unix))]
+    let _ = cancel;
+}
+
 /// Start `--kb-digest --auto` as a separate, detached process and return at
 /// once, so the collection that called this never waits for the AI.
 #[allow(unsafe_code)] // `setsid(2)` between fork and exec
@@ -831,6 +890,7 @@ pub fn spawn_background(
     exe: &std::path::Path,
     data: &DataPaths,
     args: &[&str],
+    env: &[(&str, &str)],
 ) -> Result<(), String> {
     let logs = data.logs();
     std::fs::create_dir_all(&logs).map_err(|e| format!("cannot create {}: {e}", logs.display()))?;
@@ -848,6 +908,7 @@ pub fn spawn_background(
     let mut command = std::process::Command::new(exe);
     command
         .args(args)
+        .envs(env.iter().copied())
         .stdin(std::process::Stdio::null())
         .stdout(open()?)
         .stderr(open()?);

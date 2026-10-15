@@ -6,6 +6,7 @@
 //! `-shm` file next to a database nobody has open) it is opened `immutable=1`,
 //! which is exact when no process holds the database.
 
+use std::collections::HashMap;
 use std::collections::{BTreeMap, HashSet};
 use std::path::Path;
 use std::time::Duration;
@@ -25,6 +26,10 @@ use super::Source;
 pub const DEFAULT_LIMIT: usize = 5;
 pub const MAX_LIMIT: usize = 20;
 pub const DEFAULT_PER_SESSION: usize = 2;
+pub const DEFAULT_NOTES: usize = 3;
+pub const MAX_NOTES: usize = 10;
+/// A session never takes more than this many of the note slots.
+const NOTES_PER_SESSION: usize = 2;
 pub const MAX_PER_SESSION: usize = 5;
 /// Messages pulled from the index before grouping them into sessions.
 const CANDIDATES: usize = 300;
@@ -201,6 +206,9 @@ pub struct SearchParams {
     /// `auto` (default), `all` or `any`.
     pub mode: Option<String>,
     pub kinds: Option<Vec<String>>,
+    /// How many AI-written notes to return ahead of the messages; `Some(0)`
+    /// turns them off. Default [`DEFAULT_NOTES`].
+    pub notes: Option<usize>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -257,6 +265,9 @@ pub struct SessionHit {
     pub session: SessionInfo,
     pub resume: Resume,
     pub paths: Paths,
+    /// The session has AI-written notes (see `notes` in the response).
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub has_note: bool,
     pub hit_messages: usize,
     /// Matching messages from sub-agent sessions folded into this entry.
     #[serde(skip_serializing_if = "is_zero")]
@@ -270,6 +281,49 @@ fn is_zero(n: &usize) -> bool {
 }
 
 #[derive(Debug, Clone, Serialize)]
+pub struct NoteEvidence {
+    pub seq_from: u64,
+    pub seq_to: u64,
+    pub msg_key: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct NoteSession {
+    pub source: String,
+    pub session_id: String,
+    pub title: Option<String>,
+    pub last_activity_at: Option<String>,
+}
+
+/// One entry of a session's notes, as found by a search.
+#[derive(Debug, Clone, Serialize)]
+pub struct NoteHit {
+    /// Always `"note"`: tells it apart from message hits.
+    pub kind: &'static str,
+    pub rank: usize,
+    pub score: f64,
+    /// `n1`, `n2`… inside the session's note file.
+    pub entry_id: String,
+    /// The digest round that wrote it.
+    pub round: String,
+    /// `claude/<model>`: which AI wrote it.
+    pub engine: String,
+    pub title: String,
+    pub problem: String,
+    pub cause: String,
+    pub solution: String,
+    pub conclusion: String,
+    pub keywords: Vec<String>,
+    pub evidence: NoteEvidence,
+    /// When the AI wrote it: notes are summaries, not the conversation.
+    pub digested_at: String,
+    pub session: NoteSession,
+    /// Read the messages the note is based on.
+    pub show: String,
+    pub resume: Resume,
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub struct SearchResponse {
     pub agentkb_marker: &'static str,
     pub query: String,
@@ -279,6 +333,9 @@ pub struct SearchResponse {
     pub data_as_of: Option<String>,
     pub matched_sessions: usize,
     pub returned: usize,
+    /// Notes the daily digest wrote, best first. Absent keys of older
+    /// versions of this output are unaffected: this is only ever added.
+    pub notes: Vec<NoteHit>,
     pub results: Vec<SessionHit>,
     pub hint: Option<String>,
 }
@@ -652,6 +709,356 @@ fn run_pass(
     Ok(candidates)
 }
 
+// ---------------------------------------------------------------------------
+// Notes
+// ---------------------------------------------------------------------------
+
+struct NoteRow {
+    id: i64,
+    entry_id: String,
+    round_id: String,
+    engine: String,
+    model: String,
+    file_id: i64,
+    source: String,
+    session_id: String,
+    title: String,
+    problem: String,
+    cause: String,
+    solution: String,
+    conclusion: String,
+    keywords: String,
+    seq_from: i64,
+    seq_to: i64,
+    msg_key: Option<String>,
+    digested_at: String,
+    rank: f64,
+}
+
+fn note_row_from(r: &rusqlite::Row<'_>) -> rusqlite::Result<NoteRow> {
+    Ok(NoteRow {
+        id: r.get(0)?,
+        file_id: r.get(1)?,
+        source: r.get(2)?,
+        session_id: r.get(3)?,
+        title: r.get(4)?,
+        problem: r.get(5)?,
+        cause: r.get(6)?,
+        solution: r.get(7)?,
+        conclusion: r.get(8)?,
+        keywords: r.get(9)?,
+        seq_from: r.get(10)?,
+        seq_to: r.get(11)?,
+        msg_key: r.get(12)?,
+        digested_at: r.get(13)?,
+        rank: r.get(14)?,
+        entry_id: r.get(15)?,
+        round_id: r.get(16)?,
+        engine: r.get(17)?,
+        model: r.get(18)?,
+    })
+}
+
+fn has_note_tables(index: &Index) -> Result<bool, SearchError> {
+    Ok(index.conn.query_row(
+        "SELECT COUNT(*) FROM sqlite_master WHERE name IN ('notes','notes_fts')",
+        [],
+        |r| r.get::<_, i64>(0),
+    )? == 2)
+}
+
+fn fetch_notes(
+    index: &Index,
+    groups: &[QueryGroup],
+    all: bool,
+    params: &SearchParams,
+) -> Result<Vec<NoteRow>, SearchError> {
+    let mut sql = String::from(
+        "SELECT n.id, s.file_id, n.source, n.session_id, n.title, n.problem, n.cause, n.solution, \
+                n.conclusion, n.keywords, n.seq_from, n.seq_to, n.msg_key, n.digested_at, \
+                bm25(notes_fts, 3.0, 4.0, 1.0) AS rank, n.entry_id, n.round_id, n.engine, n.model \
+         FROM notes_fts \
+         JOIN notes n ON n.id = notes_fts.rowid \
+         JOIN sessions s ON s.source = n.source AND s.session_id = n.session_id AND s.is_subagent = 0 \
+         JOIN files f ON f.id = s.file_id \
+         WHERE notes_fts MATCH ?1 AND s.cwd_excluded = 0",
+    );
+    let mut args: Vec<SqlValue> = vec![SqlValue::Text(match_expr(groups, all))];
+    let mut push = |clause: &str, value: SqlValue, sql: &mut String| {
+        args.push(value);
+        sql.push_str(&format!(
+            " AND {}",
+            clause.replace('?', &format!("?{}", args.len()))
+        ));
+    };
+    if let Some(source) = params.source.as_deref().filter(|s| !s.is_empty()) {
+        push("s.source = ?", SqlValue::Text(source.to_string()), &mut sql);
+    }
+    if let Some(client) = params.client.as_deref().filter(|s| !s.is_empty()) {
+        push("s.client = ?", SqlValue::Text(client.to_string()), &mut sql);
+    }
+    if let Some(project) = params.project.as_deref().filter(|s| !s.is_empty()) {
+        push(
+            "instr(lower(COALESCE(s.project_name,'') || ' ' || COALESCE(s.cwd,'')), lower(?)) > 0",
+            SqlValue::Text(project.to_string()),
+            &mut sql,
+        );
+    }
+    if let Some(since) = params.since.as_deref().filter(|s| !s.is_empty()) {
+        push(
+            "COALESCE(s.last_activity_at, f.last_synced_at) >= ?",
+            SqlValue::Text(since.to_string()),
+            &mut sql,
+        );
+    }
+    if let Some(until) = params.until.as_deref().filter(|s| !s.is_empty()) {
+        push(
+            "COALESCE(s.last_activity_at, f.last_synced_at) <= ?",
+            SqlValue::Text(until.to_string()),
+            &mut sql,
+        );
+    }
+    sql.push_str(" ORDER BY rank LIMIT 60");
+    let mut stmt = index.conn.prepare(&sql)?;
+    let rows = stmt.query_map(params_from_iter(args.iter()), note_row_from)?;
+    Ok(rows.collect::<Result<_, _>>()?)
+}
+
+/// The best notes for the query: strict match first (every word), relaxed
+/// only when strict finds nothing, like the message search. At most
+/// [`NOTES_PER_SESSION`] per session so one chatty session cannot fill the list.
+fn search_notes(
+    index: &Index,
+    groups: &[QueryGroup],
+    params: &SearchParams,
+    limit: usize,
+    exe: &str,
+) -> Result<Vec<NoteHit>, SearchError> {
+    if limit == 0 || !has_note_tables(index)? {
+        return Ok(Vec::new());
+    }
+    let mode = params.mode.as_deref().unwrap_or("auto");
+    let mut rows = match mode {
+        "any" => Vec::new(),
+        _ => fetch_notes(index, groups, true, params)?,
+    };
+    let mut relaxed = false;
+    if rows.is_empty() && mode != "all" {
+        relaxed = true;
+        rows = fetch_notes(index, groups, false, params)?;
+    }
+    let mut scored: Vec<(f64, NoteRow)> = Vec::new();
+    for row in rows {
+        // bm25() is lower-is-better and negative.
+        let mut score = -row.rank;
+        if relaxed {
+            let text = format!(
+                "{} {} {} {} {} {}",
+                row.title, row.keywords, row.problem, row.cause, row.solution, row.conclusion
+            );
+            let cov = coverage(groups, &token_set(&text));
+            if cov < MIN_COVERAGE {
+                continue;
+            }
+            score *= 0.5 + cov;
+        }
+        scored.push((score, row));
+    }
+    scored.sort_by(|a, b| b.0.total_cmp(&a.0).then(a.1.id.cmp(&b.1.id)));
+
+    let mut per_session: HashMap<(String, String), usize> = HashMap::new();
+    let mut out = Vec::new();
+    for (score, row) in scored {
+        let taken = per_session
+            .entry((row.source.clone(), row.session_id.clone()))
+            .or_default();
+        if *taken >= NOTES_PER_SESSION {
+            continue;
+        }
+        let Some(note) = note_hit(index, row, score, exe)? else {
+            continue;
+        };
+        *taken += 1;
+        out.push(note);
+        if out.len() >= limit {
+            break;
+        }
+    }
+    // Recency may reorder; the numbers shown follow the final order.
+    out.sort_by(|a, b| b.score.total_cmp(&a.score));
+    for (i, note) in out.iter_mut().enumerate() {
+        note.rank = i + 1;
+    }
+    Ok(out)
+}
+
+/// A found row as the output shows it; `None` when its session left the index.
+fn note_hit(
+    index: &Index,
+    row: NoteRow,
+    score: f64,
+    exe: &str,
+) -> Result<Option<NoteHit>, SearchError> {
+    let Some(session) = session_row(index, row.file_id)? else {
+        return Ok(None);
+    };
+    let mut info = session.info;
+    info.title = info.title.map(|t| redact(&t).into_owned());
+    let keywords: Vec<String> = serde_json::from_str(&row.keywords).unwrap_or_default();
+    Ok(Some(NoteHit {
+        kind: "note",
+        rank: 0,
+        score: (score * recency_factor(info.last_activity_at.as_deref()) * 100.0).round() / 100.0,
+        entry_id: row.entry_id,
+        round: row.round_id,
+        engine: format!("{}/{}", row.engine, row.model),
+        title: row.title,
+        problem: row.problem,
+        cause: row.cause,
+        solution: row.solution,
+        conclusion: row.conclusion,
+        keywords,
+        evidence: NoteEvidence {
+            seq_from: u64::try_from(row.seq_from).unwrap_or(0),
+            seq_to: u64::try_from(row.seq_to).unwrap_or(0),
+            msg_key: row.msg_key,
+        },
+        digested_at: row.digested_at,
+        show: format!(
+            "{exe} --kb-show {}:{} --around {}",
+            row.source, row.session_id, row.seq_from
+        ),
+        resume: resume_for(&info, exe),
+        session: NoteSession {
+            source: row.source,
+            session_id: row.session_id,
+            title: info.title,
+            last_activity_at: info.last_activity_at,
+        },
+    }))
+}
+
+/// The notes page: newest first, optionally of one source / one session.
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct NotesFilter {
+    pub source: Option<String>,
+    pub session_id: Option<String>,
+    /// RFC 3339 lower bound on the note's date.
+    pub since: Option<String>,
+    pub limit: Option<usize>,
+    pub offset: Option<usize>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct NotesPage {
+    pub total: usize,
+    pub notes: Vec<NoteHit>,
+}
+
+pub fn list_notes(data: &DataPaths, filter: &NotesFilter) -> Result<NotesPage, SearchError> {
+    let path = data.db();
+    if !path.is_file() {
+        return Ok(NotesPage {
+            total: 0,
+            notes: Vec::new(),
+        });
+    }
+    let conn = open_with(&path, false)
+        .or_else(|_| open_with(&path, true))
+        .map_err(|e| SearchError::Other(format!("cannot open kb.db: {e}")))?;
+    let index = Index {
+        conn,
+        read_mode: ReadMode::Normal,
+        data: data.clone(),
+    };
+    if !has_note_tables(&index)? {
+        return Ok(NotesPage {
+            total: 0,
+            notes: Vec::new(),
+        });
+    }
+    let mut clause = String::from("s.cwd_excluded = 0");
+    let mut args: Vec<SqlValue> = Vec::new();
+    for (value, sql) in [
+        (&filter.source, "n.source = ?"),
+        (&filter.session_id, "n.session_id = ?"),
+        (&filter.since, "n.digested_at >= ?"),
+    ] {
+        if let Some(v) = value.as_deref().filter(|v| !v.is_empty()) {
+            args.push(SqlValue::Text(v.to_string()));
+            clause.push_str(&format!(
+                " AND {}",
+                sql.replace('?', &format!("?{}", args.len()))
+            ));
+        }
+    }
+    let from = format!(
+        "FROM notes n JOIN sessions s ON s.source = n.source AND s.session_id = n.session_id \
+         AND s.is_subagent = 0 WHERE {clause}"
+    );
+    let total: i64 = index.conn.query_row(
+        &format!("SELECT COUNT(*) {from}"),
+        params_from_iter(args.iter()),
+        |r| r.get(0),
+    )?;
+    let limit = filter.limit.unwrap_or(50).clamp(1, 200);
+    let offset = filter.offset.unwrap_or(0);
+    let mut stmt = index.conn.prepare(&format!(
+        "SELECT n.id, s.file_id, n.source, n.session_id, n.title, n.problem, n.cause, n.solution, \
+                n.conclusion, n.keywords, n.seq_from, n.seq_to, n.msg_key, n.digested_at, \
+                0.0, n.entry_id, n.round_id, n.engine, n.model \
+         {from} ORDER BY n.digested_at DESC, n.id LIMIT {limit} OFFSET {offset}"
+    ))?;
+    let rows = stmt.query_map(params_from_iter(args.iter()), note_row_from)?;
+    let exe = current_exe_string();
+    let mut notes = Vec::new();
+    for row in rows {
+        if let Some(mut note) = note_hit(&index, row?, 0.0, &exe)? {
+            note.rank = offset + notes.len() + 1;
+            notes.push(note);
+        }
+    }
+    Ok(NotesPage {
+        total: usize::try_from(total).unwrap_or(0),
+        notes,
+    })
+}
+
+/// Notes matching `params.query` (the notes page's search box).
+pub fn find_notes_in(
+    data: &DataPaths,
+    params: &SearchParams,
+    limit: usize,
+) -> Result<Vec<NoteHit>, SearchError> {
+    let groups = tokenize::query_groups(&params.query);
+    if groups.is_empty() {
+        return Ok(Vec::new());
+    }
+    let index = Index::open(data)?;
+    search_notes(
+        &index,
+        &groups,
+        params,
+        limit.clamp(1, 50),
+        &current_exe_string(),
+    )
+}
+
+fn session_has_note(index: &Index, source: &str, session_id: &str) -> bool {
+    has_note_tables(index).unwrap_or(false)
+        && index
+            .conn
+            .query_row(
+                "SELECT 1 FROM notes WHERE source=?1 AND session_id=?2 LIMIT 1",
+                rusqlite::params![source, session_id],
+                |_| Ok(()),
+            )
+            .optional()
+            .ok()
+            .flatten()
+            .is_some()
+}
+
 pub fn search(index: &Index, params: &SearchParams) -> Result<SearchResponse, SearchError> {
     let groups = tokenize::query_groups(&params.query);
     if groups.is_empty() {
@@ -775,6 +1182,7 @@ pub fn search(index: &Index, params: &SearchParams) -> Result<SearchResponse, Se
                 mirror,
                 original: row.source_path.clone(),
             },
+            has_note: session_has_note(index, &info.source, &info.session_id),
             session: info,
             hit_messages,
             subagent_hits,
@@ -786,7 +1194,9 @@ pub fn search(index: &Index, params: &SearchParams) -> Result<SearchResponse, Se
     for (i, r) in results.iter_mut().enumerate() {
         r.rank = i + 1;
     }
-    let hint = results.is_empty().then(|| {
+    let notes_limit = params.notes.unwrap_or(DEFAULT_NOTES).min(MAX_NOTES);
+    let notes = search_notes(index, &groups, params, notes_limit, &exe)?;
+    let hint = (results.is_empty() && notes.is_empty()).then(|| {
         "No match. Try fewer or different words (a synonym, the English/Chinese variant, \
          a class or error name), or widen --since/--source/--project."
             .to_string()
@@ -808,6 +1218,7 @@ pub fn search(index: &Index, params: &SearchParams) -> Result<SearchResponse, Se
         data_as_of: index.data_as_of(),
         matched_sessions,
         returned: results.len(),
+        notes,
         results,
         hint,
     })
@@ -1134,7 +1545,7 @@ pub fn short_title(title: &str) -> String {
 /// message id of the viewer, the file locations (the skill forbids reading
 /// them), a ready-made `--kb-show` line that repeats the program path, and
 /// session facts the resume command already carries.
-const HUMAN_ONLY_KEYS: [&str; 10] = [
+const HUMAN_ONLY_KEYS: [&str; 13] = [
     "tokens",
     "paths",
     "highlights",
@@ -1145,6 +1556,9 @@ const HUMAN_ONLY_KEYS: [&str; 10] = [
     "message_count",
     "is_subagent",
     "parent_session_id",
+    "entry_id",
+    "round",
+    "engine",
 ];
 
 fn strip_for_agent(value: &mut serde_json::Value) {
@@ -1171,10 +1585,36 @@ fn strip_for_agent(value: &mut serde_json::Value) {
 pub fn agent_json<T: Serialize>(value: &T, verbose: bool) -> serde_json::Value {
     let mut json = serde_json::to_value(value).unwrap_or(serde_json::Value::Null);
     if !verbose {
+        // A note's `show` is how an agent reads the evidence, so it stays
+        // (unlike the `show` of every message hit, which it can rebuild).
+        let notes = json.as_object_mut().and_then(|o| o.remove("notes"));
         strip_for_agent(&mut json);
+        if let (Some(serde_json::Value::Array(mut notes)), Some(object)) =
+            (notes, json.as_object_mut())
+        {
+            for note in &mut notes {
+                let show = note.get("show").cloned();
+                strip_for_agent(note);
+                if let (Some(show), Some(map)) = (show, note.as_object_mut()) {
+                    map.insert("show".into(), show);
+                }
+                if let Some(map) = note.as_object_mut() {
+                    for key in NOTE_VERBOSE_ONLY {
+                        map.remove(key);
+                    }
+                }
+            }
+            object.insert("notes".into(), serde_json::Value::Array(notes));
+        }
     }
     json
 }
+
+/// Note fields only `--verbose` prints. Empty while the default output stays
+/// under the size budget (10 KB on average over `P3-eval.md`, measured on the
+/// sample library in P4 step 4); if it does not, `problem`, `cause`,
+/// `solution`, `keywords` and `evidence` go here.
+const NOTE_VERBOSE_ONLY: [&str; 0] = [];
 
 pub fn format_search_text(response: &SearchResponse) -> String {
     let mut out = format!(
@@ -1184,6 +1624,31 @@ pub fn format_search_text(response: &SearchResponse) -> String {
         local_time(response.data_as_of.as_deref()),
         response.mode_used
     );
+    if !response.notes.is_empty() {
+        out.push_str(
+            "\nNotes (written by AgentKB's daily AI digest; check the original with `show`):\n",
+        );
+        for note in &response.notes {
+            out.push_str(&format!(
+                "\n[note {}] {} — {} · {}\n",
+                note.rank,
+                note.title,
+                note.session.source,
+                local_time(Some(&note.digested_at))
+            ));
+            for (label, text) in [
+                ("problem", &note.problem),
+                ("cause", &note.cause),
+                ("solution", &note.solution),
+                ("conclusion", &note.conclusion),
+            ] {
+                if !text.is_empty() {
+                    out.push_str(&format!("   {label}: {text}\n"));
+                }
+            }
+            out.push_str(&format!("   show: {}\n", note.show));
+        }
+    }
     for r in &response.results {
         let s = &r.session;
         out.push_str(&format!(

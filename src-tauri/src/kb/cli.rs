@@ -14,7 +14,8 @@ use super::sync::{self, KbEnv};
 
 const USAGE: &str = "usage: --kb-sync | --kb-reindex | --kb-backup | --kb-move-data <new dir> \
 | --kb-schedule install|uninstall|status|ensure | --kb-search \"<words>\" [options] \
-| --kb-show <source:session-id> [--around <seq>] [options] | --kb-skill-print claude|codex";
+| --kb-show <source:session-id> [--around <seq>] [options] | --kb-skill-print claude|codex \
+| --kb-digest --auto|--all|--session <source:session-id>|--test";
 
 /// `Some(exit code)` when `args` is a KB command, `None` to let the app start
 /// normally. Only `argv[1]` is inspected, so a stray `--kb-…` value elsewhere
@@ -30,6 +31,7 @@ pub fn try_run(args: &[String]) -> Option<i32> {
         "--kb-search" => run_search_command(&args[2..]),
         "--kb-show" => run_show_command(&args[2..]),
         "--kb-skill-print" => run_skill_print_command(args.get(2).map(String::as_str)),
+        "--kb-digest" => run_digest_command(&args[2..]),
         "--kb-backup" => run_backup_command(),
         "--kb-move-data" => run_move_data_command(args.get(2).map(String::as_str)),
         "--kb-schedule" => run_schedule_command(args.get(2).map(String::as_str)),
@@ -64,6 +66,9 @@ fn run_sync_command() -> i32 {
     match sync::run_sync(&KbEnv::from_config(&config), &trigger) {
         Ok(summary) => {
             print_json(&summary);
+            if trigger != "cli" && matches!(summary.status.as_str(), "ok" | "partial") {
+                start_digest_if_due(&config);
+            }
             // A held lock is a normal outcome, not a failure launchd should log.
             i32::from(summary.status == "error" || summary.status == "partial")
         }
@@ -74,6 +79,94 @@ fn run_sync_command() -> i32 {
             );
             1
         }
+    }
+}
+
+/// After a collection: if a digest round is due (or unfinished and its retry
+/// time has come), start `--kb-digest --auto` as a separate process and move
+/// on. The collection never waits for the AI, and a problem here never
+/// changes the collection's own result.
+fn start_digest_if_due(config: &KbConfig) {
+    let tz = *chrono::Local::now().offset();
+    match super::digest::due_check(config, chrono::Utc::now(), tz) {
+        Ok(false) => {}
+        Ok(true) => {
+            let started = std::env::current_exe()
+                .map_err(|e| e.to_string())
+                .and_then(|exe| {
+                    super::digest::spawn_background(
+                        &exe,
+                        &super::paths::DataPaths::new(config.data_dir.clone()),
+                        &["--kb-digest", "--auto"],
+                        &[],
+                    )
+                });
+            if let Err(e) = started {
+                eprintln!("digest not started: {e}");
+            }
+        }
+        Err(e) => eprintln!("digest check failed: {e}"),
+    }
+}
+
+/// `--kb-digest --auto | --all | --session <source:id> | --test`.
+fn run_digest_command(args: &[String]) -> i32 {
+    use super::digest::{self, DigestEnv, Scope, Trigger};
+    let flags = match parse_flags(args, &["session"], &["auto", "all", "test"]) {
+        Ok(flags) => flags,
+        Err(e) => return usage_error(&e),
+    };
+    let config = match load_config() {
+        Ok(config) => config,
+        Err(code) => return code,
+    };
+    let env = DigestEnv::from_config(&config);
+    if flags.switches.contains("test") {
+        let report = digest::status::test_call(&env);
+        print_json(&report);
+        return i32::from(!report.ok);
+    }
+    let (trigger, scope) = if flags.switches.contains("auto") {
+        (Trigger::Auto, Scope::Auto)
+    } else if flags.switches.contains("all") {
+        (manual_trigger(), Scope::All)
+    } else if let Some(target) = flags.values.get("session") {
+        let Some((source, session_id)) = target.split_once(':') else {
+            return usage_error("--session needs <source>:<session id>, e.g. claude:8e6f1373-…");
+        };
+        if super::Source::parse(source).is_none() || !super::paths::is_safe_id(session_id) {
+            return usage_error("--session needs claude:<id> or codex:<id>");
+        }
+        (
+            manual_trigger(),
+            Scope::Session {
+                source: source.to_string(),
+                session_id: session_id.to_string(),
+            },
+        )
+    } else {
+        return usage_error("--kb-digest needs --auto, --all, --session <id> or --test");
+    };
+    digest::stop_on_sigterm(&env.cancel);
+    match digest::run(&env, trigger, &scope) {
+        Ok(summary) => {
+            print_json(&summary);
+            0
+        }
+        Err(e) => {
+            eprintln!("{e}");
+            print_json(&serde_json::json!({"status": "error", "message": e}));
+            1
+        }
+    }
+}
+
+/// Who started a manual run: the app sets the variable, a person at a
+/// terminal does not.
+fn manual_trigger() -> super::digest::Trigger {
+    match std::env::var(TRIGGER_ENV).as_deref() {
+        Ok("gui") => super::digest::Trigger::Gui,
+        _ => super::digest::Trigger::Cli,
     }
 }
 
@@ -234,8 +327,9 @@ fn run_search_command(args: &[String]) -> i32 {
             "mode",
             "format",
             "kinds",
+            "notes",
         ],
-        &["no-subagents", "include-subagents", "verbose"],
+        &["no-subagents", "include-subagents", "verbose", "no-notes"],
     ) {
         Ok(flags) => flags,
         Err(e) => return usage_error(&e),
@@ -258,6 +352,11 @@ fn run_search_command(args: &[String]) -> i32 {
             expand_subagents: flags.switches.contains("include-subagents").then_some(true),
             mode: flags.values.get("mode").cloned(),
             kinds: flags.list("kinds"),
+            notes: if flags.switches.contains("no-notes") {
+                Some(0)
+            } else {
+                flags.number("notes")?
+            },
         })
     })();
     let params = match params {

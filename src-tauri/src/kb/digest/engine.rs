@@ -276,6 +276,44 @@ pub fn resolve_cli(engine: Engine, configured: Option<&Path>) -> Result<PathBuf,
         })
 }
 
+/// Ask the user's login shell where the command is, the way a terminal
+/// would: the only way to see a `PATH` that a launchd job does not have. Used
+/// by the settings page only (it runs the user's shell start-up files), with
+/// a short deadline; the result is stored as an absolute path.
+pub fn find_via_login_shell(engine: Engine) -> Option<PathBuf> {
+    let shell = std::env::var_os("SHELL")
+        .map(PathBuf::from)
+        .filter(|p| p.is_file())
+        .unwrap_or_else(|| PathBuf::from("/bin/zsh"));
+    let mut child = Command::new(shell)
+        .args(["-lic", &format!("command -v {}", engine.as_str())])
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .ok()?;
+    let mut out = child.stdout.take()?;
+    let reader = std::thread::spawn(move || read_capped(&mut out, 64 * 1024));
+    let deadline = Instant::now() + Duration::from_secs(8);
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => break,
+            Ok(None) if Instant::now() < deadline => std::thread::sleep(POLL),
+            _ => {
+                let _ = child.kill();
+                let _ = child.wait();
+                break;
+            }
+        }
+    }
+    let text = String::from_utf8_lossy(&reader.join().ok()?).into_owned();
+    text.lines()
+        .map(str::trim)
+        .rev()
+        .find(|l| l.starts_with('/') && Path::new(l).is_file())
+        .map(PathBuf::from)
+}
+
 /// Places a CLI is usually installed, in order.
 pub fn candidate_paths(engine: Engine) -> Vec<PathBuf> {
     let name = engine.as_str();

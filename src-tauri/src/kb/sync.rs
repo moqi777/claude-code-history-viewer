@@ -1352,6 +1352,109 @@ mod tests {
         );
     }
 
+    fn search_notes_with(
+        sb: &Sandbox,
+        query: &str,
+        notes: Option<usize>,
+    ) -> crate::kb::search::SearchResponse {
+        let params = crate::kb::search::SearchParams {
+            query: query.to_string(),
+            limit: Some(20),
+            notes,
+            ..Default::default()
+        };
+        crate::kb::search::search_in(&sb.env.data, &params).unwrap()
+    }
+
+    #[test]
+    fn notes_come_with_the_search_ahead_of_the_messages_and_can_be_turned_off() {
+        let sb = Sandbox::new();
+        write(
+            &sb.claude_file(),
+            &(user_line("2026-01-01T00:00:01Z", "线程池里出现死锁怎么办")
+                + &assistant_line(
+                    "2026-01-01T00:00:02Z",
+                    serde_json::json!([{"type":"text","text":"按固定顺序加锁就能避免死锁"}]),
+                )),
+        );
+        sb.sync();
+        let file = crate::kb::notes::testing::sample("claude", CLAUDE_ID, 2);
+        crate::kb::notes::write(&sb.env.data, &file).unwrap();
+        sb.sync();
+
+        let response = search_notes_with(&sb, "死锁", None);
+        assert_eq!(response.notes.len(), 2);
+        let first = &response.notes[0];
+        assert_eq!(first.kind, "note");
+        assert_eq!(first.session.session_id, CLAUDE_ID);
+        assert_eq!(first.evidence.seq_from, 3);
+        assert_eq!(first.evidence.msg_key.as_deref(), Some("uuid-3"));
+        assert!(first
+            .show
+            .contains(&format!("--kb-show claude:{CLAUDE_ID} --around 3")));
+        assert!(first.resume.available);
+        assert_eq!(
+            response.results.len(),
+            1,
+            "the message hits are still there"
+        );
+        assert!(response.results[0].has_note);
+
+        // The command-line JSON keeps what an agent needs and nothing of the
+        // human-only detail; `notes` is only ever an added key.
+        let json = crate::kb::search::agent_json(&response, false);
+        let note = &json["notes"][0];
+        assert!(note["show"].as_str().unwrap().contains("--kb-show"));
+        assert!(note["conclusion"].is_string() && note["title"].is_string());
+        assert!(note["evidence"].get("msg_key").is_none());
+        assert!(json["results"][0].get("has_note").is_some());
+        let verbose = crate::kb::search::agent_json(&response, true);
+        assert!(verbose["notes"][0]["evidence"].get("msg_key").is_some());
+
+        let none = search_notes_with(&sb, "死锁", Some(0));
+        assert!(none.notes.is_empty());
+        assert_eq!(none.results.len(), 1);
+        let one = search_notes_with(&sb, "死锁", Some(1));
+        assert_eq!(one.notes.len(), 1);
+
+        let text = crate::kb::search::format_search_text(&response);
+        assert!(text.find("[note 1]").unwrap() < text.find("1. [claude").unwrap());
+
+        // Notes of a session whose working directory is excluded are hidden too.
+        let mut sb = sb;
+        sb.env.exclude_cwd_prefixes = vec!["/Users/me/proj".into()];
+        sb.sync();
+        assert!(search_notes_with(&sb, "死锁", None).notes.is_empty());
+    }
+
+    #[test]
+    fn a_note_found_only_by_its_keywords_is_returned_even_when_no_message_matches() {
+        let sb = Sandbox::new();
+        write(&sb.claude_file(), &claude_text());
+        sb.sync();
+        let mut file = crate::kb::notes::testing::sample("claude", CLAUDE_ID, 1);
+        file.entries[0].keywords = vec!["WindowServer".into(), "IOSurface".into()];
+        crate::kb::notes::write(&sb.env.data, &file).unwrap();
+        sb.sync();
+        let response = search_notes_with(&sb, "IOSurface", None);
+        assert!(response.results.is_empty());
+        assert_eq!(response.notes.len(), 1);
+        assert!(
+            response.hint.is_none(),
+            "no 'no match' hint when a note matched"
+        );
+        // Relaxed matching: one of two words is not enough on its own at 0.4 coverage, two of three is.
+        assert_eq!(
+            search_notes_with(&sb, "WindowServer 内存泄漏 IOSurface", None)
+                .notes
+                .len(),
+            1
+        );
+        assert!(search_notes_with(&sb, "完全无关的内容 其他", None)
+            .notes
+            .is_empty());
+    }
+
     #[test]
     fn the_digest_work_directory_is_always_excluded_from_the_index() {
         std::env::set_var("CCHV_TEST_HOME", "/tmp/agentkb-test-home");
@@ -1912,6 +2015,107 @@ mod tests {
             .find(|h| h.kind == "user")
             .unwrap();
         assert!(question.snippet.chars().count() < 220);
+    }
+
+    /// Every dotted key path of a JSON value, arrays flattened:
+    /// `results.hits.snippet`, `notes.show`, …
+    fn key_paths(value: &serde_json::Value, prefix: &str, out: &mut Vec<String>) {
+        match value {
+            serde_json::Value::Object(map) => {
+                for (key, inner) in map {
+                    let path = if prefix.is_empty() {
+                        key.clone()
+                    } else {
+                        format!("{prefix}.{key}")
+                    };
+                    out.push(path.clone());
+                    key_paths(inner, &path, out);
+                }
+            }
+            serde_json::Value::Array(items) => {
+                for item in items {
+                    key_paths(item, prefix, out);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// The fields a skill text tells the agent to read: the backticked words
+    /// that look like JSON paths (`hits[].snippet`, `resume.command`, `notes`).
+    fn fields_in(skill: &str) -> std::collections::BTreeSet<String> {
+        let is_path = regex::Regex::new(r"^[a-z_]+(\[\])?(\.[a-z_]+(\[\])?)*$").unwrap();
+        skill
+            .split('`')
+            .skip(1)
+            .step_by(2)
+            .filter(|token| is_path.is_match(token))
+            .map(|token| token.replace("[]", ""))
+            .filter(|field| !["claude", "codex", "cd"].contains(&field.as_str()))
+            .collect()
+    }
+
+    /// Skill texts already installed on people's machines (v1, v2) must keep
+    /// working: a field is never renamed or dropped from the default output.
+    /// The newest text is checked from the template itself, so a field it
+    /// mentions cannot be missing either.
+    #[test]
+    fn every_field_the_skill_texts_read_is_in_the_default_output() {
+        let sb = Sandbox::new();
+        write(
+            &sb.claude_file(),
+            &user_line("2026-01-01T00:00:01Z", "start the zebra bug"),
+        );
+        write(
+            &subagent_file(&sb, "agent-a"),
+            &(user_line("2026-01-01T00:00:02Z", "look into the zebra bug")
+                + &assistant_line(
+                    "2026-01-01T00:00:03Z",
+                    serde_json::json!([{"type":"text","text":"the zebra bug is a race"}]),
+                )),
+        );
+        sb.sync();
+        let mut file = crate::kb::notes::testing::sample("claude", CLAUDE_ID, 1);
+        file.entries[0].keywords = vec!["zebra".into()];
+        crate::kb::notes::write(&sb.env.data, &file).unwrap();
+        sb.sync();
+
+        let response = search_notes_with(&sb, "zebra", None);
+        let json = crate::kb::search::agent_json(&response, false);
+        let mut paths = Vec::new();
+        key_paths(&json, "", &mut paths);
+        let present = |field: &str| {
+            paths
+                .iter()
+                .any(|p| p == field || p.ends_with(&format!(".{field}")))
+        };
+
+        // Frozen: what the v1 and v2 texts read.
+        for field in [
+            "data_as_of",
+            "results",
+            "session.title",
+            "session.last_activity_at",
+            "session.source",
+            "session.session_id",
+            "hits.snippet",
+            "hits.seq",
+            "hits.subagent_session_id",
+            "subagent_hits",
+            "resume.command",
+            "resume.available",
+        ] {
+            assert!(present(field), "an installed v1/v2 skill reads {field}");
+        }
+        // Whatever the current text mentions, as written in the template.
+        let current = fields_in(&crate::kb::skill::render(
+            crate::kb::skill::Target::Claude,
+            "/x/agentkb",
+        ));
+        assert!(current.contains("notes.show") && current.contains("hits.snippet"));
+        for field in &current {
+            assert!(present(field), "the current skill reads {field}");
+        }
     }
 
     fn scratch_file(sb: &Sandbox) -> PathBuf {
