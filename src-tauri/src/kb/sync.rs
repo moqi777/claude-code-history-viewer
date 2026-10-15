@@ -27,7 +27,7 @@ pub const LOCK_WAIT: Duration = Duration::from_secs(3);
 /// Bump when the indexers' output changes (title rules, counting, known types…).
 /// The next sync then rebuilds every session row from the mirror, which is the
 /// source of truth, so improvements reach sessions that never change again.
-pub const INDEXER_VERSION: &str = "5";
+pub const INDEXER_VERSION: &str = "6";
 const INDEXER_VERSION_KEY: &str = "indexer_version";
 
 /// Warn (in the log) about unexpectedly huge single lines.

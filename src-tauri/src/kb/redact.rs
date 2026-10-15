@@ -72,16 +72,74 @@ static RULES: Lazy<Vec<Rule>> = Lazy::new(|| {
         // key = value / "key": "value" (the key must end with a sensitive word).
         rule(
             &format!(
-                r#"(?i)\b([A-Za-z0-9_.\-]*(?:{KEY_WORDS}))\b(["']?\s*[:=]\s*["']?)([^\s"'&,;)\]}}\[]{{1}}[^\s"'&,;)\]}}]{{2,}})"#
+                r#"(?i)\b([A-Za-z0-9_.\-]*(?:{KEY_WORDS}))\b(\\?["']?\s*[:=]\s*(?:\\?["'])?)((?:[^\s"'\\&,;)\]}}\[]|\\[^"'\s])(?:[^\s"'\\&,;)\]}}]|\\[^"'\s]){{2,}})"#
             ),
             "${1}${2}[REDACTED]",
         ),
     ]
 });
 
+/// A sensitive key followed by `=`/`:` and the start of a JSON object or
+/// array (possibly written with escaped quotes), e.g. `password={\"a\":1}`.
+static BLOCK_START: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(&format!(
+        r#"(?i)\b([A-Za-z0-9_.\-]*(?:{KEY_WORDS}))\b(\\?["']?\s*[:=]\s*)([{{\[])"#
+    ))
+    .expect("valid redaction regex")
+});
+
+/// Longest bracketed value that is swallowed in one go.
+const MAX_BLOCK_BYTES: usize = 20_000;
+
+/// Byte length of the bracketed value starting at `text[0]` (an opening `{`
+/// or `[`): up to the matching close, or to the end of the text / the size cap
+/// when it is cut off.
+fn bracketed_len(text: &str) -> usize {
+    let mut depth = 0usize;
+    for (i, ch) in text.char_indices() {
+        if i >= MAX_BLOCK_BYTES {
+            return i;
+        }
+        match ch {
+            '{' | '[' => depth += 1,
+            '}' | ']' => {
+                depth = depth.saturating_sub(1);
+                if depth == 0 {
+                    return i + 1;
+                }
+            }
+            _ => {}
+        }
+    }
+    text.len()
+}
+
+fn redact_blocks(text: &str) -> Cow<'_, str> {
+    if !BLOCK_START.is_match(text) {
+        return Cow::Borrowed(text);
+    }
+    let mut out = String::with_capacity(text.len());
+    let mut cursor = 0;
+    while let Some(caps) = BLOCK_START.captures_at(text, cursor) {
+        let whole = caps.get(0).expect("group 0");
+        let opener = caps.get(3).expect("opener group");
+        let end = opener.start() + bracketed_len(&text[opener.start()..]);
+        out.push_str(&text[cursor..whole.start()]);
+        out.push_str(&caps[1]);
+        out.push_str(&caps[2]);
+        out.push_str(REDACTED);
+        cursor = end;
+    }
+    out.push_str(&text[cursor..]);
+    Cow::Owned(out)
+}
+
 /// `text` with secrets replaced by `[REDACTED]`. Borrows when nothing matched.
 pub fn redact(text: &str) -> Cow<'_, str> {
-    let mut current: Cow<'_, str> = Cow::Borrowed(text);
+    let mut current: Cow<'_, str> = match redact_blocks(text) {
+        Cow::Borrowed(_) => Cow::Borrowed(text),
+        Cow::Owned(done) => Cow::Owned(done),
+    };
     for rule in RULES.iter() {
         if !rule.re.is_match(&current) {
             continue;
@@ -164,9 +222,37 @@ mod tests {
     }
 
     #[test]
+    fn bracketed_and_json_escaped_values_are_redacted() {
+        // The shape found in a real session (fake data): an escaped JSON object.
+        assert_eq!(
+            r(r#"cfg password={\"kmsKeyId\":\"k1\",\"cipherText\":\"abc==\"} next"#),
+            "cfg password=[REDACTED] next"
+        );
+        assert_eq!(
+            r(r#"{"secret": {"a": [1, 2], "b": "x"}, "ok": 1}"#),
+            r#"{"secret": [REDACTED], "ok": 1}"#
+        );
+        assert_eq!(r("token: [\"a\", \"b\"] end"), "token: [REDACTED] end");
+        // Escaped quotes around an ordinary value.
+        assert_eq!(
+            r(r#"{\"password\":\"hunter22\",\"user\":\"bob\"}"#),
+            r#"{\"password\":\"[REDACTED]\",\"user\":\"bob\"}"#
+        );
+        // Cut off before the closing bracket: everything after is dropped.
+        assert_eq!(r("api_key={\"a\":\"b"), "api_key=[REDACTED]");
+        // Two blocks in one text.
+        assert_eq!(
+            r("password={a} and secret=[b]"),
+            "password=[REDACTED] and secret=[REDACTED]"
+        );
+    }
+
+    #[test]
     fn look_alikes_are_left_alone() {
         for text in [
             "token_count: 1234",
+            "token_counts = {\"a\": 1}",
+            "max_tokens: [1, 2]",
             "max_tokens=4096",
             "the tokens were counted",
             "a secret garden",
