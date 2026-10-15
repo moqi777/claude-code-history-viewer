@@ -1,0 +1,58 @@
+src-tauri/src/kb/mod.rs
+  s_cca7c29607588b::t_cbedf92f5178b6 35
+src/i18n/locales/en/kb.json
+  s_cca7c29607588b::t_6172928f031b15 218
+src-tauri/src/kb/cli.rs
+  s_cca7c29607588b::t_8992aa7d4e4c8e 299,344-349
+  s_cca7c29607588b::t_f620d3e0bf9832 238,258,274-279
+src/kb/fixtures.ts
+  s_cca7c29607588b::t_cbedf92f5178b6 22
+src/kb/types.ts
+  s_cca7c29607588b::t_6172928f031b15 285-286,297-298,326-327
+src/kb/KbHome.test.tsx
+  s_cca7c29607588b::t_cbedf92f5178b6 72
+src-tauri/src/kb/sync.rs
+  s_cca7c29607588b::t_7a20aa63d67e32 1565-1587,1592-1594,1602-1640,1645-1670,1672,1677-1678,1687,1689-1710,1716-1723
+  s_cca7c29607588b::t_bfbded35106fc3 1588-1591,1595-1601,1641-1644,1673-1676,1679-1686,1711-1715
+  s_cca7c29607588b::t_9f57e239d945d4 1688
+  s_cca7c29607588b::t_77067094e5fa46 1671
+src-tauri/src/kb/search.rs
+  s_cca7c29607588b::t_18a683004d5903 267
+  ai_agent 720,724
+  s_cca7c29607588b::t_77daeb5f673d3d 39-46,198-200,244-247,261-263,268-271,474-489,584-587,594,683-704,706-708,711-719,721-723,725-726,736-737,742-748,759,764,776,780
+  s_cca7c29607588b::t_bfbded35106fc3 755,1154-1155,1312-1315
+  s_cca7c29607588b::t_f620d3e0bf9832 1124-1153,1156-1178,1197-1199,1216-1221,1242-1244
+  s_cca7c29607588b::t_77067094e5fa46 1306-1311,1316-1317
+src/kb/branding.ts
+  s_cca7c29607588b::t_cbedf92f5178b6 5
+src/i18n/locales/zh-CN/kb.json
+  s_cca7c29607588b::t_6172928f031b15 218
+src/i18n/types.generated.ts
+  ai_agent 8
+src/i18n/locales/ko/kb.json
+  s_cca7c29607588b::t_6172928f031b15 218
+src/kb/KbSearch.tsx
+  s_cca7c29607588b::t_6172928f031b15 97-99,200,207-209,218-222
+src-tauri/src/kb/skill.rs
+  s_cca7c29607588b::t_cbedf92f5178b6 22,102,106,110
+src/i18n/locales/zh-TW/kb.json
+  s_cca7c29607588b::t_6172928f031b15 218
+src/i18n/locales/ja/kb.json
+  s_cca7c29607588b::t_6172928f031b15 218
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.11",
+  "base_commit_sha": "2f7b2f6e313e77418f68d8cda05830c745403fa9",
+  "prompts": {},
+  "sessions": {
+    "s_cca7c29607588b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ef228e77-8d37-45df-ab42-2d4c28a0387d",
+        "model": "claude-sonnet-5-5"
+      },
+      "human_author": "moqing <moqing@tsign.cn>"
+    }
+  }
+}
