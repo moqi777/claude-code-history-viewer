@@ -1,0 +1,42 @@
+docs/agent-kb/P4-design.md
+  s_cca7c29607588b::t_82c49bbb4b169d 260,393
+src-tauri/src/kb/digest/engine.rs
+  s_cca7c29607588b::t_b980fc0b2a4e75 731-737,757-763,767-774
+  s_cca7c29607588b::t_1b1caabc7cdae2 111-112,178,222-226,363
+  s_cca7c29607588b::t_9ee42bc3442976 120
+  s_cca7c29607588b::t_1b60479e835089 129-133,614-615,684-685
+docs/agent-kb/p4-evidence/step4-runs.json
+  s_cca7c29607588b::t_142e8ba6023929 1-186
+src-tauri/src/kb/digest/status.rs
+  s_cca7c29607588b::t_b980fc0b2a4e75 285
+src/kb/types.ts
+  s_cca7c29607588b::t_1d9526d759a312 167-168
+src-tauri/src/kb/digest/input.rs
+  s_cca7c29607588b::t_0c519772770131 18
+src-tauri/src/kb/digest/mod.rs
+  s_cca7c29607588b::t_1b60479e835089 559,566-569,658-659,685-686,717-718
+  s_cca7c29607588b::t_b980fc0b2a4e75 709
+src-tauri/src/kb/digest/tests.rs
+  s_cca7c29607588b::t_cf8f28cbbf054b 507,519-533,535
+src/kb/testkit.ts
+  s_cca7c29607588b::t_1d9526d759a312 70
+src-tauri/src/kb/config.rs
+  s_cca7c29607588b::t_f129d055473b8e 87-89,137-143
+  s_cca7c29607588b::t_a9e111f1086f9f 105
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.11",
+  "base_commit_sha": "2d741014da4309ba51dfa062836fa67280ac58d2",
+  "prompts": {},
+  "sessions": {
+    "s_cca7c29607588b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ef228e77-8d37-45df-ab42-2d4c28a0387d",
+        "model": "claude-sonnet-5-5"
+      },
+      "human_author": "moqing <moqing@tsign.cn>"
+    }
+  }
+}
