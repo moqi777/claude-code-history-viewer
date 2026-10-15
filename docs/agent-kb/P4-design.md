@@ -1,8 +1,10 @@
-# P4 设计说明：每日整理成笔记（待 leader 审核）
+# P4 设计说明：每日整理成笔记（leader 有条件通过，已按审核意见修订）
 
 对应 `P4-digest.md` 步骤 1。**本文只是设计，没有动任何实现代码。** 实测都是在本机（`claude 2.1.300`、`codex-cli 0.162.1`，macOS 26）上做的，原始输出放在 `docs/agent-kb/p4-evidence/`。
 
-开头先列三件需要 leader 拍板的事（细节在正文）：
+> **审核后修订（leader，见 `P4-design-review.md`）**：有条件通过，Q1–Q3 已定（Q1 不隔离 `CODEX_HOME`；Q2 默认模型留空，但步骤 4 要用小模型对比 3 个会话；Q3 方案 A）。第 2 节的 5 条修改已写进下面各节，标注"〔审核 2.x〕"。真实调用上限由 30 次调为 **35 次**。
+
+开头先列三件需要 leader 拍板的事（细节在正文，**已决定**）：
 
 | # | 问题 | 我的建议 |
 |---|---|---|
@@ -39,7 +41,7 @@
       "solution": "用 `sudo footprint --unmapped` 看 `Shared with <进程>` 一行找到真正的持有者；退出 QQ 后 WindowServer 从 3972 MB 降到 1112 MB。",
       "conclusion": "WindowServer 的大内存记在它名下，但持有者是 QQ；退出 QQ 即可释放。",
       "keywords": ["WindowServer", "QQ", "IOSurface", "footprint", "内存泄漏"],
-      "evidence": { "seq_from": 1, "seq_to": 145 },
+      "evidence": { "seq_from": 1, "seq_to": 145, "msg_key": "a1b2c3d4-…" },
       "round": "2026-10-16",
       "digested_at": "2026-10-16T03:12:44Z",
       "engine": { "cli": "claude", "cli_version": "2.1.300", "model": "claude-sonnet-5-5" }
@@ -55,6 +57,7 @@
 - 没有值得记的内容：`"status": "nothing"`，`"entries": []`，`digested_through_seq` 照样前进——同样算"已整理"。
 - 大会话被分段、一轮没做完：`"status": "partial"`，`digested_through_seq` 停在已做完的位置（见 §4.4）。
 - `engine.model` 取 `modelUsage` 的键（Claude）；Codex 的事件里没有模型名，用设置里填的值，留空时记 `"default"`。
+- **`seq` 是笔记和原会话之间的约定〔审核 2.5〕**：`evidence.msg_key` 是 `seq_from` 那条消息的 `msg_key`（Claude 为行 `uuid`；Codex 没有 `msg_key`，该字段为 `null`，只靠 `seq`）。打开会话时优先按 `msg_key` 定位，找不到再用 `seq`。`index/messages.rs` 头部注释写明"`seq` 的编号规则一旦改动，已有笔记会失效"；测试 `seq_is_identical_between_incremental_build_and_reindex` 验证同一份 raw 下增量建与 `--kb-reindex` 的 `seq` 和 `msg_key` 一致，并验证笔记里的 `msg_key` 与库里 `seq_from` 那行一致。
 - 条目 `id` 在文件内稳定（`n1`、`n2`…，单调递增，不复用）。更新条目时 AI 给出旧 `id`，程序替换那一条；AI 没提到的旧条目原样保留，**AI 不能删条目**。
 - 所有文本字段写入前再过一次 `redact::redact`。
 
@@ -187,7 +190,7 @@ CREATE TABLE digest_items (
 5. **自动轮次**：最近活动在 `recent_days`（7）天内，或者已经是 `partial` 状态（做了一半的不受 7 天限制）；**手动"整理全部未整理的"**：不限时间；
 6. 过了 §2.3 的静默检查。
 
-按最后活动时间从新到旧取前 `max_sessions_per_round`（自动轮次）。真实库里满足 1、2 的 146 个（188 个减去 user+assistant 不足 4 条的 42 个），其中最近 7 天活动的 24 个（按 2026-10-15 的库副本统计，见 §6）。
+按最后活动时间从新到旧取前 `max_sessions_per_round`（自动轮次）。**首次自动整理〔审核 3〕**：开启后的第一轮会处理最近 7 天的会话（真实库 24 个，含好几个上千条的长会话）。第一轮开始前，首页显示一次"第一次整理预计约 X 万 token"（用 §9 的预估算法，不弹确认框）；该提示在第一轮 `planned_at` 之后消失（`meta.digest_first_round_seen`）。真实库里满足 1、2 的 146 个（188 个减去 user+assistant 不足 4 条的 42 个），其中最近 7 天活动的 24 个（按 2026-10-15 的库副本统计，见 §6）。
 
 ---
 
@@ -254,7 +257,7 @@ active: 2026-10-15T03:12:43Z .. 2026-10-15T03:17:42Z
 
 ### 4.3 长度上限
 
-**单次输入上限 100,000 字符**（约 7 万 token），在"一个 user 回合的开头"处切，不把一个回合拦腰截断。依据（真实库 188 个可整理会话，按 §4.1 的截断规则算）：
+**单次输入上限 100,000 字符**（约 7 万 token），在"一个 user 回合的开头"处切，不把一个回合拦腰截断。**审核 3：若步骤 4 的长会话样本里"一段只出 1 条、后面白发"依然存在，先把每段上限降到 50,000 字符再试，不靠反复改提示词；上限做成常量 `CHUNK_CHARS`，只在代码里改。**依据（真实库 188 个可整理会话，按 §4.1 的截断规则算）：
 
 | 统计 | 数值 |
 |---|---|
@@ -342,7 +345,7 @@ claude -p \
   --system-prompt "<§4.5 提示词>" \
   --output-format json \
   --json-schema '<schema>' \
-  --max-budget-usd 2 \                # 单次保险，仅对按量计费有意义
+  --max-budget-usd 2 \                # 单次保险；只对按量计费（API key）的账号有用，订阅账号以 §6.1 的"每轮上限+额度提示"为准
   [--model <设置里的模型>]            # 留空 = CLI 默认
   < input.txt
 ```
@@ -387,7 +390,7 @@ codex exec \
 | 失败时的样子 | 不存在的模型：退出码 1，事件流里 `{"type":"error","message":"{\"type\":\"error\",\"status\":400,…}"}` 和 `{"type":"turn.failed","error":{"message":…}}` |
 | **额度不足（推断）** | 本机历史有一条真实的 Codex 记录：`You've hit your usage limit. Upgrade to Pro (https://chatgpt.com/explore/pro), visit https://chatgpt.com/codex/settings/usage to purchase more credits or try again at 11:56 PM.`。按上面的形状，应出现在 `turn.failed.error.message` 里。**判定**：`turn.failed` 且消息匹配 `/hit your usage limit|usage limit|"status":\s*429/i` → `quota`；`"status": 401/403` 或含 `login` → `auth`。同样没有真触发过 |
 | token | `turn.completed.usage`：`input_tokens`（含 `cached_input_tokens`）、`output_tokens`、`reasoning_output_tokens`。没有模型名、没有费用 |
-| 耗时 | 9 千字输入 102.8 s，5.4 万字 89.6 s（比 Claude 慢约 10 倍；原因没深究，可能是默认的推理档位） |
+| 耗时 | 9 千字输入 102.8 s，5.4 万字 89.6 s（比 Claude 慢约 10 倍；原因没深究，可能是默认的推理档位）。**〔审核 2.4〕步骤 4 用 1 次调用试 `-c model_reasoning_effort="low"`，比较用时和笔记质量；明显更快且质量没变差就作为 Codex 的固定参数（设置里不露出）。代码里这是 `engine.rs` 的常量 `CODEX_EXTRA_ARGS`，默认先不加，步骤 4 之后按结果定** |
 
 ### 5.3 会不会在 `~/.claude`、`~/.codex` 里留文件
 
@@ -438,7 +441,7 @@ Claude 的 A、B、E1、E2 费用分别 0.026、0.105、0.316、0.298 美元（`
 
 输出每次调用约 0.5–1k token（Codex 的 11 条那次是 3k）。**这个用户的会话偏重**（很多 1000+ 条的长会话，其中不少是做 AgentKB 本身的开发会话），所以 42 万只是这台机器的参考，别人的平均会低很多。按 Claude Sonnet 级标价换算约 1.3 美元/天，重的日子 2–3 美元。可降的杠杆：换小模型、调低 `max_chunks_per_session`、调低 `max_sessions_per_round`——这是 Q2。
 
-**真实调用次数（上限 30 次，步骤 4 还要用）**：本设计阶段共 **18 次**，明细：
+**真实调用次数（上限 35 次〔审核〕，步骤 4 还要用）**：本设计阶段共 **18 次**，明细：
 
 | # | 用途 | 引擎/模型 | token（输入/输出） |
 |---|---|---|---|
@@ -461,7 +464,16 @@ Claude 的 A、B、E1、E2 费用分别 0.026、0.105、0.316、0.298 美元（`
 | 17 | 样本 C | Codex | 14.2k / 551 |
 | 18 | 样本 D | Codex | 35.6k / 2,985 |
 
-其中 #13 可能根本没发出请求，仍按 1 次算。**步骤 4 还能用 12 次**（计划 10 个会话各 1 次，留 2 次余量；大会话不分多段）。
+其中 #13 可能根本没发出请求，仍按 1 次算。**步骤 4 可用 17 次**〔审核 1，Q2/2.4〕：10 个会话默认模型各 1 次 + 其中 3 个（含 1 个长会话）用小模型（Claude haiku 级）各 1 次 + Codex 试低推理档位 1 次 + 余量 3 次。长会话在步骤 4 里每轮最多 3 段，只要超过 1 段，每多一段算 1 次调用，实际次数在报告里逐次列出。
+
+### 6.1 共用额度要说清楚、看得见〔审核 2.2〕
+
+整理用的是用户自己订阅账号的额度，和白天写代码共用。要求落到界面：
+
+- **向导和设置页**各有一句固定文案："整理会用你自己的 Claude（或 Codex）额度，和你平时使用共用。"（i18n 键 `kb.digest.sharedQuota`）。
+- **首页整理卡片**显示"上一轮用了 X.X 万 token（输入 / 输出）"，数据取该轮 `digest_items` 的 `input_tokens`/`output_tokens` 之和（`kb_digest_status.last_round.tokens`）。
+- **设置页**在"每轮最多会话数"旁显示"按最近 7 天估算，每天约 X 万 token"。算法同 §6 表：取最近 7 天内有活动的、可整理的会话，每个按 §4.1 截断后字符数 × 0.72 + 每段 2.5k（每会话最多 3 段），按最后活动日归日，对**有活动的日子**取平均；没有数据时不显示。后端 `digest::estimate_daily_tokens()`，单测覆盖。
+- **额度不足时立刻停**（§3 情况 3）并在首页显示"额度不足，已暂停整理，HH:MM 后自动重试"，文案明确不是用户操作的问题（`kb.digest.paused.quota`）。
 
 ---
 
@@ -495,6 +507,10 @@ due_check():
 
 专用目录 `<数据目录>/digest-work/`。`sync.rs` 的 `apply_cwd_exclusion` 在用户的 `exclude_cwd_prefixes` 之外，**代码里固定加上这个目录**，不依赖用户设置，也不能被用户从界面删掉。所以：整理产生的会话（如果某个 CLI 版本以后会落盘）不进索引、不进首页、不被再次整理。
 
+### 7.3b 假 AI 命令必须覆盖 stdin 的坑〔审核 3〕
+
+测试用的假 `claude`/`codex` 脚本支持模式：`ok`（返回固定 JSON）、`quota`（返回额度不足的形状）、`bad_json`、`slow`（睡过超时）、`fail`、**`wait_eof`（读到 stdin EOF 之前不退出，也不输出）**。引擎实现若没有写完 stdin 就关闭，`wait_eof` 模式的测试会超时失败，这样 Codex 那个坑被测试覆盖到。
+
 ### 7.4 App 退出 / 进程被杀
 
 - 后台 `--kb-digest` 是独立进程，不依赖 App；App 退出不影响它。手动按钮同样是 spawn 同一个 `--kb-digest`（GUI 只负责 spawn 和轮询 `digest_items` 显示进度），所以"整理中途关 App"不会丢工作。
@@ -510,9 +526,11 @@ due_check():
 
 在 `search.rs` 的 `search()` 里并行查 `notes_fts`（`bm25(notes_fts, 3.0, 4.0, 1.0)`：标题+结论权重 3、关键词 4、正文 1，步骤 2 里用 `P3-eval.md` 的题再校一遍），**结果里加一个顶层数组 `notes`，排在 `sessions` 之前**；`sessions` 一字不改（v1/v2 模板用到的字段全部保留，P3.1 的兼容规则照旧）。笔记最多 3 条（`--notes N` 可改，`--no-notes` 关掉）。
 
+**〔审核 2.1〕键名按已安装的 0.3.1 实际输出**：顶层是 `agentkb_marker`、`results`（会话命中数组）等，**现有键一个不改**；`notes` 只是新增的顶层键。下面是 `--verbose` 的形状，省略了没变的键：
+
 ```json
 {
-  "marker": "agentkb-result-v1",
+  "agentkb_marker": "agentkb-result-v1",
   "data_as_of": "…",
   "notes": [
     {
@@ -527,9 +545,11 @@ due_check():
       "resume": { "command": "cd '…' && claude --resume 8e6f1373-…", "available": true }
     }
   ],
-  "sessions": [ …… 不变，命中的会话多一个 "has_note": true …… ]
+  "results": [ …… 不变，命中的会话多一个 "has_note": true …… ]
 }
 ```
+
+**默认输出（精简）和 `--verbose` 的区别〔审核 2.3〕**：先按下面"完整形状"实现，然后用 `P3-eval.md` 的 15 道题（关键词版）在步骤 4 的样本库上测默认输出的平均字节，**上限 10 KB（P3.1 实测 5.6 KB）**。超了就按顺序处理：① 默认笔记条数 3 → 2；② 默认输出里笔记只保留 `title`、`conclusion`、`show`、`resume`（及 `session`、`digested_at`），`problem`/`cause`/`solution`/`keywords`/`evidence` 只在 `--verbose` 出现（实现为 `NOTE_VERBOSE_KEYS`，由 `strip_for_agent` 去掉）。测量结果写进报告。
 
 - **怎么区分笔记和原始消息**：笔记在 `notes[]`（每条有 `"kind":"note"`），原始消息命中在 `sessions[].hits[]`，所以不会混。文本格式输出里笔记在最前面，以"📝 笔记（AI 整理）"分块。
 - **排序**：笔记块永远在前；笔记之间按 bm25（`notes_fts`）。笔记和 `sessions` 之间不混排、不比较分数。关键词覆盖率规则与消息检索一致（先要求全部关键词命中，不足再放宽，沿用 `search.rs` 的 `QueryGroup`）。
@@ -554,7 +574,7 @@ due_check():
 +- 只想要原始消息命中时加 `--no-notes`；想多看几条笔记加 `--notes 5`。
 ```
 
-字段兼容测试（P3.1 建立的"从模板提取字段名断言默认输出里都有"）扩到 v2 模板用到的字段（含 `subagent_hits`、`subagent_session_id`），v1/v2 的老 SKILL.md 读新输出照样能用（`notes` 只是多出来的键）。
+字段兼容测试（P3.1 建立的"从模板提取字段名断言默认输出里都有"）**按实际键名（`agentkb_marker`、`results`、`session.*`、`hits[].*`、`resume.*`、`data_as_of`）写**，并扩到 v2 模板用到的字段（含 `subagent_hits`、`subagent_session_id`），v1/v2 的老 SKILL.md 读新输出照样能用（`notes` 只是多出来的键）。
 
 ---
 
@@ -646,7 +666,7 @@ WindowServer 内存膨胀至 28GB 的根因是 QQ        10-16 · Claude
 ## 11. 提交与证据
 
 - 本文提交到 `agent-kb` 并推送；实测原始输出、脚本、两个 schema、提示词放 `docs/agent-kb/p4-evidence/`。**证据文件里不含用户会话原文**：只放 token、耗时、退出码、事件类型、工具清单等；样本笔记原文留到步骤 4 的 `P4-samples.md`（那是 leader 要求用户审看的内容）。
-- 步骤 1 到此为止，**等待审核，不开始写实现**。
+- 步骤 1 已审核通过（有条件，修订见文首），实现按本文执行。
 
 ## 附：本设计没有验证的地方
 
