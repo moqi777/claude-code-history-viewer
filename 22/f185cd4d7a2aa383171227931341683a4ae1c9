@@ -1,0 +1,30 @@
+docs/agent-kb/P4-design.md
+  ai_agent 1
+  s_cca7c29607588b::t_8241aa82e31b19 5-7,44,60,193,260,348,393,444,467-476,510-513,529-530,533,548,552-553,577,669
+docs/agent-kb/P4-design-review.md
+  s_d58d4b162ae7dc::t_1667e0b58a8d11 1-52
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.11",
+  "base_commit_sha": "22f185cd4d7a2aa383171227931341683a4ae1c9",
+  "prompts": {},
+  "sessions": {
+    "s_cca7c29607588b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ef228e77-8d37-45df-ab42-2d4c28a0387d",
+        "model": "claude-sonnet-5-5"
+      },
+      "human_author": "moqing <moqing@tsign.cn>"
+    },
+    "s_d58d4b162ae7dc": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "c4c081c6-aaf3-412b-8f62-de2a98c156fc",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "moqing <moqing@tsign.cn>"
+    }
+  }
+}
