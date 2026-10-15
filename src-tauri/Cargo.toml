@@ -74,6 +74,11 @@ comrak = { version = "0.49.0", default-features = false }
 [target.'cfg(windows)'.dependencies]
 winreg = "0.55"
 
+[target.'cfg(unix)'.dependencies]
+# Process groups and signals for the digest's AI child processes (already in
+# the lock file as a transitive dependency).
+libc = "0.2"
+
 [dev-dependencies]
 # Core testing utilities
 tempfile = "3.24.0"

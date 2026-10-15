@@ -34,11 +34,40 @@ impl DataPaths {
     pub fn logs(&self) -> PathBuf {
         self.root.join("logs")
     }
+    /// AI-written notes: like `raw/`, a source of truth (they cannot be
+    /// regenerated for free); `kb.db` only indexes them.
+    pub fn notes(&self) -> PathBuf {
+        self.root.join("notes")
+    }
+    /// One file per session: `notes/<source>/<session_id>.json`. The id comes
+    /// from file contents, so it is checked before it names a path.
+    pub fn notes_file(&self, source: &str, session_id: &str) -> Result<PathBuf, String> {
+        if !matches!(source, "claude" | "codex") || !is_safe_id(session_id) {
+            return Err(format!("unsafe note path {source}/{session_id}"));
+        }
+        Ok(self.notes().join(source).join(format!("{session_id}.json")))
+    }
+    pub fn digest_lock(&self) -> PathBuf {
+        self.root.join("digest.lock")
+    }
+    /// The AI's working directory. Always excluded from collection.
+    pub fn digest_work(&self) -> PathBuf {
+        self.root.join("digest-work")
+    }
 
     /// Absolute mirror path for a `mirror_rel` stored in the database.
     pub fn mirror_path(&self, mirror_rel: &str) -> Result<PathBuf, String> {
         safe_join(&self.raw(), mirror_rel)
     }
+}
+
+/// Session ids as the CLIs write them: letters, digits, `-` and `_` only.
+pub fn is_safe_id(id: &str) -> bool {
+    !id.is_empty()
+        && id.len() <= 128
+        && id
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
 }
 
 /// Join `rel` (always `/`-separated) onto `base`, refusing anything that could
@@ -127,6 +156,19 @@ mod tests {
         for bad in ["", "../x", "a/../b", "/abs", "a//b", "a\\b", "./a", "a/."] {
             assert!(safe_join(Path::new("/raw"), bad).is_err(), "{bad}");
         }
+    }
+
+    #[test]
+    fn note_paths_refuse_ids_that_could_escape() {
+        let data = DataPaths::new("/d");
+        assert_eq!(
+            data.notes_file("claude", "8e6f1373-1e1d").unwrap(),
+            Path::new("/d/notes/claude/8e6f1373-1e1d.json")
+        );
+        for bad in ["", "../x", "a/b", "a.b", "a b", "a\\b"] {
+            assert!(data.notes_file("claude", bad).is_err(), "{bad}");
+        }
+        assert!(data.notes_file("gemini", "abc").is_err());
     }
 
     const ID: &str = "019e7371-a6b9-7a50-9825-b7acd6255914";

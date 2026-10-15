@@ -82,8 +82,37 @@ impl SyncLock {
 
 impl Drop for SyncLock {
     fn drop(&mut self) {
+        // The note is diagnostics for whoever looks while the lock is held;
+        // an empty file says "nobody".
+        let _ = self.file.set_len(0);
         let _ = FileExt::unlock(&self.file);
     }
+}
+
+/// Whether the process named in the lock file is alive. Unlike taking the
+/// lock to see whether it is free, asking never makes a run that starts at
+/// the same moment find the lock busy. A holder that crashed leaves its pid
+/// behind; a dead pid is "not held".
+pub fn held_by_live_process(path: &Path) -> Option<LockInfo> {
+    let info = read_info(path)?;
+    process_alive(info.pid).then_some(info)
+}
+
+#[cfg(unix)]
+#[allow(unsafe_code)] // `kill(pid, 0)` only checks that the process exists
+fn process_alive(pid: u32) -> bool {
+    let Ok(pid) = i32::try_from(pid) else {
+        return false;
+    };
+    // SAFETY: signal 0 only checks that the process exists.
+    let rc = unsafe { libc::kill(pid, 0) };
+    rc == 0 || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
+}
+
+#[cfg(not(unix))]
+fn process_alive(_pid: u32) -> bool {
+    // Without a cheap check, trust the lock file; the lock itself is still exact.
+    true
 }
 
 /// Who wrote the lock file last (may be stale; never use it for ownership).
@@ -133,6 +162,22 @@ mod tests {
         let path = dir.path().join("kb.lock");
         let _held = SyncLock::acquire(&path, Duration::ZERO).unwrap().unwrap();
         assert_eq!(read_info(&path).unwrap().pid, std::process::id());
+    }
+
+    #[test]
+    fn dropping_the_lock_clears_the_note_and_a_dead_pid_is_not_held() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("digest.lock");
+        let held = SyncLock::acquire(&path, Duration::ZERO).unwrap().unwrap();
+        assert_eq!(held_by_live_process(&path).unwrap().pid, std::process::id());
+        drop(held);
+        assert!(held_by_live_process(&path).is_none());
+        std::fs::write(
+            &path,
+            r#"{"pid":4194000,"started_at":"2020-01-01T00:00:00Z"}"#,
+        )
+        .unwrap();
+        assert!(held_by_live_process(&path).is_none(), "nobody has that pid");
     }
 
     #[test]

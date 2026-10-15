@@ -1,4 +1,4 @@
-//! Plain-file sync log: `<data>/logs/sync-YYYY-MM-DD.log`, kept for 14 days.
+//! Plain-file sync log: `<data>/logs/sync-YYYY-MM-DD.log` (and `digest-…`), kept for 14 days.
 //! Headless runs have no `log` backend, so the KB writes its own file.
 
 use std::fs::{self, OpenOptions};
@@ -8,6 +8,8 @@ use std::time::{Duration, SystemTime};
 
 const RETENTION_DAYS: u64 = 14;
 const FILE_PREFIX: &str = "sync-";
+/// The digest keeps its own file next to the sync log.
+const DIGEST_PREFIX: &str = "digest-";
 const FILE_SUFFIX: &str = ".log";
 
 pub struct SyncLog {
@@ -16,9 +18,18 @@ pub struct SyncLog {
 
 impl SyncLog {
     pub fn open(logs_dir: &Path) -> Self {
+        Self::open_prefixed(logs_dir, FILE_PREFIX)
+    }
+
+    /// `<logs>/digest-YYYY-MM-DD.log`.
+    pub fn open_digest(logs_dir: &Path) -> Self {
+        Self::open_prefixed(logs_dir, DIGEST_PREFIX)
+    }
+
+    fn open_prefixed(logs_dir: &Path, prefix: &str) -> Self {
         let _ = fs::create_dir_all(logs_dir);
         let name = format!(
-            "{FILE_PREFIX}{}{FILE_SUFFIX}",
+            "{prefix}{}{FILE_SUFFIX}",
             chrono::Local::now().format("%Y-%m-%d")
         );
         Self {
@@ -53,7 +64,9 @@ fn prune_older_than(logs_dir: &Path, max_age: Duration) -> usize {
     for entry in entries.flatten() {
         let name = entry.file_name();
         let Some(name) = name.to_str() else { continue };
-        if !(name.starts_with(FILE_PREFIX) && name.ends_with(FILE_SUFFIX)) {
+        if !((name.starts_with(FILE_PREFIX) || name.starts_with(DIGEST_PREFIX))
+            && name.ends_with(FILE_SUFFIX))
+        {
             continue;
         }
         let age = entry

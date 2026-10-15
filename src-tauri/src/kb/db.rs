@@ -87,6 +87,75 @@ const MIGRATIONS: &[&str] = &[
     // v3: sessions whose working directory the user excluded (kept in the
     // backup, absent from search and the session list).
     "ALTER TABLE sessions ADD COLUMN cwd_excluded INTEGER NOT NULL DEFAULT 0;",
+    // v4: the AI-written notes and the digest bookkeeping. `notes`,
+    // `notes_fts` and `digest_sessions` are derived from `notes/*.json`;
+    // `digest_rounds` / `digest_items` are run state (retries, failures).
+    // No foreign keys to `sessions`/`messages`: a reindex rebuilds those and
+    // must not take the notes with them.
+    "
+    CREATE TABLE notes (
+      id          INTEGER PRIMARY KEY,
+      source      TEXT NOT NULL CHECK (source IN ('claude','codex')),
+      session_id  TEXT NOT NULL,
+      entry_id    TEXT NOT NULL,
+      title       TEXT NOT NULL,
+      problem     TEXT NOT NULL,
+      cause       TEXT NOT NULL,
+      solution    TEXT NOT NULL,
+      conclusion  TEXT NOT NULL,
+      keywords    TEXT NOT NULL,
+      seq_from    INTEGER NOT NULL,
+      seq_to      INTEGER NOT NULL,
+      msg_key     TEXT,
+      round_id    TEXT NOT NULL,
+      digested_at TEXT NOT NULL,
+      engine      TEXT NOT NULL,
+      model       TEXT NOT NULL,
+      UNIQUE (source, session_id, entry_id)
+    );
+    CREATE INDEX idx_notes_session ON notes(source, session_id);
+    CREATE VIRTUAL TABLE notes_fts USING fts5(
+      head, kw, body,
+      content='', contentless_delete=1,
+      tokenize='unicode61 remove_diacritics 0'
+    );
+    CREATE TABLE digest_sessions (
+      source        TEXT NOT NULL,
+      session_id    TEXT NOT NULL,
+      status        TEXT NOT NULL CHECK (status IN ('notes','nothing','partial')),
+      digested_seq  INTEGER NOT NULL,
+      digested_at   TEXT NOT NULL,
+      note_hash     TEXT NOT NULL,
+      PRIMARY KEY (source, session_id)
+    );
+    CREATE TABLE digest_rounds (
+      round_id     TEXT PRIMARY KEY,
+      kind         TEXT NOT NULL CHECK (kind IN ('daily','manual')),
+      cutoff_at    TEXT NOT NULL,
+      planned_at   TEXT NOT NULL,
+      completed_at TEXT,
+      state        TEXT NOT NULL CHECK (state IN ('open','done','superseded')),
+      trigger      TEXT NOT NULL,
+      engine       TEXT NOT NULL,
+      model        TEXT NOT NULL
+    );
+    CREATE TABLE digest_items (
+      round_id     TEXT NOT NULL REFERENCES digest_rounds(round_id) ON DELETE CASCADE,
+      source       TEXT NOT NULL,
+      session_id   TEXT NOT NULL,
+      state        TEXT NOT NULL CHECK (state IN ('pending','running','done','failed','skipped')),
+      attempts     INTEGER NOT NULL DEFAULT 0,
+      next_try_at  TEXT,
+      last_error   TEXT,
+      seq_from     INTEGER,
+      seq_to       INTEGER,
+      input_tokens INTEGER,
+      output_tokens INTEGER,
+      duration_ms  INTEGER,
+      finished_at  TEXT,
+      PRIMARY KEY (round_id, source, session_id)
+    );
+    ",
 ];
 
 /// Same definition as in migration v2, for [`reset_message_index`].

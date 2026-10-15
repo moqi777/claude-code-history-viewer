@@ -805,6 +805,7 @@ dependencies = [
  "insta",
  "jieba-rs",
  "lazy_static",
+ "libc",
  "log",
  "lru",
  "memchr",

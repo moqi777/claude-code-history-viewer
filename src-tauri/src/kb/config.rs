@@ -60,11 +60,93 @@ pub struct MirrorConfig {
     pub volume_name: Option<String>,
 }
 
+/// The daily digest (`--kb-digest`). Only the first five fields are exposed
+/// in the settings page; the others are tuning knobs kept in `config.json`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct DigestConfig {
+    /// Off until the user turns it on: the digest spends their own CLI quota.
+    pub enabled: bool,
+    /// `claude` or `codex`.
+    pub engine: String,
+    /// Empty = the CLI's own default model.
+    pub model: String,
+    /// Absolute path of the CLI. Background tasks have no `PATH`, so the
+    /// settings page resolves it once.
+    pub cli_path: Option<PathBuf>,
+    /// Local `HH:MM`: the cut-off between two rounds.
+    pub time: String,
+    pub max_sessions_per_round: usize,
+    /// Automatic rounds only look at sessions active this many days back.
+    pub recent_days: u32,
+    /// A session with a message newer than this is left for the next round.
+    pub quiet_minutes: u32,
+    /// Fewest user + assistant messages a new session needs.
+    pub min_messages: usize,
+    pub max_chunks_per_session: usize,
+}
+
+impl Default for DigestConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            engine: "claude".into(),
+            model: String::new(),
+            cli_path: None,
+            time: "03:00".into(),
+            max_sessions_per_round: 30,
+            recent_days: 7,
+            quiet_minutes: 30,
+            min_messages: 4,
+            max_chunks_per_session: 3,
+        }
+    }
+}
+
+impl DigestConfig {
+    /// `(hour, minute)` of [`Self::time`].
+    pub fn time_of_day(&self) -> Option<(u32, u32)> {
+        let (h, m) = self.time.split_once(':')?;
+        let (h, m) = (h.parse::<u32>().ok()?, m.parse::<u32>().ok()?);
+        (h < 24 && m < 60 && self.time.len() == 5).then_some((h, m))
+    }
+
+    fn validate(&self) -> Result<(), String> {
+        if !matches!(self.engine.as_str(), "claude" | "codex") {
+            return Err(format!(
+                "digest.engine must be claude or codex, got {:?}",
+                self.engine
+            ));
+        }
+        if self.time_of_day().is_none() {
+            return Err(format!("digest.time must be HH:MM, got {:?}", self.time));
+        }
+        if !(1..=500).contains(&self.max_sessions_per_round) {
+            return Err("digest.max_sessions_per_round must be between 1 and 500".into());
+        }
+        if !(1..=3650).contains(&self.recent_days) {
+            return Err("digest.recent_days must be between 1 and 3650".into());
+        }
+        if self.max_chunks_per_session == 0 || self.max_chunks_per_session > 50 {
+            return Err("digest.max_chunks_per_session must be between 1 and 50".into());
+        }
+        if self.model.len() > 100 || self.model.chars().any(char::is_control) {
+            return Err("digest.model is not a valid model name".into());
+        }
+        if let Some(path) = &self.cli_path {
+            if !path.is_absolute() {
+                return Err("digest.cli_path must be an absolute path".into());
+            }
+        }
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
 pub struct KbConfig {
     pub version: u32,
-    /// Where `raw/`, `kb.db` and `logs/` live. `~/` is expanded on load.
+    /// Where `raw/`, `notes/`, `kb.db` and `logs/` live. `~/` is expanded on load.
     pub data_dir: PathBuf,
     /// Collection interval for the scheduled task.
     pub interval_secs: u64,
@@ -78,6 +160,7 @@ pub struct KbConfig {
     /// in the backup but are left out of search and the session list.
     pub exclude_cwd_prefixes: Vec<String>,
     pub mirror: MirrorConfig,
+    pub digest: DigestConfig,
     /// Keys this version does not know, kept so a newer/older sibling program
     /// does not lose them when we save.
     #[serde(flatten)]
@@ -95,6 +178,7 @@ impl Default for KbConfig {
             exclude_prefixes: Vec::new(),
             exclude_cwd_prefixes: Vec::new(),
             mirror: MirrorConfig::default(),
+            digest: DigestConfig::default(),
             extra: Map::new(),
         }
     }
@@ -304,6 +388,7 @@ impl KbConfig {
                 ));
             }
         }
+        self.digest.validate()?;
         let roots = SourceRoots::resolve(self);
         for root in [&roots.claude, &roots.codex].into_iter().flatten() {
             if self.data_dir.starts_with(root) || root.starts_with(&self.data_dir) {
