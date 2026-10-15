@@ -1,0 +1,23 @@
+src/kb/branding.ts
+  s_cca7c29607588b::t_275e78c9c3e8bd 5
+src/kb/fixtures.ts
+  s_cca7c29607588b::t_275e78c9c3e8bd 22
+src/kb/KbHome.test.tsx
+  s_cca7c29607588b::t_275e78c9c3e8bd 72
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.11",
+  "base_commit_sha": "198e06262fe541d692d41605b9c251ccc28e3770",
+  "prompts": {},
+  "sessions": {
+    "s_cca7c29607588b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ef228e77-8d37-45df-ab42-2d4c28a0387d",
+        "model": "claude-sonnet-5-5"
+      },
+      "human_author": "moqing <moqing@tsign.cn>"
+    }
+  }
+}
