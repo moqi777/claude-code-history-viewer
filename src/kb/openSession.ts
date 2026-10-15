@@ -78,6 +78,9 @@ export async function openKbSession(session: KbSession, focus?: KbFocus): Promis
   return focus == null ? true : scrollToFocus(focus);
 }
 
+/** Scroll the session that is already open to the message `focus` points at. */
+export const jumpToFocus = (focus: KbFocus): Promise<boolean> => scrollToFocus(focus);
+
 /** Scroll the opened session to the message a search hit points at. */
 async function scrollToFocus(focus: KbFocus): Promise<boolean> {
   const store = useAppStore.getState();

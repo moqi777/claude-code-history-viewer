@@ -150,6 +150,24 @@ export interface KbMirrorConfig {
   volume_name: string | null;
 }
 
+export interface KbDigestConfig {
+  enabled: boolean;
+  engine: KbDigestEngine;
+  /** Empty = the CLI's own default model. */
+  model: string;
+  /** Absolute path of the CLI; background tasks have no `PATH`. */
+  cli_path: string | null;
+  /** Local `HH:MM`: where one round ends and the next begins. */
+  time: string;
+  max_sessions_per_round: number;
+  recent_days: number;
+  quiet_minutes: number;
+  min_messages: number;
+  max_chunks_per_session: number;
+}
+
+export type KbDigestEngine = "claude" | "codex";
+
 export interface KbConfig {
   version: number;
   data_dir: string;
@@ -160,6 +178,7 @@ export interface KbConfig {
   /** Working directories whose sessions stay backed up but are not searched or listed. */
   exclude_cwd_prefixes: string[];
   mirror: KbMirrorConfig;
+  digest: KbDigestConfig;
   [extra: string]: unknown;
 }
 
@@ -321,6 +340,8 @@ export interface KbHitSession {
 export interface KbSessionHit {
   rank: number;
   score: number;
+  /** The session has notes written by the daily digest. */
+  has_note?: boolean;
   session: KbHitSession;
   resume: { available: boolean; command: string | null; note: string | null };
   paths: { mirror: string; original: string };
@@ -338,6 +359,8 @@ export interface KbSearchResponse {
   data_as_of: string | null;
   matched_sessions: number;
   returned: number;
+  /** AI-written notes, best first; shown ahead of the messages. */
+  notes?: KbNote[];
   results: KbSessionHit[];
   hint: string | null;
 }
@@ -370,4 +393,147 @@ export interface KbSkillTest {
   matched_sessions: number | null;
   millis: number;
   message: string | null;
+}
+
+// ---------------------------------------------------------------------------
+// Notes and the daily digest
+// ---------------------------------------------------------------------------
+
+export interface KbNoteEvidence {
+  seq_from: number;
+  seq_to: number;
+  /** Claude only; Codex messages are found by `at` and `kind`. */
+  msg_key: string | null;
+  at: string | null;
+  kind: KbHit["kind"] | null;
+}
+
+/** One entry of a session's notes, written by the digest. */
+export interface KbNote {
+  kind: "note";
+  rank: number;
+  score: number;
+  entry_id: string;
+  /** The digest round that wrote it (a date, or `manual-…`). */
+  round: string;
+  /** `claude/<model>`. */
+  engine: string;
+  title: string;
+  problem: string;
+  cause: string;
+  solution: string;
+  conclusion: string;
+  keywords: string[];
+  evidence: KbNoteEvidence;
+  digested_at: string;
+  session: KbHitSession;
+  paths: { mirror: string; original: string };
+  show: string;
+  resume: { available: boolean; command: string | null; note: string | null };
+}
+
+export interface KbNotesPage {
+  total: number;
+  notes: KbNote[];
+}
+
+export interface KbNotesQuery {
+  query?: string;
+  source?: KbSource;
+  session_id?: string;
+  since?: string;
+  limit?: number;
+  offset?: number;
+}
+
+export interface KbSessionNotes {
+  notes: KbNote[];
+  /** `null` when the session was never digested. */
+  status: "notes" | "nothing" | "partial" | null;
+  digested_at: string | null;
+}
+
+export interface KbDigestRound {
+  round_id: string;
+  kind: "daily" | "manual";
+  state: "open" | "done" | "superseded";
+  planned_at: string;
+  completed_at: string | null;
+  done: number;
+  failed: number;
+  skipped: number;
+  pending: number;
+  input_tokens: number;
+  output_tokens: number;
+  duration_ms: number;
+}
+
+export interface KbDigestPaused {
+  reason: "quota" | "auth" | "config";
+  until: string;
+  message: string;
+}
+
+export interface KbDigestFailure {
+  source: KbSource;
+  session_id: string;
+  title: string | null;
+  attempts: number;
+  error: string | null;
+}
+
+export interface KbDigestRunning {
+  pid: number;
+  started_at: string;
+  round_id: string | null;
+  total: number;
+  finished: number;
+  current_title: string | null;
+}
+
+export interface KbDigestStatus {
+  enabled: boolean;
+  engine: KbDigestEngine;
+  model: string;
+  time: string;
+  running: KbDigestRunning | null;
+  paused: KbDigestPaused | null;
+  next_run_at: string | null;
+  last_round: KbDigestRound | null;
+  failures: KbDigestFailure[];
+  /** Sessions the next automatic round would digest. */
+  pending_auto: number;
+  /** Undigested sessions older than the automatic window (manual only). */
+  pending_older: number;
+  /** Until the first round: what it will cost, in input tokens. */
+  first_round_tokens: number | null;
+}
+
+export interface KbDigestEstimate {
+  sessions: number;
+  calls: number;
+  input_tokens: number;
+  minutes: number;
+  engine: KbDigestEngine;
+  model: string;
+}
+
+export type KbDigestRunRequest =
+  | { kind: "all" }
+  | { kind: "session"; source: KbSource; session_id: string };
+
+export type KbDigestRunStarted =
+  | { state: "started" }
+  | { state: "busy" }
+  | { state: "nothing"; message: string };
+
+export interface KbDigestTestReport {
+  ok: boolean;
+  kind: "quota" | "auth" | "config" | "timeout" | "failed" | "invalid_answer" | null;
+  message: string | null;
+  cli: string | null;
+  duration_ms: number;
+  input_tokens: number;
+  output_tokens: number;
+  model: string | null;
 }

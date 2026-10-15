@@ -1,5 +1,14 @@
 import { api } from "@/services/api";
 import type {
+  KbDigestConfig,
+  KbDigestEstimate,
+  KbDigestRunRequest,
+  KbDigestRunStarted,
+  KbDigestStatus,
+  KbDigestTestReport,
+  KbNotesPage,
+  KbNotesQuery,
+  KbSessionNotes,
   KbBackupPresence,
   KbBackupSummary,
   KbConfig,
@@ -65,4 +74,16 @@ export const kbApi = {
     api<KbMigrateCheck>("kb_change_data_dir_check", { newDir }),
   changeDataDirRun: (newDir: string, useExisting: boolean) =>
     api<KbMoveOutcome>("kb_change_data_dir_run", { newDir, useExisting }),
+
+  digestStatus: () => api<KbDigestStatus>("kb_digest_status"),
+  digestEstimateAll: () => api<KbDigestEstimate>("kb_digest_estimate_all"),
+  digestDailyTokens: () => api<number | null>("kb_digest_daily_tokens"),
+  digestRun: (request: KbDigestRunRequest) =>
+    api<KbDigestRunStarted>("kb_digest_run", { request }),
+  digestCancel: () => api<boolean>("kb_digest_cancel"),
+  digestFindCli: (engine: string) => api<string | null>("kb_digest_find_cli", { engine }),
+  digestTest: (draft: KbDigestConfig) => api<KbDigestTestReport>("kb_digest_test", { draft }),
+  notesList: (query: KbNotesQuery) => api<KbNotesPage>("kb_notes_list", { query }),
+  notesForSession: (source: string, sessionId: string) =>
+    api<KbSessionNotes>("kb_notes_for_session", { source, sessionId }),
 };

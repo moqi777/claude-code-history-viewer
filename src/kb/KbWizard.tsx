@@ -15,14 +15,15 @@ import { useAppStore } from "@/store/useAppStore";
 import { useLanguageStore } from "@/store/useLanguageStore";
 import { kbApi } from "./api";
 import { DataDirField, IntervalField, MirrorField, SourcesField, VerdictLine } from "./fields";
+import { DigestField } from "./KbDigestField";
 import { formatBytes } from "./format";
 import { SkillField } from "./SkillField";
-import { dataDirAcceptable } from "./logic";
+import { dataDirAcceptable, digestValid } from "./logic";
 import { progressLabel } from "./progressLabel";
 import type { KbConfig, KbDataDirReport, KbWizardResult } from "./types";
 import { useKbStore } from "./useKbStore";
 
-const STEPS = ["sources", "dataDir", "interval", "mirror", "confirm"] as const;
+const STEPS = ["sources", "dataDir", "interval", "mirror", "digest", "confirm"] as const;
 type Step = (typeof STEPS)[number];
 
 type Phase =
@@ -99,6 +100,8 @@ export const KbWizard = () => {
         return draft.interval_secs >= 60 && draft.interval_secs <= 86_400;
       case "mirror":
         return !draft.mirror.enabled || mirrorOk;
+      case "digest":
+        return digestValid(draft.digest);
       default:
         return true;
     }
@@ -192,6 +195,12 @@ export const KbWizard = () => {
                 <p className="text-xs text-muted-foreground">{t("kb.wizard.mirrorSkip")}</p>
               </>
             )}
+            {step === "digest" && (
+              <>
+                <DigestField draft={draft} onChange={setDraft} showEstimate={false} />
+                <p className="text-xs text-muted-foreground">{t("kb.digest.wizardSkip")}</p>
+              </>
+            )}
             {step === "confirm" && <Summary draft={draft} existing={dirReport} />}
             {phase.kind === "failed" && (
               <VerdictLine
@@ -279,6 +288,15 @@ const Summary = ({ draft, existing }: { draft: KbConfig; existing: KbDataDirRepo
       draft.mirror.enabled
         ? `${draft.mirror.volume_name ?? ""} ${draft.mirror.target_dir ?? ""}`.trim()
         : t("kb.wizard.mirrorOff"),
+    ],
+    [
+      t("kb.digest.field.title"),
+      draft.digest.enabled
+        ? t("kb.digest.summaryOn", {
+            engine: t(`kb.digest.engine.${draft.digest.engine}`),
+            time: draft.digest.time,
+          })
+        : t("kb.digest.summaryOff"),
     ],
   ];
   return (

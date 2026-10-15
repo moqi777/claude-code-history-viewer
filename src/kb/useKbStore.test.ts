@@ -150,4 +150,40 @@ describe("useKbStore", () => {
     expect(await useKbStore.getState().restoreDefaultConfig()).toEqual({});
     expect(useKbStore.getState().configState?.state).toBe("missing");
   });
+
+  describe("digest", () => {
+    it("keeps the status the card shows and survives a failed or empty poll", async () => {
+      api().digestStatus.mockResolvedValueOnce({ enabled: true, failures: [] });
+      await useKbStore.getState().refreshDigest();
+      expect(useKbStore.getState().digest).toMatchObject({ enabled: true });
+      api().digestStatus.mockRejectedValueOnce(new Error("locked"));
+      await useKbStore.getState().refreshDigest();
+      expect(useKbStore.getState().digest).toMatchObject({ enabled: true });
+      api().digestStatus.mockResolvedValueOnce(undefined);
+      await useKbStore.getState().refreshDigest();
+      expect(useKbStore.getState().digest).toBeNull();
+    });
+
+    it("starts a manual digest and then refreshes the card", async () => {
+      api().digestRun.mockResolvedValue({ state: "started" });
+      api().digestStatus.mockResolvedValue({ enabled: true, running: { total: 3 } });
+      const out = await useKbStore.getState().runDigest({ kind: "all" });
+      expect(out.started).toEqual({ state: "started" });
+      expect(api().digestRun).toHaveBeenCalledWith({ kind: "all" });
+      expect(useKbStore.getState().digest?.running).toMatchObject({ total: 3 });
+    });
+
+    it("reports a failure to start instead of throwing", async () => {
+      api().digestRun.mockRejectedValue(new Error("no such session"));
+      expect(await useKbStore.getState().runDigest({ kind: "all" })).toEqual({ error: "no such session" });
+      api().digestCancel.mockRejectedValue(new Error("nothing running"));
+      expect(await useKbStore.getState().cancelDigest()).toEqual({ error: "nothing running" });
+    });
+
+    it("remembers which home tab is open", () => {
+      expect(useKbStore.getState().homeTab).toBe("sessions");
+      useKbStore.getState().setHomeTab("notes");
+      expect(useKbStore.getState().homeTab).toBe("notes");
+    });
+  });
 });

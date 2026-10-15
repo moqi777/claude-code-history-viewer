@@ -1,4 +1,4 @@
-import type { KbOverview, KbRunSummary, KbSession } from "./types";
+import type { KbDigestStatus, KbNote, KbOverview, KbRunSummary, KbSession } from "./types";
 
 export const overviewFixture = (patch: Partial<KbOverview> = {}): KbOverview => ({
   data_dir: "/Users/me/AgentKB",
@@ -59,5 +59,69 @@ export const sessionFixture = (patch: Partial<KbSession> = {}): KbSession => ({
   source_path: "/Users/me/.claude/projects/p/a.jsonl",
   parent_session_id: null,
   is_subagent: false,
+  ...patch,
+});
+
+export const digestStatusFixture = (patch: Partial<KbDigestStatus> = {}): KbDigestStatus => ({
+  enabled: true,
+  engine: "claude",
+  model: "",
+  time: "03:00",
+  running: null,
+  paused: null,
+  next_run_at: "2026-10-17T03:00:00+08:00",
+  last_round: {
+    round_id: "2026-10-16",
+    kind: "daily",
+    state: "done",
+    planned_at: "2026-10-16T03:00:10+08:00",
+    completed_at: "2026-10-16T03:21:00+08:00",
+    done: 12,
+    failed: 0,
+    skipped: 0,
+    pending: 0,
+    input_tokens: 420_000,
+    output_tokens: 9_000,
+    duration_ms: 1_200_000,
+  },
+  failures: [],
+  pending_auto: 5,
+  pending_older: 183,
+  first_round_tokens: null,
+  ...patch,
+});
+
+export const noteFixture = (patch: Partial<KbNote> = {}): KbNote => ({
+  kind: "note",
+  rank: 1,
+  score: 4.2,
+  entry_id: "n1",
+  round: "2026-10-16",
+  engine: "claude/claude-sonnet-5-5",
+  title: "WindowServer 内存膨胀至 28GB 的根因是 QQ",
+  problem: "WindowServer 在活动监视器里显示约 28 GB。",
+  cause: "QQ 的截图功能让 WindowServer 创建 IOSurface，QQ 一直不释放。",
+  solution: "用 sudo footprint --unmapped 找到持有者；退出 QQ 后降到 1112 MB。",
+  conclusion: "持有者是 QQ，退出 QQ 即可释放。",
+  keywords: ["WindowServer", "QQ", "IOSurface"],
+  evidence: { seq_from: 1, seq_to: 145, msg_key: "uuid-1", at: "2026-10-15T01:00:00Z", kind: "user" },
+  digested_at: "2026-10-16T03:12:44Z",
+  session: {
+    source: "claude",
+    session_id: "8e6f1373",
+    title: "macOS 26 WindowServer内存泄漏",
+    client: "cli",
+    project: "JavaCode",
+    cwd: "/Users/me/JavaCode",
+    started_at: "2026-10-15T01:00:00Z",
+    last_activity_at: "2026-10-15T03:00:00Z",
+    source_status: "present",
+    is_subagent: false,
+    parent_session_id: null,
+    message_count: 131,
+  },
+  paths: { mirror: "/AgentKB/raw/claude/projects/p/8e6f1373.jsonl", original: "/Users/me/.claude/projects/p/8e6f1373.jsonl" },
+  show: "AgentKB --kb-show claude:8e6f1373 --around 1",
+  resume: { available: true, command: "cd '/Users/me/JavaCode' && claude --resume 8e6f1373", note: null },
   ...patch,
 });

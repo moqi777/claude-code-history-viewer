@@ -729,12 +729,18 @@ fn digest_session(
 
         let at = plan::rfc3339(env.now());
         let file_id = info.file_id;
-        let lookup = |seq: u64| -> Option<String> {
+        let lookup = |seq: u64| -> Option<validate::Anchor> {
             conn.query_row(
-                "SELECT msg_key FROM messages WHERE file_id=?1 AND seq>=?2 AND msg_key IS NOT NULL \
+                "SELECT msg_key, ts, kind FROM messages WHERE file_id=?1 AND seq>=?2 \
                  ORDER BY seq LIMIT 1",
                 rusqlite::params![file_id, i64::try_from(seq).unwrap_or(i64::MAX)],
-                |r| r.get(0),
+                |r| {
+                    Ok(validate::Anchor {
+                        msg_key: r.get(0)?,
+                        at: r.get(1)?,
+                        kind: r.get(2)?,
+                    })
+                },
             )
             .ok()
         };
@@ -755,7 +761,7 @@ fn digest_session(
                         })
                         .unwrap_or_else(|| "default".to_string()),
                 },
-                msg_key_of: &lookup,
+                anchor_of: &lookup,
             },
         );
         file.session_title = info.title.as_deref().map(|t| redact(t).into_owned());

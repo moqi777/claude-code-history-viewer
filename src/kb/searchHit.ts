@@ -1,14 +1,26 @@
 import type { ClaudeMessage } from "@/types";
-import type { KbHit, KbSessionHit, KbSession } from "./types";
+import type { KbHit, KbHitSession, KbNote, KbSessionHit, KbSession } from "./types";
 
 /** A search hit's session in the shape the viewer opens. */
-export const sessionFromHit = (hit: KbSessionHit): KbSession => {
-  const s = hit.session;
+export const sessionFromHit = (hit: KbSessionHit): KbSession =>
+  sessionFrom(hit.session, hit.paths);
+
+/** The session a note belongs to, in the shape the viewer opens. */
+export const sessionFromNote = (note: KbNote): KbSession => sessionFrom(note.session, note.paths);
+
+/** Where a note's evidence starts. Claude messages carry a key; Codex ones are found by time and role. */
+export const focusOfNote = (note: KbNote): KbFocus => ({
+  msgKey: note.evidence.msg_key,
+  at: note.evidence.at,
+  kind: note.evidence.kind ?? "user",
+});
+
+const sessionFrom = (s: KbHitSession, paths: { mirror: string; original: string }): KbSession => {
   const last = s.last_activity_at ?? s.started_at ?? "";
   return {
-    session_id: hit.paths.mirror,
+    session_id: paths.mirror,
     actual_session_id: s.session_id,
-    file_path: hit.paths.mirror,
+    file_path: paths.mirror,
     project_name: s.project ?? "",
     message_count: s.message_count,
     first_message_time: s.started_at ?? "",
@@ -22,7 +34,7 @@ export const sessionFromHit = (hit: KbSessionHit): KbSession => {
     entrypoint: s.client ?? undefined,
     cwd: s.cwd,
     source_status: s.source_status,
-    source_path: hit.paths.original,
+    source_path: paths.original,
     parent_session_id: s.parent_session_id,
     is_subagent: s.is_subagent,
   } as KbSession;

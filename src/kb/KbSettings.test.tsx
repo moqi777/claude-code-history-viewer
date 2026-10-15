@@ -235,4 +235,47 @@ describe("KbSettings", () => {
     expect(useKbStore.getState().wizard).toEqual({ open: true, mode: "rerun" });
     expect(useKbStore.getState().settingsOpen).toBe(false);
   });
+
+  describe("daily digest", () => {
+    const enable = () => screen.getByRole("checkbox", { name: "kb.digest.field.enable" }) as HTMLInputElement;
+
+    it("shows the shared-quota sentence and the estimate from the last 7 days", async () => {
+      mocks.api.digestDailyTokens.mockResolvedValue(420_000);
+      await openSettings();
+      expect(screen.getByText("kb.digest.sharedQuota")).toBeTruthy();
+      expect((await screen.findByText(/kb\.digest\.field\.daily/)).textContent).toContain("kb.digest.tokens");
+    });
+
+    it("can only be turned on after a passing test, and saves the CLI path with it", async () => {
+      mocks.api.digestDailyTokens.mockResolvedValue(null);
+      mocks.api.saveConfig.mockImplementation(async (config) => ({ config, schedule: null, schedule_error: null }));
+      await openSettings();
+      expect(enable().disabled).toBe(true);
+      mocks.api.digestTest.mockResolvedValue({
+        ok: true, kind: null, message: null, cli: "/Users/me/.local/bin/claude",
+        duration_ms: 12_000, input_tokens: 3200, output_tokens: 4, model: "claude-sonnet-5-5",
+      });
+      fireEvent.click(screen.getByRole("button", { name: "kb.digest.field.test" }));
+      await waitFor(() => expect(enable().disabled).toBe(false));
+      fireEvent.click(enable());
+      fireEvent.change(screen.getByLabelText("kb.digest.field.model"), { target: { value: "claude-haiku-5-5" } });
+      // Changing the model invalidated the test: it is on, but must be tested again to be turned on afresh.
+      fireEvent.click(save());
+      await waitFor(() => expect(mocks.api.saveConfig).toHaveBeenCalled());
+      const sent = mocks.api.saveConfig.mock.calls[0]?.[0].digest;
+      expect(sent).toMatchObject({
+        enabled: true, model: "claude-haiku-5-5", cli_path: "/Users/me/.local/bin/claude",
+      });
+    });
+
+    it("refuses a time or a session count the backend would reject", async () => {
+      mocks.api.digestDailyTokens.mockResolvedValue(null);
+      await openSettings();
+      fireEvent.change(screen.getByLabelText("kb.digest.field.cap"), { target: { value: "0" } });
+      expect(screen.getByText("kb.digest.field.invalid")).toBeTruthy();
+      expect(save().disabled).toBe(true);
+      fireEvent.change(screen.getByLabelText("kb.digest.field.cap"), { target: { value: "20" } });
+      expect(save().disabled).toBe(false);
+    });
+  });
 });

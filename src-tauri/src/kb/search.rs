@@ -285,14 +285,10 @@ pub struct NoteEvidence {
     pub seq_from: u64,
     pub seq_to: u64,
     pub msg_key: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct NoteSession {
-    pub source: String,
-    pub session_id: String,
-    pub title: Option<String>,
-    pub last_activity_at: Option<String>,
+    /// When the first message was sent and its kind: how Codex messages
+    /// (which have no key) are found again.
+    pub at: Option<String>,
+    pub kind: Option<String>,
 }
 
 /// One entry of a session's notes, as found by a search.
@@ -317,7 +313,8 @@ pub struct NoteHit {
     pub evidence: NoteEvidence,
     /// When the AI wrote it: notes are summaries, not the conversation.
     pub digested_at: String,
-    pub session: NoteSession,
+    pub session: SessionInfo,
+    pub paths: Paths,
     /// Read the messages the note is based on.
     pub show: String,
     pub resume: Resume,
@@ -731,6 +728,8 @@ struct NoteRow {
     seq_from: i64,
     seq_to: i64,
     msg_key: Option<String>,
+    msg_at: Option<String>,
+    msg_kind: Option<String>,
     digested_at: String,
     rank: f64,
 }
@@ -756,6 +755,8 @@ fn note_row_from(r: &rusqlite::Row<'_>) -> rusqlite::Result<NoteRow> {
         round_id: r.get(16)?,
         engine: r.get(17)?,
         model: r.get(18)?,
+        msg_at: r.get(19)?,
+        msg_kind: r.get(20)?,
     })
 }
 
@@ -776,7 +777,8 @@ fn fetch_notes(
     let mut sql = String::from(
         "SELECT n.id, s.file_id, n.source, n.session_id, n.title, n.problem, n.cause, n.solution, \
                 n.conclusion, n.keywords, n.seq_from, n.seq_to, n.msg_key, n.digested_at, \
-                bm25(notes_fts, 3.0, 4.0, 1.0) AS rank, n.entry_id, n.round_id, n.engine, n.model \
+                bm25(notes_fts, 3.0, 4.0, 1.0) AS rank, n.entry_id, n.round_id, n.engine, n.model, \
+                n.msg_at, n.msg_kind \
          FROM notes_fts \
          JOIN notes n ON n.id = notes_fts.rowid \
          JOIN sessions s ON s.source = n.source AND s.session_id = n.session_id AND s.is_subagent = 0 \
@@ -922,6 +924,8 @@ fn note_hit(
             seq_from: u64::try_from(row.seq_from).unwrap_or(0),
             seq_to: u64::try_from(row.seq_to).unwrap_or(0),
             msg_key: row.msg_key,
+            at: row.msg_at,
+            kind: row.msg_kind,
         },
         digested_at: row.digested_at,
         show: format!(
@@ -929,12 +933,14 @@ fn note_hit(
             row.source, row.session_id, row.seq_from
         ),
         resume: resume_for(&info, exe),
-        session: NoteSession {
-            source: row.source,
-            session_id: row.session_id,
-            title: info.title,
-            last_activity_at: info.last_activity_at,
+        paths: Paths {
+            mirror: index.data.mirror_path(&session.mirror_rel).map_or_else(
+                |_| session.mirror_rel.clone(),
+                |p| p.to_string_lossy().into_owned(),
+            ),
+            original: session.source_path.clone(),
         },
+        session: info,
     }))
 }
 
@@ -1006,7 +1012,7 @@ pub fn list_notes(data: &DataPaths, filter: &NotesFilter) -> Result<NotesPage, S
     let mut stmt = index.conn.prepare(&format!(
         "SELECT n.id, s.file_id, n.source, n.session_id, n.title, n.problem, n.cause, n.solution, \
                 n.conclusion, n.keywords, n.seq_from, n.seq_to, n.msg_key, n.digested_at, \
-                0.0, n.entry_id, n.round_id, n.engine, n.model \
+                0.0, n.entry_id, n.round_id, n.engine, n.model, n.msg_at, n.msg_kind \
          {from} ORDER BY n.digested_at DESC, n.id LIMIT {limit} OFFSET {offset}"
     ))?;
     let rows = stmt.query_map(params_from_iter(args.iter()), note_row_from)?;

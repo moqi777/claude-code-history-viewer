@@ -69,7 +69,7 @@ describe("KbWizard", () => {
     mocks.api.getConfigState.mockResolvedValue({ state: "valid", config: configFixture(), config_path: "/x" });
   });
 
-  it("walks forward and back through all five steps without losing choices", async () => {
+  it("walks forward and back through all six steps without losing choices", async () => {
     await open();
     expect(current()).toContain("kb.wizard.step.sources");
     expect((await sourcesReady())[0]?.textContent).toContain('"sessions":40');
@@ -83,8 +83,11 @@ describe("KbWizard", () => {
     next();
     expect(current()).toContain("kb.wizard.step.mirror");
     next(); // the disk is optional: skipping is allowed
+    expect(current()).toContain("kb.wizard.step.digest");
+    next(); // so is the digest
     expect(current()).toContain("kb.wizard.step.confirm");
     expect(screen.getByText(/"count":15/)).toBeTruthy();
+    back();
     back();
     back();
     expect(current()).toContain("kb.wizard.step.interval");
@@ -129,6 +132,7 @@ describe("KbWizard", () => {
     next();
     expect(await screen.findByText(/kb\.test\.dataDir\.existing/)).toBeTruthy();
     await waitFor(() => expect(isNextDisabled()).toBe(false));
+    next();
     next();
     next();
     next();
@@ -202,6 +206,7 @@ describe("KbWizard", () => {
     next();
     next();
     next();
+    next();
     expect(mocks.api.wizardCommit).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "kb.wizard.start" }));
     expect(await screen.findByText("kb.wizard.done")).toBeTruthy();
@@ -229,6 +234,7 @@ describe("KbWizard", () => {
     next();
     next();
     next();
+    next();
     fireEvent.click(screen.getByRole("button", { name: "kb.wizard.start" }));
     expect((await screen.findByRole("alert")).textContent).toContain("disk full");
     expect(screen.queryByText("kb.wizard.done")).toBeNull();
@@ -237,6 +243,73 @@ describe("KbWizard", () => {
     expect(await screen.findByText("kb.wizard.done")).toBeTruthy();
     expect(screen.getByText(/kb\.wizard\.doneScheduleFailed/)).toBeTruthy();
     expect(screen.getByText("kb.wizard.doneBackup")).toBeTruthy();
+  });
+
+  it("the digest step: optional, and it only turns on after the test passes, remembering the CLI's path", async () => {
+    mocks.api.digestDailyTokens.mockResolvedValue(null);
+    mocks.api.wizardCommit.mockResolvedValue({
+      sync: { status: "ok", changed_files: 1, copied_bytes: 1, errors: [] },
+      schedule: null, schedule_error: null, backup_started: false,
+    });
+    await open();
+    await sourcesReady();
+    next();
+    await dataDirReady();
+    next();
+    next();
+    next();
+    expect(current()).toContain("kb.wizard.step.digest");
+    expect(isNextDisabled()).toBe(false);
+    expect(screen.getByText("kb.digest.sharedQuota")).toBeTruthy();
+    const enable = screen.getByRole("checkbox", { name: "kb.digest.field.enable" }) as HTMLInputElement;
+    expect(enable.disabled).toBe(true);
+
+    mocks.api.digestTest.mockResolvedValueOnce({
+      ok: false, kind: "auth", message: "Invalid API key", cli: "/Users/me/.local/bin/claude",
+      duration_ms: 900, input_tokens: 0, output_tokens: 0, model: null,
+    });
+    fireEvent.click(screen.getByRole("button", { name: "kb.digest.field.test" }));
+    expect((await screen.findByRole("alert")).textContent).toContain("kb.digest.test.auth");
+    expect(enable.disabled).toBe(true);
+
+    mocks.api.digestTest.mockResolvedValueOnce({
+      ok: true, kind: null, message: null, cli: "/Users/me/.local/bin/claude",
+      duration_ms: 11_000, input_tokens: 3200, output_tokens: 4, model: "claude-sonnet-5-5",
+    });
+    fireEvent.click(screen.getByRole("button", { name: "kb.digest.field.test" }));
+    expect(await screen.findByText(/kb\.digest\.test\.ok/)).toBeTruthy();
+    await waitFor(() => expect(enable.disabled).toBe(false));
+    fireEvent.click(enable);
+    next();
+    expect(screen.getByText(/kb\.digest\.summaryOn/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "kb.wizard.start" }));
+    await screen.findByText("kb.wizard.done");
+    const sent = mocks.api.wizardCommit.mock.calls[0]?.[0].digest;
+    expect(sent.enabled).toBe(true);
+    expect(sent.cli_path).toBe("/Users/me/.local/bin/claude");
+    // The test was run with the settings on screen.
+    expect(mocks.api.digestTest.mock.calls[0]?.[0].engine).toBe("claude");
+  });
+
+  it("changing the AI invalidates an earlier passing test", async () => {
+    mocks.api.digestDailyTokens.mockResolvedValue(null);
+    await open();
+    await sourcesReady();
+    next();
+    await dataDirReady();
+    next();
+    next();
+    next();
+    mocks.api.digestTest.mockResolvedValue({
+      ok: true, kind: null, message: null, cli: "/x/claude",
+      duration_ms: 1000, input_tokens: 1, output_tokens: 1, model: "m",
+    });
+    fireEvent.click(screen.getByRole("button", { name: "kb.digest.field.test" }));
+    const enable = screen.getByRole("checkbox", { name: "kb.digest.field.enable" }) as HTMLInputElement;
+    await waitFor(() => expect(enable.disabled).toBe(false));
+    fireEvent.click(screen.getByRole("radio", { name: "kb.digest.engine.codex" }));
+    expect(enable.disabled).toBe(true);
+    expect(screen.queryByText(/kb\.digest\.test\.ok/)).toBeNull();
   });
 
   it("'later' closes it without writing anything, and reopening starts from the beginning", async () => {

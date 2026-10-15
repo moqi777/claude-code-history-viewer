@@ -841,3 +841,101 @@ fn rebuilding_the_index_brings_every_note_back_and_search_finds_them() {
     rig.at("2026-10-17T00:30:00Z");
     assert_eq!(rig.run().status, "idle");
 }
+
+#[test]
+fn a_collection_is_not_held_up_by_a_digest_that_is_working() {
+    use crate::kb::config::SourceRoots;
+    use crate::kb::progress::ProgressSink;
+    use crate::kb::sync::{run_sync, KbEnv};
+
+    let rig = Rig::new();
+    rig.session("a", 6, "2026-10-15T14:00:00Z");
+    rig.ai.mode("slow");
+    rig.at("2026-10-16T00:30:00Z");
+
+    // A real source file for the collection to pick up.
+    let claude = rig.kb.dir.path().join(".claude");
+    let session = claude.join("projects/-tmp-p/11111111-2222-3333-4444-555555555555.jsonl");
+    std::fs::create_dir_all(session.parent().unwrap()).unwrap();
+    std::fs::write(
+        &session,
+        r#"{"type":"user","timestamp":"2026-01-01T00:00:01Z","cwd":"/tmp/p","message":{"role":"user","content":"hello there"}}
+"#,
+    )
+    .unwrap();
+    // The hand-made sessions have no mirror files; mark the index as current
+    // so the collection does not try to rebuild them.
+    db::set_meta(
+        &rig.kb.conn,
+        "indexer_version",
+        crate::kb::sync::INDEXER_VERSION,
+    )
+    .unwrap();
+    db::set_meta(&rig.kb.conn, "exclude_cwd_applied", "").unwrap();
+    let sync_env = KbEnv {
+        data: rig.kb.data.clone(),
+        roots: SourceRoots {
+            claude: Some(claude),
+            codex: None,
+        },
+        exclude_prefixes: vec![],
+        exclude_cwd_prefixes: vec![],
+        mirror: None,
+        progress: ProgressSink::default(),
+        force_reindex: false,
+    };
+
+    let mut slow = rig.env();
+    slow.call_timeout = Duration::from_secs(4);
+    let background = std::thread::spawn(move || run(&slow, Trigger::Auto, &Scope::Auto).unwrap());
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    while rig.ai.calls() == 0 && std::time::Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(30));
+    }
+    assert_eq!(rig.ai.calls(), 1, "the digest is in the middle of a call");
+
+    let started = std::time::Instant::now();
+    let summary = run_sync(&sync_env, "test").unwrap();
+    let took = started.elapsed();
+    assert_eq!(summary.status, "ok", "{:?}", summary.errors);
+    assert_eq!(summary.new_sessions, 1);
+    assert!(
+        took < Duration::from_secs(2),
+        "the collection took {took:?} while the digest waited for the AI"
+    );
+    background.join().unwrap();
+}
+
+#[test]
+fn a_note_remembers_where_its_evidence_starts_even_without_a_message_key() {
+    let rig = Rig::new();
+    rig.session("with-key", 6, "2026-10-15T14:00:00Z");
+    let codex = rig.kb.session(
+        "codex",
+        "codex-1",
+        "/work/app",
+        None,
+        "2026-10-15T14:00:00Z",
+    );
+    rig.kb.chat(codex, 6, "2026-10-15T13:00:00Z");
+    rig.kb
+        .conn
+        .execute("UPDATE messages SET msg_key=NULL WHERE file_id=?1", [codex])
+        .unwrap();
+    rig.at("2026-10-16T00:30:00Z");
+    rig.run();
+
+    let keyed = &rig.note("with-key").unwrap().entries[0].evidence;
+    assert_eq!(keyed.msg_key.as_deref(), Some("key-1"));
+    assert_eq!(keyed.kind.as_deref(), Some("user"));
+    assert!(keyed.at.is_some());
+
+    let plain = &notes::read(&rig.kb.data, "codex", "codex-1")
+        .unwrap()
+        .unwrap()
+        .entries[0]
+        .evidence;
+    assert_eq!(plain.msg_key, None, "Codex has no message keys");
+    assert_eq!(plain.kind.as_deref(), Some("user"));
+    assert!(plain.at.as_deref().unwrap().starts_with("2026-10-15T13:00"));
+}

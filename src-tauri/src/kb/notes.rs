@@ -44,6 +44,8 @@ const NOTES_DDL: &str = "
       seq_from    INTEGER NOT NULL,
       seq_to      INTEGER NOT NULL,
       msg_key     TEXT,
+      msg_at      TEXT,
+      msg_kind    TEXT,
       round_id    TEXT NOT NULL,
       digested_at TEXT NOT NULL,
       engine      TEXT NOT NULL,
@@ -75,6 +77,12 @@ pub struct Evidence {
     /// looks the message up by it first and falls back to `seq`.
     #[serde(default)]
     pub msg_key: Option<String>,
+    /// When that message was sent, and what it was (`user`, `assistant`…):
+    /// Codex messages have no key, so the opener finds them by time and role.
+    #[serde(default)]
+    pub at: Option<String>,
+    #[serde(default)]
+    pub kind: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -227,8 +235,8 @@ pub fn index_file(conn: &Connection, file: &NotesFile, hash: &str) -> Result<(),
         let keywords = serde_json::to_string(&entry.keywords).map_err(|e| e.to_string())?;
         tx.execute(
             "INSERT INTO notes (source, session_id, entry_id, title, problem, cause, solution, \
-             conclusion, keywords, seq_from, seq_to, msg_key, round_id, digested_at, engine, model) \
-             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16)",
+             conclusion, keywords, seq_from, seq_to, msg_key, msg_at, msg_kind, round_id, digested_at, engine, model) \
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18)",
             params![
                 file.source,
                 file.session_id,
@@ -242,6 +250,8 @@ pub fn index_file(conn: &Connection, file: &NotesFile, hash: &str) -> Result<(),
                 i64::try_from(entry.evidence.seq_from).unwrap_or(i64::MAX),
                 i64::try_from(entry.evidence.seq_to).unwrap_or(i64::MAX),
                 entry.evidence.msg_key,
+                entry.evidence.at,
+                entry.evidence.kind,
                 entry.round,
                 entry.digested_at,
                 entry.engine.cli,
@@ -457,6 +467,8 @@ pub mod testing {
                     seq_from: 3,
                     seq_to: 9,
                     msg_key: Some("uuid-3".into()),
+                    at: Some("2026-10-16T01:00:00Z".into()),
+                    kind: Some("user".into()),
                 },
                 round: "2026-10-16".into(),
                 digested_at: "2026-10-16T03:00:00Z".into(),

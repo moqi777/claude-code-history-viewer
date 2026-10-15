@@ -14,7 +14,8 @@ import {
 } from "@/components/ui";
 import { kbApi } from "./api";
 import { Field, IntervalField, MirrorField, SourcesField, VerdictLine } from "./fields";
-import { excludesValid, parseExcludes } from "./logic";
+import { DigestField } from "./KbDigestField";
+import { digestValid, excludesValid, parseExcludes } from "./logic";
 import { SkillField } from "./SkillField";
 import { useTest } from "./useTest";
 import { describeMigrateCheck } from "./messages";
@@ -79,6 +80,7 @@ export const KbSettings = () => {
     excludesValid(excludes) &&
     excludesValid(excludeCwds) &&
     candidate.interval_secs >= 60 &&
+    digestValid(candidate.digest) &&
     (candidate.sources.claude.enabled || candidate.sources.codex.enabled) &&
     (!mirrorChanged || mirrorOk);
 
@@ -161,6 +163,8 @@ export const KbSettings = () => {
             />
 
             <SkillField />
+
+            <DigestField draft={draft} onChange={setDraft} />
 
             <MoveDataDir current={saved.data_dir} />
 

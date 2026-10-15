@@ -9,6 +9,8 @@ import { formatBytes } from "./format";
 import { describeBackup, scheduleHealth } from "./homeStatus";
 import { VerdictLine } from "./fields";
 import { openKbSession } from "./openSession";
+import { KbDigestCard } from "./KbDigestCard";
+import { KbNotes } from "./KbNotes";
 import { SearchBox, SearchResults } from "./KbSearch";
 import { percentOf, progressLabel } from "./progressLabel";
 import type { KbFilters, KbOverview, KbSession, KbTimeRange } from "./types";
@@ -17,6 +19,7 @@ import { defaultFilters, useKbStore } from "./useKbStore";
 const POLL_BUSY_MS = 2000;
 const POLL_IDLE_MS = 5000;
 const PRESENCE_MS = 15000;
+const POLL_DIGEST_IDLE_MS = 10000;
 const RANGES: KbTimeRange[] = ["all", "7d", "30d"];
 
 export const KbHome = () => {
@@ -34,6 +37,8 @@ export const KbHome = () => {
   const isRepairing = useKbStore((s) => s.isRepairing);
   const loadError = useKbStore((s) => s.loadError);
   const searching = useKbStore((s) => s.search.query.trim() !== "");
+  const homeTab = useKbStore((s) => s.homeTab);
+  const digestRunning = useKbStore((s) => s.digest?.running != null);
 
   const activity = overview?.activity ?? "idle";
   const busy = isSyncing || isBackingUp || overview?.running === true;
@@ -45,6 +50,7 @@ export const KbHome = () => {
     void store.loadFacets();
     void store.refreshPresence();
     void store.loadSkills();
+    void store.refreshDigest();
   }, []);
 
   // Collections also run from launchd, outside this window: keep the page fresh.
@@ -55,6 +61,15 @@ export const KbHome = () => {
     );
     return () => window.clearInterval(timer);
   }, [busy]);
+
+  // The digest runs in its own process (launchd, or a button): follow it closely while it works.
+  useEffect(() => {
+    const timer = window.setInterval(
+      () => void useKbStore.getState().refreshDigest(),
+      digestRunning ? POLL_BUSY_MS : POLL_DIGEST_IDLE_MS,
+    );
+    return () => window.clearInterval(timer);
+  }, [digestRunning]);
 
   useEffect(() => {
     const timer = window.setInterval(() => void useKbStore.getState().refreshPresence(), PRESENCE_MS);
@@ -228,6 +243,32 @@ export const KbHome = () => {
         />
       )}
 
+      <KbDigestCard />
+
+      <div role="tablist" aria-label={t("kb.tabs.label")} className="flex gap-1 border-b">
+        {(["sessions", "notes"] as const).map((tab) => (
+          <button
+            key={tab}
+            type="button"
+            role="tab"
+            aria-selected={homeTab === tab}
+            onClick={() => useKbStore.getState().setHomeTab(tab)}
+            className={cn(
+              "-mb-px border-b-2 px-3 py-1.5 text-sm",
+              homeTab === tab
+                ? "border-accent font-medium"
+                : "border-transparent text-muted-foreground hover:text-foreground",
+            )}
+          >
+            {t(`kb.tabs.${tab}`)}
+          </button>
+        ))}
+      </div>
+
+      {homeTab === "notes" ? (
+        <KbNotes />
+      ) : (
+        <>
       <SearchBox />
 
       <Filters filters={filters} facets={facets} />
@@ -255,6 +296,8 @@ export const KbHome = () => {
       </div>
       {!searching && sessions.length >= 500 && (
         <p className="text-xs text-muted-foreground">{t("kb.sessions.limitNote", { count: 500 })}</p>
+      )}
+        </>
       )}
     </div>
   );

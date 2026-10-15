@@ -1,6 +1,9 @@
 import { create } from "zustand";
 import { kbApi } from "./api";
 import type {
+  KbDigestRunRequest,
+  KbDigestRunStarted,
+  KbDigestStatus,
   KbBackupPresence,
   KbBackupSummary,
   KbConfigStateInfo,
@@ -28,6 +31,8 @@ export type WizardMode = "first" | "rerun";
 
 export type KbSearchStatus = "idle" | "loading" | "ok" | "not_ready" | "no_data" | "error";
 
+export type KbHomeTab = "sessions" | "notes";
+
 export interface KbSearchState {
   query: string;
   status: KbSearchStatus;
@@ -52,6 +57,8 @@ export interface KbState {
   settingsOpen: boolean;
   search: KbSearchState;
   skills: KbSkillStatus[] | null;
+  digest: KbDigestStatus | null;
+  homeTab: KbHomeTab;
 }
 
 export interface KbActions {
@@ -75,6 +82,11 @@ export interface KbActions {
   loadSkills: () => Promise<void>;
   installSkill: (target: KbSkillTarget) => Promise<{ error?: string }>;
   uninstallSkill: (target: KbSkillTarget) => Promise<{ error?: string }>;
+  refreshDigest: () => Promise<void>;
+  setHomeTab: (tab: KbHomeTab) => void;
+  /** Start a manual digest (its own process); the card follows its progress. */
+  runDigest: (request: KbDigestRunRequest) => Promise<{ started?: KbDigestRunStarted; error?: string }>;
+  cancelDigest: () => Promise<{ error?: string }>;
 }
 
 const errorMessage = (e: unknown): string => (e instanceof Error ? e.message : String(e));
@@ -140,6 +152,8 @@ const initialState: KbState = {
   settingsOpen: false,
   search: idleSearch,
   skills: null,
+  digest: null,
+  homeTab: "sessions",
 };
 
 // Responses of overlapping refreshes can arrive out of order; only the newest
@@ -307,6 +321,36 @@ export const useKbStore = create<KbState & KbActions>((set, get) => ({
     try {
       await kbApi.restoreDefaultConfig();
       await get().loadConfigState();
+      return {};
+    } catch (e) {
+      return { error: errorMessage(e) };
+    }
+  },
+
+  refreshDigest: async () => {
+    try {
+      set({ digest: (await kbApi.digestStatus()) ?? null });
+    } catch {
+      /* the card keeps what it last showed */
+    }
+  },
+
+  setHomeTab: (homeTab) => set({ homeTab }),
+
+  runDigest: async (request) => {
+    try {
+      const started = await kbApi.digestRun(request);
+      await get().refreshDigest();
+      return { started };
+    } catch (e) {
+      return { error: errorMessage(e) };
+    }
+  },
+
+  cancelDigest: async () => {
+    try {
+      await kbApi.digestCancel();
+      await get().refreshDigest();
       return {};
     } catch (e) {
       return { error: errorMessage(e) };

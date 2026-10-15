@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { overviewFixture, sessionFixture } from "./fixtures";
+import { noteFixture, overviewFixture, sessionFixture } from "./fixtures";
 import { KbHome } from "./KbHome";
 import { configFixture } from "./testkit";
 import type { KbSearchResponse, KbSessionHit } from "./types";
@@ -212,5 +212,26 @@ describe("home page search", () => {
     });
     expect(screen.getByText("Fix the login bug")).toBeTruthy();
     expect(useKbStore.getState().search.status).toBe("idle");
+  });
+
+  it("shows the AI's notes ahead of the message hits, and flags sessions that have notes", async () => {
+    await runSearch({
+      state: "ok",
+      response: response({ notes: [noteFixture()], results: [hit({ has_note: true })] }),
+    });
+    const notes = screen.getByRole("region", { name: "kb.search.notesTitle" });
+    expect(notes.textContent).toContain("WindowServer 内存膨胀至 28GB 的根因是 QQ");
+    expect(screen.getByText("kb.search.hasNote")).toBeTruthy();
+    const all = document.body.innerHTML;
+    expect(all.indexOf("WindowServer 内存膨胀")).toBeLessThan(all.indexOf("排查 Ghostty 卡死"));
+  });
+
+  it("a search that only finds notes is not reported as empty", async () => {
+    await runSearch({
+      state: "ok",
+      response: response({ notes: [noteFixture()], results: [], matched_sessions: 0, returned: 0 }),
+    });
+    expect(screen.queryByText("kb.search.none")).toBeNull();
+    expect(screen.getByText("WindowServer 内存膨胀至 28GB 的根因是 QQ")).toBeTruthy();
   });
 });

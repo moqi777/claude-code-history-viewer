@@ -147,13 +147,21 @@ pub fn check(answer: &str, bounds: &Bounds<'_>) -> Result<Vec<Checked>, String> 
     Ok(out)
 }
 
+/// What the opener needs to find a message again.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Anchor {
+    pub msg_key: Option<String>,
+    pub at: Option<String>,
+    pub kind: String,
+}
+
 /// Who wrote the entries and when, for the entries this call produced.
 pub struct Authorship<'a> {
     pub round: &'a str,
     pub at: &'a str,
     pub engine: EngineInfo,
-    /// `msg_key` of a message, by `seq`, for `Evidence::msg_key`.
-    pub msg_key_of: &'a dyn Fn(u64) -> Option<String>,
+    /// The message at (or just after) a `seq`, for the entry's evidence.
+    pub anchor_of: &'a dyn Fn(u64) -> Option<Anchor>,
 }
 
 /// Fold checked entries into `file`. Entries the AI did not mention stay as
@@ -164,6 +172,7 @@ pub fn merge(file: &mut NotesFile, checked: Vec<Checked>, who: &Authorship<'_>) 
             .replaces
             .clone()
             .unwrap_or_else(|| file.next_entry_id());
+        let anchor = (who.anchor_of)(item.seq_from);
         let entry = Entry {
             id: id.clone(),
             title: item.title,
@@ -175,7 +184,9 @@ pub fn merge(file: &mut NotesFile, checked: Vec<Checked>, who: &Authorship<'_>) 
             evidence: Evidence {
                 seq_from: item.seq_from,
                 seq_to: item.seq_to,
-                msg_key: (who.msg_key_of)(item.seq_from),
+                msg_key: anchor.as_ref().and_then(|a| a.msg_key.clone()),
+                at: anchor.as_ref().and_then(|a| a.at.clone()),
+                kind: anchor.map(|a| a.kind),
             },
             round: who.round.to_string(),
             digested_at: who.at.to_string(),
@@ -268,7 +279,13 @@ mod tests {
     #[test]
     fn merge_adds_new_entries_updates_named_ones_and_never_deletes() {
         let mut file = NotesFile::empty("claude", "s");
-        let lookup = |seq: u64| Some(format!("key-{seq}"));
+        let lookup = |seq: u64| {
+            Some(Anchor {
+                msg_key: Some(format!("key-{seq}")),
+                at: Some("2026-10-16T00:00:00Z".into()),
+                kind: "user".into(),
+            })
+        };
         let who = Authorship {
             round: "r1",
             at: "2026-10-16T03:00:00Z",
@@ -277,7 +294,7 @@ mod tests {
                 cli_version: "1".into(),
                 model: "m".into(),
             },
-            msg_key_of: &lookup,
+            anchor_of: &lookup,
         };
         let first = check(&entry(""), &bounds(&[])).unwrap();
         merge(&mut file, first, &who);

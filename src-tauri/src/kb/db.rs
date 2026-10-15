@@ -107,6 +107,8 @@ const MIGRATIONS: &[&str] = &[
       seq_from    INTEGER NOT NULL,
       seq_to      INTEGER NOT NULL,
       msg_key     TEXT,
+      msg_at      TEXT,
+      msg_kind    TEXT,
       round_id    TEXT NOT NULL,
       digested_at TEXT NOT NULL,
       engine      TEXT NOT NULL,

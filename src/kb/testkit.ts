@@ -29,6 +29,15 @@ export const apiMocks = () => ({
   wizardCommit: vi.fn(),
   changeDataDirCheck: vi.fn(),
   changeDataDirRun: vi.fn(),
+  digestStatus: vi.fn(),
+  digestEstimateAll: vi.fn(),
+  digestDailyTokens: vi.fn(),
+  digestRun: vi.fn(),
+  digestCancel: vi.fn(),
+  digestFindCli: vi.fn(),
+  digestTest: vi.fn(),
+  notesList: vi.fn(),
+  notesForSession: vi.fn(),
 });
 
 /** `t` that makes assertions readable: `key {"param":1}`. */
@@ -47,6 +56,18 @@ export const configFixture = (patch: Partial<KbConfig> = {}): KbConfig => ({
   exclude_prefixes: [],
   exclude_cwd_prefixes: [],
   mirror: { enabled: false, target_dir: null, volume_uuid: null, volume_name: null },
+  digest: {
+    enabled: false,
+    engine: "claude",
+    model: "",
+    cli_path: null,
+    time: "03:00",
+    max_sessions_per_round: 30,
+    recent_days: 7,
+    quiet_minutes: 30,
+    min_messages: 4,
+    max_chunks_per_session: 3,
+  },
   ...patch,
 });
 

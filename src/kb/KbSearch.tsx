@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import { AlertTriangle, Loader2, Search, X } from "lucide-react";
 import { Badge, Input } from "@/components/ui";
 import { formatTime } from "@/utils/time";
+import { NoteCard } from "./KbNotes";
 import { openKbSession } from "./openSession";
 import { focusOf, sessionFromHit } from "./searchHit";
 import type { KbHit, KbSessionHit } from "./types";
@@ -139,7 +140,8 @@ export const SearchResults = () => {
     );
   }
   if (response == null) return null;
-  if (response.results.length === 0) {
+  const notes = response.notes ?? [];
+  if (response.results.length === 0 && notes.length === 0) {
     return (
       <div className="p-6 text-center text-sm text-muted-foreground">
         <p>{t("kb.search.none")}</p>
@@ -157,6 +159,21 @@ export const SearchResults = () => {
         })}
         {response.mode_used === "any" && <> · {t("kb.search.relaxed")}</>}
       </p>
+      {notes.length > 0 && (
+        <section aria-label={t("kb.search.notesTitle")} className="border-b bg-muted/30">
+          <h3 className="px-4 pt-2 text-xs font-medium text-muted-foreground">
+            {t("kb.search.notesTitle")}
+          </h3>
+          <ul className="divide-y">
+            {notes.map((note) => (
+              <NoteCard
+                key={`${note.session.source}:${note.session.session_id}:${note.entry_id}`}
+                note={note}
+              />
+            ))}
+          </ul>
+        </section>
+      )}
       <ul className="divide-y">
         {response.results.map((hit) => (
           <ResultCard key={`${hit.session.source}:${hit.session.session_id}`} hit={hit} />
@@ -187,6 +204,7 @@ const ResultCard = ({ hit }: { hit: KbSessionHit }) => {
             </Badge>
           )}
           {s.is_subagent && <Badge variant="muted">{t("kb.sessions.subagentBadge")}</Badge>}
+          {hit.has_note === true && <Badge variant="outline">{t("kb.search.hasNote")}</Badge>}
         </span>
         <span className="flex flex-wrap items-center gap-x-3 text-xs text-muted-foreground">
           <Badge variant="outline">{s.source}</Badge>

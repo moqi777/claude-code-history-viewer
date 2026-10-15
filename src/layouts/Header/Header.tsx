@@ -22,6 +22,7 @@ import { getAssetPath, isMacOS, isTauri } from "@/utils/platform";
 import { SettingDropdown } from "./SettingDropdown";
 import { getProjectDisplayName } from "@/utils/pathUtils";
 import { SessionCopyMenu } from "./SessionCopyMenu";
+import { KbSessionNotesButton } from "@/kb";
 
 interface HeaderProps {
   analyticsActions: UseAnalyticsReturn["actions"];
@@ -197,6 +198,7 @@ export const Header = ({ analyticsActions, analyticsComputed }: HeaderProps) => 
           </div>
         )}
 
+        {isKbProject && <KbSessionNotesButton />}
         {isKbProject && (
           <button
             type="button"

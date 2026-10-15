@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { overviewFixture, sessionFixture } from "./fixtures";
+import { digestStatusFixture, overviewFixture, sessionFixture } from "./fixtures";
 import { KbHome } from "./KbHome";
 import { configFixture, volumeFixture } from "./testkit";
 import { useKbStore } from "./useKbStore";
@@ -260,5 +260,20 @@ describe("KbHome", () => {
     await show();
     fireEvent.click(screen.getByRole("button", { name: "kb.action.settings" }));
     expect(useKbStore.getState().settingsOpen).toBe(true);
+  });
+
+  it("has a digest card and a notes tab next to the sessions", async () => {
+    mocks.api.digestStatus.mockResolvedValue(digestStatusFixture());
+    mocks.api.notesList.mockResolvedValue({ total: 0, notes: [] });
+    await show();
+    expect(await screen.findByRole("region", { name: "kb.digest.title" })).toBeTruthy();
+    expect(screen.getByText("Fix the login bug")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("tab", { name: "kb.tabs.notes" }));
+    expect(await screen.findByText("kb.notes.empty")).toBeTruthy();
+    expect(screen.queryByText("Fix the login bug")).toBeNull();
+
+    fireEvent.click(screen.getByRole("tab", { name: "kb.tabs.sessions" }));
+    expect(await screen.findByText("Fix the login bug")).toBeTruthy();
   });
 });
