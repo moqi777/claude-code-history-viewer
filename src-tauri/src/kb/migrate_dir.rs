@@ -235,6 +235,10 @@ pub fn migrate_data(
     let Some(_lock) = SyncLock::acquire(&old_paths.lock(), LOCK_WAIT)? else {
         return Err("a collection is still running; try again in a moment".into());
     };
+    // So is a digest writing notes: they must be in the copy too.
+    let Some(_digest_lock) = SyncLock::acquire(&old_paths.digest_lock(), LOCK_WAIT)? else {
+        return Err("a digest is still running; try again in a moment".into());
+    };
 
     std::fs::create_dir_all(new).map_err(|e| format!("cannot create {}: {e}", new.display()))?;
     let marker = new.join(MARKER);
@@ -248,9 +252,14 @@ pub fn migrate_data(
 
     let old_raw = old_paths.raw();
     let new_raw = DataPaths::new(new).raw();
-    let total_files =
-        (fsutil::walk_files(&old_raw).len() + fsutil::walk_files(&old_paths.logs()).len()) as u64;
-    let total_bytes = fsutil::dir_size(&old_raw) + fsutil::dir_size(&old_paths.logs());
+    let old_notes = old_paths.notes();
+    let new_notes = DataPaths::new(new).notes();
+    let total_files = (fsutil::walk_files(&old_raw).len()
+        + fsutil::walk_files(&old_notes).len()
+        + fsutil::walk_files(&old_paths.logs()).len()) as u64;
+    let total_bytes = fsutil::dir_size(&old_raw)
+        + fsutil::dir_size(&old_notes)
+        + fsutil::dir_size(&old_paths.logs());
     let mut meter = Meter {
         sink: progress,
         phase: "copy",
@@ -261,6 +270,10 @@ pub fn migrate_data(
     };
     meter.tick();
     let (mut files, mut bytes) = copy_tree(&old_raw, &new_raw, &mut meter)?;
+    // Notes cannot be regenerated for free, so they travel with the raw logs.
+    let (note_files, note_bytes) = copy_tree(&old_notes, &new_notes, &mut meter)?;
+    files += note_files;
+    bytes += note_bytes;
     let (log_files, log_bytes) =
         copy_tree(&old_paths.logs(), &DataPaths::new(new).logs(), &mut meter)?;
     files += log_files;
@@ -285,6 +298,7 @@ pub fn migrate_data(
     meter.done_files = 0;
     meter.done_bytes = 0;
     let mut verified = verify_tree(&old_raw, &new_raw, &mut meter)?;
+    verified += verify_tree(&old_notes, &new_notes, &mut meter)?;
     verified += verify_tree(&old_paths.logs(), &DataPaths::new(new).logs(), &mut meter)?;
     if has_db {
         let a = db_fingerprint(&old_paths.db())?;
@@ -376,6 +390,8 @@ mod tests {
         fs::create_dir_all(old.join("raw/claude/p")).unwrap();
         fs::write(old.join("raw/claude/p/a.jsonl"), b"alpha\nbeta\n").unwrap();
         fs::write(old.join("raw/claude/p/a.jsonl.prev-1"), b"older\n").unwrap();
+        fs::create_dir_all(old.join("notes/claude")).unwrap();
+        fs::write(old.join("notes/claude/s-1.json"), b"{\"note\":true}\n").unwrap();
         fs::create_dir_all(old.join("logs")).unwrap();
         fs::write(old.join("logs/sync-1.log"), b"log\n").unwrap();
         let conn = db::open(&old.join("kb.db")).unwrap();
@@ -399,7 +415,7 @@ mod tests {
     fn snapshot(dir: &Path) -> Vec<(String, String)> {
         fsutil::walk_files(dir)
             .into_iter()
-            .filter(|(n, _)| !n.starts_with("kb.db-") && n != "kb.lock")
+            .filter(|(n, _)| !n.starts_with("kb.db-") && n != "kb.lock" && n != "digest.lock")
             .map(|(n, _)| {
                 let h = fsutil::sha256_file(&dir.join(&n)).unwrap();
                 (n, h)
@@ -418,12 +434,13 @@ mod tests {
             &ProgressSink::default(),
         )
         .unwrap();
-        assert!(report.verified_files >= 4, "{report:?}");
+        assert!(report.verified_files >= 5, "{report:?}");
 
         // Raw files are byte-identical.
         for rel in [
             "raw/claude/p/a.jsonl",
             "raw/claude/p/a.jsonl.prev-1",
+            "notes/claude/s-1.json",
             "logs/sync-1.log",
         ] {
             assert_eq!(

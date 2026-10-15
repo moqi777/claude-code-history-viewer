@@ -65,11 +65,17 @@ impl KbEnv {
                 volume_uuid: config.mirror.volume_uuid.clone()?,
             })
         });
+        let data = DataPaths::new(config.data_dir.clone());
+        // The digest's own working directory is always excluded from search
+        // and the session list (its sessions stay in the backup), whatever the
+        // user's list says and whether or not the digest is switched on.
+        let mut exclude_cwd_prefixes = config.exclude_cwd_prefixes.clone();
+        exclude_cwd_prefixes.push(data.digest_work().to_string_lossy().into_owned());
         Self {
-            data: DataPaths::new(config.data_dir.clone()),
+            data,
             roots: SourceRoots::resolve(config),
             exclude_prefixes: config.exclude_prefixes.clone(),
-            exclude_cwd_prefixes: config.exclude_cwd_prefixes.clone(),
+            exclude_cwd_prefixes,
             mirror: mirror.flatten(),
             progress: ProgressSink::default(),
             force_reindex: false,
@@ -218,6 +224,15 @@ fn collect(
         .extend(discovery.errors.iter().cloned().map(SyncError::from));
 
     reindex_if_outdated(env, conn, log, summary)?;
+    // Notes are files first: bring the database copy in line with them.
+    if let Err(message) = super::notes::reconcile(conn, &env.data) {
+        log.line(&format!("ERROR notes: {message}"));
+        summary.errors.push(SyncError {
+            path: env.data.notes().display().to_string(),
+            stage: "notes".into(),
+            message,
+        });
+    }
     reconcile_sources(env, conn, &discovery, summary)?;
 
     // Reload: moves changed `source_path`s.
@@ -398,6 +413,32 @@ fn reindex_if_outdated(
             summary.errors.push(SyncError {
                 path: row.source_path.clone(),
                 stage: "reindex".into(),
+                message,
+            });
+        }
+    }
+    // The notes are not derived from `raw/` but from their own files; they are
+    // re-indexed together with everything else so one command restores all.
+    match super::notes::rebuild_all(conn, &env.data) {
+        Ok(report) => {
+            log.line(&format!(
+                "notes: {} files, {} entries re-indexed",
+                report.files, report.entries
+            ));
+            for (path, reason) in report.skipped {
+                log.line(&format!("ERROR note file {path}: {reason}"));
+                summary.errors.push(SyncError {
+                    path,
+                    stage: "notes".into(),
+                    message: reason,
+                });
+            }
+        }
+        Err(message) => {
+            failed = true;
+            summary.errors.push(SyncError {
+                path: env.data.notes().display().to_string(),
+                stage: "notes".into(),
                 message,
             });
         }
@@ -1208,6 +1249,124 @@ mod tests {
         crate::kb::search::search_in(&sb.env.data, &params)
             .unwrap()
             .matched_sessions
+    }
+
+    fn keyed_user(ts: &str, uuid: &str, text: &str) -> String {
+        serde_json::json!({"type":"user","uuid":uuid,"timestamp":ts,"cwd":"/Users/me/proj",
+            "message":{"role":"user","content":text}})
+        .to_string()
+            + "\n"
+    }
+
+    fn keyed_assistant(ts: &str, uuid: &str, text: &str) -> String {
+        serde_json::json!({"type":"assistant","uuid":uuid,"timestamp":ts,
+            "message":{"role":"assistant","content":[{"type":"text","text":text}]}})
+        .to_string()
+            + "\n"
+    }
+
+    fn numbered(conn: &Connection) -> Vec<(u64, Option<String>)> {
+        let mut stmt = conn
+            .prepare("SELECT seq, msg_key FROM messages ORDER BY seq")
+            .unwrap();
+        stmt.query_map([], |r| {
+            Ok((u64::try_from(r.get::<_, i64>(0)?).unwrap(), r.get(1)?))
+        })
+        .unwrap()
+        .map(Result::unwrap)
+        .collect()
+    }
+
+    /// Notes point at messages by `seq` (and the `msg_key` of the first one).
+    /// If the two ways of building the index ever numbered differently, every
+    /// existing note would point at the wrong message.
+    #[test]
+    fn seq_and_message_keys_are_the_same_after_incremental_builds_and_a_reindex() {
+        let mut sb = Sandbox::new();
+        let path = sb.claude_file();
+        write(
+            &path,
+            &(keyed_user("2026-01-01T00:00:01Z", "u1", "first question")
+                + &keyed_assistant("2026-01-01T00:00:02Z", "a1", "first answer")),
+        );
+        sb.sync();
+        // A kb lookup turn (not indexed, but it still takes a number), then more.
+        append(
+            &path,
+            &(keyed_user("2026-01-01T00:01:00Z", "u2", "second question")
+                + &tool_line("2026-01-01T00:01:02Z", "t1", "agentkb --kb-search lock")
+                + &keyed_assistant("2026-01-01T00:01:05Z", "a2", "second answer")),
+        );
+        sb.sync();
+        append(
+            &path,
+            &(keyed_user("2026-01-01T00:02:00Z", "u3", "third question")
+                + &keyed_assistant("2026-01-01T00:02:02Z", "a3", "third answer")),
+        );
+        sb.sync();
+        let incremental = numbered(&sb.db());
+        // The lookup turn is dropped as a pure Q&A turn, but its messages
+        // still used up numbers 3-5.
+        assert_eq!(
+            incremental,
+            vec![
+                (1, Some("u1".into())),
+                (2, Some("a1".into())),
+                (6, Some("u3".into())),
+                (7, Some("a3".into())),
+            ]
+        );
+
+        sb.env.force_reindex = true;
+        let rebuilt = sb.sync();
+        assert_eq!(rebuilt.status, "ok", "{:?}", rebuilt.errors);
+        assert_eq!(numbered(&sb.db()), incremental);
+    }
+
+    #[test]
+    fn a_reindex_restores_the_notes_from_their_files() {
+        let mut sb = Sandbox::new();
+        write(&sb.claude_file(), &claude_text());
+        sb.sync();
+        let file = crate::kb::notes::testing::sample("claude", CLAUDE_ID, 2);
+        crate::kb::notes::write(&sb.env.data, &file).unwrap();
+        // The database has never seen the file: an ordinary sync picks it up.
+        sb.sync();
+        let notes_in = |sb: &Sandbox| -> i64 {
+            sb.db()
+                .query_row("SELECT COUNT(*) FROM notes", [], |r| r.get(0))
+                .unwrap()
+        };
+        assert_eq!(notes_in(&sb), 2);
+        // Lose the tables, then rebuild everything.
+        sb.db()
+            .execute_batch("DROP TABLE notes_fts; DROP TABLE notes; DROP TABLE digest_sessions;")
+            .unwrap();
+        sb.env.force_reindex = true;
+        let summary = sb.sync();
+        assert_eq!(summary.status, "ok", "{:?}", summary.errors);
+        assert_eq!(notes_in(&sb), 2);
+        assert_eq!(
+            crate::kb::notes::digested_seq(&sb.db(), "claude", CLAUDE_ID).unwrap(),
+            Some(42)
+        );
+    }
+
+    #[test]
+    fn the_digest_work_directory_is_always_excluded_from_the_index() {
+        std::env::set_var("CCHV_TEST_HOME", "/tmp/agentkb-test-home");
+        let config = KbConfig {
+            data_dir: PathBuf::from("/data/AgentKB"),
+            ..KbConfig::default()
+        };
+        let env = KbEnv::from_config(&config);
+        assert!(env
+            .exclude_cwd_prefixes
+            .contains(&"/data/AgentKB/digest-work".to_string()));
+        assert!(crate::kb::db::is_cwd_excluded(
+            Some("/data/AgentKB/digest-work"),
+            &env.exclude_cwd_prefixes
+        ));
     }
 
     #[test]

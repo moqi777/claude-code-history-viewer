@@ -16,6 +16,15 @@
 //! * **Stable numbering.** `seq` counts every candidate message, including
 //!   skipped ones, so an incremental build and a full rebuild number
 //!   identically.
+//!
+//! **`seq` is a contract with the notes.** The daily digest (`kb::digest`)
+//! stores `seq` ranges (and the `msg_key` of the first message) in its note
+//! files as the pointer back to the evidence. Notes are files that outlive
+//! `kb.db`, so if the rule that assigns `seq` ever changes, every existing
+//! note points at the wrong messages. Do not change the numbering without a
+//! migration of the notes; the test
+//! `seq_and_message_keys_are_the_same_after_incremental_builds_and_a_reindex`
+//! (in `sync.rs`) pins the current rule.
 
 use once_cell::sync::Lazy;
 use regex::Regex;

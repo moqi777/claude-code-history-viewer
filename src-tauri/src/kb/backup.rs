@@ -341,7 +341,45 @@ fn copy_all(
         meter.tick(false);
     }
     meter.tick(true);
+    copy_notes(env, log, target_dir, mount, summary);
     Ok(())
+}
+
+/// The note files, which exist nowhere else: an AI wrote them and writing
+/// them again costs quota. Unlike session logs they are rewritten whole, so a
+/// changed file simply replaces its copy (the copy is made through a temp
+/// file, so the old one stays intact until the new one is complete). Nothing
+/// is ever removed from the backup.
+fn copy_notes(
+    env: &KbEnv,
+    log: &SyncLog,
+    target_dir: &Path,
+    mount: &Path,
+    summary: &mut BackupSummary,
+) {
+    let src_root = env.data.notes();
+    let dst_root = target_dir.join("notes");
+    for (rel, _) in fsutil::walk_files(&src_root) {
+        let (src, dst) = (src_root.join(&rel), dst_root.join(&rel));
+        if matches!((fsutil::sha256_file(&src), fsutil::sha256_file(&dst)), (Ok(a), Ok(b)) if a == b)
+        {
+            continue;
+        }
+        if let Err(message) = ensure_on_disk(&dst, mount) {
+            summary.errors.push(backup_error(&dst, message));
+            return;
+        }
+        match fsutil::copy_atomic(&src, &dst) {
+            Ok(n) => {
+                summary.copied_files += 1;
+                summary.copied_bytes += n;
+            }
+            Err(message) => {
+                log.line(&format!("ERROR backup notes/{rel}: {message}"));
+                summary.errors.push(backup_error(&dst, message));
+            }
+        }
+    }
 }
 
 /// Consistent copy of `kb.db` via the `SQLite` online backup, at most once a day,
@@ -529,6 +567,31 @@ mod tests {
             (0, 0, 0)
         );
         assert!(!second.snapshot_taken, "snapshot is at most once a day");
+    }
+
+    #[test]
+    fn notes_are_backed_up_updated_in_place_and_never_removed() {
+        let rig = rig();
+        let note = rig.data.join("notes/claude/s-1.json");
+        fs::create_dir_all(note.parent().unwrap()).unwrap();
+        fs::write(&note, b"{\"v\":1}\n").unwrap();
+        let copy = rig.target.join("notes/claude/s-1.json");
+
+        pass(&rig);
+        assert_eq!(fs::read(&copy).unwrap(), b"{\"v\":1}\n");
+        assert_eq!(
+            pass(&rig).copied_files,
+            0,
+            "an unchanged note is not copied again"
+        );
+
+        fs::write(&note, b"{\"v\":2}\n").unwrap();
+        assert_eq!(pass(&rig).copied_files, 1);
+        assert_eq!(fs::read(&copy).unwrap(), b"{\"v\":2}\n");
+
+        fs::remove_file(&note).unwrap();
+        pass(&rig);
+        assert!(copy.is_file(), "nothing is ever deleted from the backup");
     }
 
     #[test]
