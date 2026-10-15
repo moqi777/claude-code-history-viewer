@@ -1,0 +1,45 @@
+src-tauri/src/kb/skill.rs
+  s_cca7c29607588b::t_ab74baffc9883b 22,103,107,109,113
+src-tauri/src/kb/sync.rs
+  s_cca7c29607588b::t_ef1e7b8813c94e 1356-1384,1386-1413,1415-1416,1418-1426,1428-1438,1440-1447,1449-1452,1454-1457
+  s_cca7c29607588b::t_ab74baffc9883b 2020-2053,2055-2120
+  s_cca7c29607588b::t_8deb4f37f3483d 2054
+  s_cca7c29607588b::t_513cfb45975b59 1355,1385,1414,1417,1427,1439,1448,1453
+src-tauri/src/kb/digest/engine.rs
+  s_cca7c29607588b::t_0c04ed115c3ab0 279-316
+src-tauri/src/lib.rs
+  s_cca7c29607588b::t_09017bde585f1b 224-232
+src-tauri/src/kb/search.rs
+  s_cca7c29607588b::t_9c16955982ff45 9
+  s_cca7c29607588b::t_7b532ab798bc51 305-310,718-721,779,1548,1559-1561
+  s_cca7c29607588b::t_a429813cc3181c 738-761,823,878,882,893-1044
+  s_cca7c29607588b::t_b17e67f576004c 29-32,209-211,268-270,283-304,311-325,336-338,712-717,722-737,762,768-778,780-822,824-877,879-881,883-892,1045-1061,1185,1197-1199,1221
+  s_cca7c29607588b::t_6e49a60b3ffdcf 763-767,1588-1590,1592-1608,1613-1618,1627-1651
+src-tauri/src/kb/digest/commands.rs
+  s_cca7c29607588b::t_0c04ed115c3ab0 1-77,81-161,164-203,205-212,214-243,245-253
+  s_cca7c29607588b::t_11ca9589f049bb 78-80,162-163
+  s_cca7c29607588b::t_46bd75249b5d06 204,213,244
+src-tauri/src/kb/digest/mod.rs
+  s_cca7c29607588b::t_9c16955982ff45 853-885
+  s_cca7c29607588b::t_46bd75249b5d06 893
+  s_cca7c29607588b::t_0c04ed115c3ab0 20,797-821,911
+src-tauri/src/kb/cli.rs
+  s_cca7c29607588b::t_0c04ed115c3ab0 101
+  s_cca7c29607588b::t_9c16955982ff45 17-18,34,69-71,85-100,102-172,330,332,355-359
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.11",
+  "base_commit_sha": "a6990dc3a661c5b909cff147917ea965987044d0",
+  "prompts": {},
+  "sessions": {
+    "s_cca7c29607588b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ef228e77-8d37-45df-ab42-2d4c28a0387d",
+        "model": "claude-sonnet-5-5"
+      },
+      "human_author": "moqing <moqing@tsign.cn>"
+    }
+  }
+}
