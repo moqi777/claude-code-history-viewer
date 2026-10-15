@@ -118,6 +118,8 @@ pub struct Summary {
     pub new_sessions: u64,
     pub deleted_sources: u64,
     pub moved_sources: u64,
+    /// Sessions that older versions stored twice (plain and compressed).
+    pub joined_twins: u64,
     pub rewritten_files: u64,
     pub errors: Vec<SyncError>,
     pub unknown_types: BTreeMap<String, u64>,
@@ -223,6 +225,7 @@ fn collect(
         .errors
         .extend(discovery.errors.iter().cloned().map(SyncError::from));
 
+    join_twin_rows(env, conn, log, summary)?;
     reindex_if_outdated(env, conn, log, summary)?;
     // Notes are files first: bring the database copy in line with them.
     if let Err(message) = super::notes::reconcile(conn, &env.data) {
@@ -233,7 +236,7 @@ fn collect(
             message,
         });
     }
-    reconcile_sources(env, conn, &discovery, summary)?;
+    reconcile_sources(env, conn, &discovery, log, summary)?;
 
     // Reload: moves changed `source_path`s.
     let rows = db::load_files(conn)?;
@@ -290,17 +293,30 @@ fn collect(
 pub struct Reconciliation {
     /// (file id, new source path)
     pub moves: Vec<(i64, String)>,
+    /// The file is still there but stored the other way (plain <-> `.zst`).
+    /// Only a candidate until its content is compared.
+    pub restored: Vec<Restored>,
     pub deleted: Vec<i64>,
 }
 
+#[derive(Debug, PartialEq, Eq)]
+pub struct Restored {
+    pub id: i64,
+    pub new_path: String,
+    pub new_mirror_rel: String,
+    pub compressed: bool,
+}
+
 /// Codex moves a rollout between `sessions/` and `archived_sessions/` keeping
-/// its filename, so the filename (which carries the session id) is its identity.
-fn move_key(source: Source, compressed: bool, path: &Path) -> Option<(Source, bool, String)> {
+/// its filename, and compresses old ones in place by adding `.zst`. The
+/// filename without that suffix (it carries the session id) is its identity.
+fn move_key(source: Source, path: &Path) -> Option<(Source, String)> {
     if source != Source::Codex {
         return None;
     }
-    let name = path.file_name()?.to_str()?.to_string();
-    Some((source, compressed, name))
+    let name = path.file_name()?.to_str()?;
+    let stem = name.strip_suffix(".zst").unwrap_or(name);
+    Some((source, stem.to_string()))
 }
 
 /// Decide, from one complete listing, which vanished sources were moved and
@@ -319,12 +335,12 @@ pub fn reconcile(
     let known: HashSet<&str> = rows.iter().map(|r| r.source_path.as_str()).collect();
 
     // Unclaimed new paths by identity.
-    let mut fresh: HashMap<(Source, bool, String), Vec<&SourceFile>> = HashMap::new();
+    let mut fresh: HashMap<(Source, String), Vec<&SourceFile>> = HashMap::new();
     for file in &discovery.files {
         if known.contains(file.path_str.as_str()) {
             continue;
         }
-        if let Some(key) = move_key(file.source, file.is_compressed, &file.path) {
+        if let Some(key) = move_key(file.source, &file.path) {
             fresh.entry(key).or_default().push(file);
         }
     }
@@ -342,11 +358,25 @@ pub fn reconcile(
         {
             continue;
         }
-        let candidate = move_key(row.source, row.is_compressed, path)
-            .and_then(|key| fresh.get_mut(&key))
-            .and_then(Vec::pop);
-        match candidate {
-            Some(new_file) => out.moves.push((row.id, new_file.path_str.clone())),
+        let candidates = move_key(row.source, path).and_then(|key| fresh.get_mut(&key));
+        // Same storage first; the other way only when nothing else is left.
+        let chosen = candidates.and_then(|list| {
+            let at = list
+                .iter()
+                .rposition(|f| f.is_compressed == row.is_compressed)
+                .or_else(|| list.len().checked_sub(1))?;
+            Some(list.remove(at))
+        });
+        match chosen {
+            Some(new_file) if new_file.is_compressed == row.is_compressed => {
+                out.moves.push((row.id, new_file.path_str.clone()));
+            }
+            Some(new_file) => out.restored.push(Restored {
+                id: row.id,
+                new_path: new_file.path_str.clone(),
+                new_mirror_rel: new_file.mirror_rel.clone(),
+                compressed: new_file.is_compressed,
+            }),
             None => out.deleted.push(row.id),
         }
     }
@@ -357,12 +387,51 @@ fn reconcile_sources(
     env: &KbEnv,
     conn: &Connection,
     discovery: &Discovery,
+    log: &SyncLog,
     summary: &mut Summary,
 ) -> Result<(), String> {
     let rows = db::load_files(conn)?;
     let plan = reconcile(&rows, discovery, &env.exclude_prefixes);
-    if plan.moves.is_empty() && plan.deleted.is_empty() {
+    if plan.moves.is_empty() && plan.restored.is_empty() && plan.deleted.is_empty() {
         return Ok(());
+    }
+    let mut deleted = plan.deleted;
+    // A file stored another way is the same file only if what the mirror
+    // already holds is the beginning of what is there now.
+    let mut converted = Vec::new();
+    for item in plan.restored {
+        let Some(row) = rows.iter().find(|r| r.id == item.id) else {
+            continue;
+        };
+        let same = env.data.mirror_path(&row.mirror_rel).and_then(|mirror| {
+            super::mirror::content_continues(
+                (
+                    &mirror,
+                    row.is_compressed,
+                    Some(u64::try_from(row.mirror_offset).unwrap_or(0)),
+                ),
+                (Path::new(&item.new_path), item.compressed),
+            )
+        });
+        match same {
+            Ok(true) => converted.push(item),
+            Ok(false) => {
+                log.line(&format!(
+                    "{} is not the content of {}: handled as a different file",
+                    item.new_path, row.source_path
+                ));
+                deleted.push(item.id);
+            }
+            Err(message) => {
+                // Cannot prove it: change nothing, look again next time.
+                log.line(&format!("cannot compare {}: {message}", item.new_path));
+                summary.errors.push(SyncError {
+                    path: item.new_path.clone(),
+                    stage: "reconcile".into(),
+                    message,
+                });
+            }
+        }
     }
     let when = now();
     let tx = conn
@@ -371,13 +440,100 @@ fn reconcile_sources(
     for (id, new_path) in &plan.moves {
         db::set_source_path(&tx, *id, new_path)?;
     }
-    for id in &plan.deleted {
+    for item in &converted {
+        db::convert_file(
+            &tx,
+            item.id,
+            &item.new_path,
+            &item.new_mirror_rel,
+            item.compressed,
+        )?;
+    }
+    for id in &deleted {
         db::mark_deleted(&tx, *id, &when)?;
     }
     tx.commit().map_err(|e| format!("commit reconcile: {e}"))?;
-    summary.moved_sources += plan.moves.len() as u64;
-    summary.deleted_sources += plan.deleted.len() as u64;
+    summary.moved_sources += (plan.moves.len() + converted.len()) as u64;
+    summary.deleted_sources += deleted.len() as u64;
     Ok(())
+}
+
+/// Older versions took a rollout that Codex compressed (`X.jsonl` ->
+/// `X.jsonl.zst`) for a new session and the old one for deleted, leaving the
+/// same session twice. Join such a pair back: keep the row that follows the
+/// source, drop the other from the index. Both mirrors stay in `raw/`.
+///
+/// Only when the deleted row's mirror is the beginning of the present row's
+/// content; anything else is a different file and stays as it is.
+fn join_twin_rows(
+    env: &KbEnv,
+    conn: &Connection,
+    log: &SyncLog,
+    summary: &mut Summary,
+) -> Result<(), String> {
+    let rows = db::load_files(conn)?;
+    let mut present: HashMap<(Source, String), Vec<&FileRow>> = HashMap::new();
+    for row in rows.iter().filter(|r| !r.deleted) {
+        if let Some(key) = move_key(row.source, Path::new(&row.source_path)) {
+            present.entry(key).or_default().push(row);
+        }
+    }
+    let mut pairs: Vec<(&FileRow, &FileRow)> = Vec::new();
+    for gone in rows.iter().filter(|r| r.deleted) {
+        let Some(key) = move_key(gone.source, Path::new(&gone.source_path)) else {
+            continue;
+        };
+        let Some(alive) = present
+            .get(&key)
+            .and_then(|list| list.iter().find(|r| r.is_compressed != gone.is_compressed))
+        else {
+            continue;
+        };
+        let (Ok(old), Ok(new)) = (
+            env.data.mirror_path(&gone.mirror_rel),
+            env.data.mirror_path(&alive.mirror_rel),
+        ) else {
+            continue;
+        };
+        match super::mirror::content_continues(
+            (
+                &old,
+                gone.is_compressed,
+                Some(u64::try_from(gone.mirror_offset).unwrap_or(0)),
+            ),
+            (&new, alive.is_compressed),
+        ) {
+            Ok(true) => pairs.push((gone, alive)),
+            Ok(false) => {}
+            Err(message) => log.line(&format!("cannot compare {}: {message}", gone.source_path)),
+        }
+    }
+    if pairs.is_empty() {
+        return Ok(());
+    }
+    let copy = db::snapshot(conn, &format!("before-twin-join-{}", compact_stamp()))?;
+    log.line(&format!(
+        "joining {} sessions stored twice (plain and compressed); kb.db copied to {}",
+        pairs.len(),
+        copy.display()
+    ));
+    let tx = conn
+        .unchecked_transaction()
+        .map_err(|e| format!("begin join: {e}"))?;
+    for (gone, alive) in &pairs {
+        log.line(&format!(
+            "joined {} into {} (mirror {} kept in raw/)",
+            gone.source_path, alive.source_path, gone.mirror_rel
+        ));
+        db::forget_file(&tx, gone.id)?;
+    }
+    tx.commit().map_err(|e| format!("commit join: {e}"))?;
+    summary.joined_twins += pairs.len() as u64;
+    Ok(())
+}
+
+fn compact_stamp() -> String {
+    chrono::Utc::now().format("%Y%m%dT%H%M%SZ").to_string()
 }
 
 // ---------------------------------------------------------------------------
@@ -968,6 +1124,175 @@ mod tests {
             "mirror stays where it was first made: {rel}"
         );
         assert!(!sb.mirror_of("codex/archived_sessions").exists());
+    }
+
+    fn compress_in_place(plain: &Path, text: &str) -> PathBuf {
+        let zst = PathBuf::from(format!("{}.zst", plain.display()));
+        fs::write(&zst, zstd::encode_all(text.as_bytes(), 3).unwrap()).unwrap();
+        fs::remove_file(plain).unwrap();
+        zst
+    }
+
+    fn message_count_of(conn: &Connection, word: &str) -> i64 {
+        conn.query_row(
+            "SELECT COUNT(*) FROM messages WHERE text LIKE ?1",
+            [format!("%{word}%")],
+            |r| r.get(0),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn a_rollout_compressed_in_place_is_the_same_session_not_a_new_one() {
+        let sb = Sandbox::new();
+        write(&sb.codex_file(), &codex_text());
+        sb.sync();
+        let plain_mirror = sb.mirror_of(&format!(
+            "codex/sessions/2026/05/29/rollout-2026-05-29T11-14-48-{CODEX_ID}.jsonl"
+        ));
+        assert!(plain_mirror.is_file());
+
+        let zst = compress_in_place(&sb.codex_file(), &codex_text());
+        let s = sb.sync();
+        assert_eq!(
+            (s.moved_sources, s.deleted_sources, s.new_sessions),
+            (1, 0, 0),
+            "{:?}",
+            s.errors
+        );
+        let conn = sb.db();
+        let rows = session_rows(&conn);
+        assert_eq!(rows.len(), 1, "one session, not two");
+        assert_eq!(rows[0].3, "present", "never shown as deleted");
+        let (path, compressed): (String, i64) = conn
+            .query_row("SELECT source_path, is_compressed FROM files", [], |r| {
+                Ok((r.get(0)?, r.get(1)?))
+            })
+            .unwrap();
+        assert_eq!((path.as_str(), compressed), (&*zst.to_string_lossy(), 1));
+        assert_eq!(message_count_of(&conn, "retry"), 1, "indexed once");
+        assert_eq!(found(&sb, "retry"), 1, "found once");
+        assert!(plain_mirror.is_file(), "the plain mirror is kept");
+        assert!(sb
+            .mirror_of(&format!(
+                "codex/sessions/2026/05/29/rollout-2026-05-29T11-14-48-{CODEX_ID}.jsonl.zst"
+            ))
+            .is_file());
+
+        // Nothing more to do on the next pass.
+        let again = sb.sync();
+        assert_eq!(
+            (again.changed_files, again.moved_sources, again.new_sessions),
+            (0, 0, 0)
+        );
+    }
+
+    #[test]
+    fn a_compressed_rollout_that_was_unpacked_again_is_also_the_same_session() {
+        let sb = Sandbox::new();
+        write(&sb.codex_file(), &codex_text());
+        let zst = compress_in_place(&sb.codex_file(), &codex_text());
+        sb.sync();
+        assert!(zst.is_file());
+
+        fs::remove_file(&zst).unwrap();
+        write(&sb.codex_file(), &codex_text());
+        let s = sb.sync();
+        assert_eq!(
+            (s.moved_sources, s.deleted_sources),
+            (1, 0),
+            "{:?}",
+            s.errors
+        );
+        assert_eq!(session_rows(&sb.db()).len(), 1);
+        assert_eq!(found(&sb, "retry"), 1);
+    }
+
+    #[test]
+    fn a_compressed_file_with_other_content_is_a_new_file_and_nothing_is_joined() {
+        let sb = Sandbox::new();
+        write(&sb.codex_file(), &codex_text());
+        sb.sync();
+
+        let other = codex_text().replace("add a retry", "write a poem");
+        compress_in_place(&sb.codex_file(), &other);
+        let s = sb.sync();
+        assert_eq!(
+            (s.moved_sources, s.deleted_sources),
+            (0, 1),
+            "{:?}",
+            s.errors
+        );
+        assert_eq!(s.new_sessions, 1, "{:?}", s.errors);
+        let rows = session_rows(&sb.db());
+        assert_eq!(
+            rows.iter().map(|r| r.3.as_str()).collect::<Vec<_>>(),
+            ["deleted", "present"]
+        );
+        // And it stays that way: the next pass does not join them.
+        let again = sb.sync();
+        assert_eq!(again.joined_twins, 0);
+        assert_eq!(session_rows(&sb.db()).len(), 2);
+    }
+
+    #[test]
+    fn sessions_stored_twice_by_an_older_version_are_joined_once_and_both_mirrors_stay() {
+        let sb = Sandbox::new();
+        write(&sb.codex_file(), &codex_text());
+        sb.sync();
+        // What an older version left: the plain row "deleted", the compressed
+        // file taken for a new session.
+        sb.db()
+            .execute(
+                "UPDATE files SET source_status='deleted', deleted_at='2026-10-15T00:00:00Z'",
+                [],
+            )
+            .unwrap();
+        compress_in_place(&sb.codex_file(), &codex_text());
+        sb.sync();
+        let rows = session_rows(&sb.db());
+        assert_eq!(rows.len(), 2, "the duplicate exists: {rows:?}");
+        assert_eq!(found(&sb, "retry"), 2, "the duplicate is searchable twice");
+        let conn = sb.db();
+        assert_eq!(message_count_of(&conn, "retry"), 2);
+        drop(conn);
+
+        let s = sb.sync();
+        assert_eq!(s.joined_twins, 1, "{:?}", s.errors);
+        let conn = sb.db();
+        let rows = session_rows(&conn);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].3, "present");
+        assert_eq!(message_count_of(&conn, "retry"), 1, "indexed once");
+        drop(conn);
+        assert_eq!(found(&sb, "retry"), 1, "found once");
+        let conn = sb.db();
+        let files: i64 = conn
+            .query_row("SELECT COUNT(*) FROM files", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(files, 1);
+        for name in ["jsonl", "jsonl.zst"] {
+            assert!(
+                sb.mirror_of(&format!(
+                    "codex/sessions/2026/05/29/rollout-2026-05-29T11-14-48-{CODEX_ID}.{name}"
+                ))
+                .is_file(),
+                "{name} mirror stays"
+            );
+        }
+        let copies: Vec<_> = fs::read_dir(sb.env.data.db().parent().unwrap())
+            .unwrap()
+            .filter_map(Result::ok)
+            .filter(|e| {
+                e.file_name()
+                    .to_string_lossy()
+                    .starts_with("kb.db.before-twin-join-")
+            })
+            .collect();
+        assert_eq!(copies.len(), 1, "kb.db was copied before the join");
+
+        let again = sb.sync();
+        assert_eq!(again.joined_twins, 0);
     }
 
     #[test]

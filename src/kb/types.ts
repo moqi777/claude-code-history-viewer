@@ -40,6 +40,7 @@ export interface KbRunSummary {
   new_sessions: number;
   deleted_sources: number;
   moved_sources: number;
+  joined_twins?: number;
   rewritten_files: number;
   errors: KbError[];
   duration_ms: number;

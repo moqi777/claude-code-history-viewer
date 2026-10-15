@@ -223,6 +223,11 @@ fn migrate(conn: &mut Connection) -> Result<(), String> {
     if current == latest_version() {
         return Ok(());
     }
+    if current > 0 {
+        // A real upgrade of a database with history in it: keep a copy first.
+        let stamp = chrono::Utc::now().format("%Y%m%dT%H%M%SZ");
+        snapshot(conn, &format!("pre-v{}-{stamp}", latest_version()))?;
+    }
     let tx = conn.transaction().map_err(|e| err("begin migration", e))?;
     for (index, sql) in MIGRATIONS.iter().enumerate().skip(current as usize) {
         tx.execute_batch(sql)
@@ -231,6 +236,28 @@ fn migrate(conn: &mut Connection) -> Result<(), String> {
     tx.execute_batch(&format!("PRAGMA user_version = {}", latest_version()))
         .map_err(|e| err("set user_version", e))?;
     tx.commit().map_err(|e| err("commit migration", e))
+}
+
+/// A consistent copy of the database next to it, as `kb.db.<label>`. Existing
+/// copies are never overwritten.
+pub fn snapshot(conn: &Connection, label: &str) -> Result<std::path::PathBuf, String> {
+    let main = conn
+        .path()
+        .map(std::path::PathBuf::from)
+        .ok_or("the database has no file to copy")?;
+    let name = main
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let mut target = main.with_file_name(format!("{name}.{label}"));
+    let mut n = 1;
+    while target.exists() {
+        target = main.with_file_name(format!("{name}.{label}-{n}"));
+        n += 1;
+    }
+    conn.execute("VACUUM INTO ?1", [target.to_string_lossy().as_ref()])
+        .map_err(|e| err("cannot copy kb.db before changing it", e))?;
+    Ok(target)
 }
 
 #[derive(Debug, Clone)]
@@ -369,6 +396,33 @@ pub fn set_source_path(tx: &Transaction<'_>, file_id: i64, new_path: &str) -> Re
         params![file_id, new_path],
     )
     .map_err(|e| err("move source path", e))?;
+    Ok(())
+}
+
+/// The same source file now stored another way (plain <-> `.zst`): follow it
+/// to its new path and mirror, and treat it as present. Its content is read
+/// again by the next pass over the file.
+pub fn convert_file(
+    tx: &Transaction<'_>,
+    file_id: i64,
+    new_path: &str,
+    new_mirror_rel: &str,
+    compressed: bool,
+) -> Result<(), String> {
+    tx.execute(
+        "UPDATE files SET source_path=?2, mirror_rel=?3, is_compressed=?4, \
+         source_status='present', deleted_at=NULL WHERE id=?1",
+        params![file_id, new_path, new_mirror_rel, i64::from(compressed)],
+    )
+    .map_err(|e| err("convert file", e))?;
+    Ok(())
+}
+
+/// Forget one file row with its session and messages (the mirror stays on disk).
+pub fn forget_file(tx: &Transaction<'_>, file_id: i64) -> Result<(), String> {
+    purge_messages(tx, file_id)?;
+    tx.execute("DELETE FROM files WHERE id=?1", [file_id])
+        .map_err(|e| err("forget file", e))?;
     Ok(())
 }
 
@@ -686,6 +740,50 @@ pub fn finish_run(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn upgrading_a_database_with_history_keeps_a_copy_and_a_new_one_makes_none() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("kb.db");
+        let names = |prefix: &str| -> Vec<String> {
+            std::fs::read_dir(dir.path())
+                .unwrap()
+                .filter_map(Result::ok)
+                .map(|e| e.file_name().to_string_lossy().into_owned())
+                .filter(|n| n.starts_with(prefix))
+                .collect()
+        };
+        super::open(&path).unwrap();
+        assert!(
+            names("kb.db.pre-").is_empty(),
+            "a fresh database is not a copy"
+        );
+
+        let old = dir.path().join("old").join("kb.db");
+        std::fs::create_dir_all(old.parent().unwrap()).unwrap();
+        {
+            let conn = rusqlite::Connection::open(&old).unwrap();
+            for sql in &super::MIGRATIONS[..3] {
+                conn.execute_batch(sql).unwrap();
+            }
+            conn.execute_batch("PRAGMA user_version = 3").unwrap();
+            conn.execute("INSERT INTO meta VALUES ('k','v')", [])
+                .unwrap();
+        }
+        super::open(&old).unwrap();
+        let copies: Vec<_> = std::fs::read_dir(old.parent().unwrap())
+            .unwrap()
+            .filter_map(Result::ok)
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .filter(|n| n.starts_with("kb.db.pre-v"))
+            .collect();
+        assert_eq!(copies.len(), 1, "{copies:?}");
+        let copy = rusqlite::Connection::open(old.with_file_name(&copies[0])).unwrap();
+        let version: i64 = copy
+            .query_row("PRAGMA user_version", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(version, 3, "the copy is the database as it was");
+    }
+
     #[test]
     fn cwd_exclusion_matches_whole_path_components_only() {
         let rules = vec!["/a/scratch/".to_string()];

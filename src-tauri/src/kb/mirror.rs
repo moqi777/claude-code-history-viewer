@@ -216,6 +216,63 @@ fn is_prefix_of(candidate: &Path, whole: &Path) -> std::io::Result<bool> {
     }
 }
 
+/// Whether everything `old` holds is the beginning of what `new` holds, with
+/// each side read as plain text (`zstd` unpacked when `compressed`). Codex
+/// compresses finished sessions in place; this is how "the same file, stored
+/// differently" is told from "a different file with a similar name".
+///
+/// `old_limit` caps how many bytes of a plain `old` count (a mirror may hold
+/// orphan bytes past its cursor).
+pub fn content_continues(
+    old: (&Path, bool, Option<u64>),
+    new: (&Path, bool),
+) -> Result<bool, String> {
+    let open = |path: &Path, compressed: bool| -> Result<Box<dyn Read>, String> {
+        let file = File::open(path).map_err(|e| format!("cannot open {}: {e}", path.display()))?;
+        if compressed {
+            let reader = zstd::stream::Decoder::new(file)
+                .map_err(|e| format!("cannot decompress {}: {e}", path.display()))?;
+            Ok(Box::new(reader))
+        } else {
+            Ok(Box::new(file))
+        }
+    };
+    let (old_path, old_compressed, old_limit) = old;
+    let mut a: Box<dyn Read> = open(old_path, old_compressed)?;
+    if let (false, Some(limit)) = (old_compressed, old_limit) {
+        a = Box::new(a.take(limit));
+    }
+    let mut b = open(new.0, new.1)?;
+    let (mut buf_a, mut buf_b) = (vec![0u8; 64 * 1024], vec![0u8; 64 * 1024]);
+    let mut seen_any = false;
+    loop {
+        let n = read_full(&mut a, &mut buf_a)?;
+        if n == 0 {
+            // An empty `old` proves nothing about `new`.
+            return Ok(seen_any);
+        }
+        seen_any = true;
+        let m = read_full(&mut b, &mut buf_b[..n])?;
+        if m < n || buf_a[..n] != buf_b[..n] {
+            return Ok(false);
+        }
+    }
+}
+
+/// `read` until `buf` is full or the stream ends.
+fn read_full(reader: &mut dyn Read, buf: &mut [u8]) -> Result<usize, String> {
+    let mut filled = 0;
+    while filled < buf.len() {
+        match reader.read(&mut buf[filled..]) {
+            Ok(0) => break,
+            Ok(n) => filled += n,
+            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {}
+            Err(e) => return Err(format!("read failed: {e}")),
+        }
+    }
+    Ok(filled)
+}
+
 fn sync_parent_dir(path: &Path) {
     if let Some(dir) = path.parent() {
         if let Ok(handle) = File::open(dir) {
