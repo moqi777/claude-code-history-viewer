@@ -94,7 +94,9 @@ const open = async (
   try {
     const found = await openKbSession(
       sessionFromHit(hit),
-      focusHit == null ? undefined : focusOf(focusHit),
+      // A hit inside a sub-agent session has no message to jump to in the
+      // parent's own transcript.
+      focusHit == null || focusHit.subagent_session_id != null ? undefined : focusOf(focusHit),
     );
     if (!found) toast.info(t("kb.search.focusFailed"));
   } catch (e) {
@@ -195,14 +197,16 @@ const ResultCard = ({ hit }: { hit: KbSessionHit }) => {
       </button>
       <ul className="mt-2 space-y-1">
         {hit.hits.map((h) => (
-          <li key={h.seq}>
+          <li key={`${h.subagent_session_id ?? ""}:${h.seq}`}>
             <button
               type="button"
               onClick={() => void open(hit, h, t)}
               className="flex w-full items-start gap-2 rounded px-2 py-1 text-left text-sm hover:bg-muted focus-visible:bg-muted focus-visible:outline-none"
             >
               <span className="mt-0.5 shrink-0 text-xs text-muted-foreground">
-                {t(`kb.search.kind.${h.kind}`)}
+                {h.subagent_session_id != null
+                  ? t("kb.sessions.subagentBadge")
+                  : t(`kb.search.kind.${h.kind}`)}
               </span>
               <span className="min-w-0 break-words">
                 <Highlighted text={h.snippet} ranges={h.highlights} />
@@ -211,6 +215,11 @@ const ResultCard = ({ hit }: { hit: KbSessionHit }) => {
           </li>
         ))}
       </ul>
+      {(hit.subagent_hits ?? 0) > 0 && (
+        <p className="mt-1 px-2 text-xs text-muted-foreground">
+          {t("kb.search.subagentHits", { count: hit.subagent_hits })}
+        </p>
+      )}
       {hit.hit_messages > hit.hits.length && (
         <p className="mt-1 px-2 text-xs text-muted-foreground">
           {t("kb.search.moreHits", { count: hit.hit_messages - hit.hits.length })}

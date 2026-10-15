@@ -215,6 +215,7 @@
   "kb.search.noData": "Nothing has been collected yet, so there is nothing to search.",
   "kb.search.error": "Search failed: {{message}}",
   "kb.search.moreHits": "{{count}} more matching message(s)",
+  "kb.search.subagentHits": "{{count}} matching message(s) in sub-agent sessions",
   "kb.search.focusFailed": "Opened the session, but could not locate the exact message.",
   "kb.search.kind.user": "You",
   "kb.search.kind.assistant": "Assistant",

@@ -215,6 +215,7 @@
   "kb.search.noData": "还没有收集过会话，暂时无法搜索。",
   "kb.search.error": "搜索失败：{{message}}",
   "kb.search.moreHits": "还有 {{count}} 处命中",
+  "kb.search.subagentHits": "子会话（子代理）里另有 {{count}} 条匹配消息",
   "kb.search.focusFailed": "已打开会话，但没能定位到具体那条消息。",
   "kb.search.kind.user": "你",
   "kb.search.kind.assistant": "助手",

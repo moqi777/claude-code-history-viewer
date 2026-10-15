@@ -235,7 +235,7 @@ fn run_search_command(args: &[String]) -> i32 {
             "format",
             "kinds",
         ],
-        &["no-subagents"],
+        &["no-subagents", "include-subagents", "verbose"],
     ) {
         Ok(flags) => flags,
         Err(e) => return usage_error(&e),
@@ -255,6 +255,7 @@ fn run_search_command(args: &[String]) -> i32 {
             limit: flags.number("limit")?,
             per_session: flags.number("per-session")?,
             include_subagents: flags.switches.contains("no-subagents").then_some(false),
+            expand_subagents: flags.switches.contains("include-subagents").then_some(true),
             mode: flags.values.get("mode").cloned(),
             kinds: flags.list("kinds"),
         })
@@ -270,9 +271,12 @@ fn run_search_command(args: &[String]) -> i32 {
     };
     match super::search::search_in(&data, &params) {
         Ok(response) => {
-            print_output(format, &response, || {
-                super::search::format_search_text(&response)
-            });
+            let verbose = flags.switches.contains("verbose");
+            print_output(
+                format,
+                &super::search::agent_json(&response, verbose),
+                || super::search::format_search_text(&response),
+            );
             0
         }
         Err(e) => report_error(&e),
@@ -292,7 +296,7 @@ fn run_show_command(args: &[String]) -> i32 {
             "max-chars",
             "format",
         ],
-        &["full"],
+        &["full", "verbose"],
     ) {
         Ok(flags) => flags,
         Err(e) => return usage_error(&e),
@@ -337,9 +341,12 @@ fn run_show_command(args: &[String]) -> i32 {
     };
     match super::search::show_in(&data, &params) {
         Ok(response) => {
-            print_output(format, &response, || {
-                super::search::format_show_text(&response)
-            });
+            let verbose = flags.switches.contains("verbose");
+            print_output(
+                format,
+                &super::search::agent_json(&response, verbose),
+                || super::search::format_show_text(&response),
+            );
             0
         }
         Err(e) => report_error(&e),

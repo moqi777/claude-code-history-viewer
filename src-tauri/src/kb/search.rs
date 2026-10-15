@@ -36,6 +36,14 @@ const MIN_COVERAGE: f64 = 0.4;
 const TOOL_WEIGHT: f64 = 0.4;
 const SNIPPET_BEFORE: usize = 60;
 const SNIPPET_AFTER: usize = 140;
+/// An assistant's answer usually states its conclusion after the matched
+/// words, so its excerpt reaches further.
+const SNIPPET_AFTER_ANSWER: usize = 300;
+/// Titles longer than this are cut in the command output (a pasted question can
+/// run to kilobytes).
+pub const TITLE_CHARS: usize = 60;
+/// A sub-agent's hits count a little less than the main session's own.
+const SUBAGENT_WEIGHT: f64 = 0.8;
 
 #[derive(Debug)]
 pub enum SearchError {
@@ -187,6 +195,9 @@ pub struct SearchParams {
     pub per_session: Option<usize>,
     /// Default true: much real investigation happens in sub-agents.
     pub include_subagents: Option<bool>,
+    /// List sub-agent sessions as entries of their own instead of folding
+    /// them into the session that started them.
+    pub expand_subagents: Option<bool>,
     /// `auto` (default), `all` or `any`.
     pub mode: Option<String>,
     pub kinds: Option<Vec<String>>,
@@ -230,6 +241,10 @@ pub struct Hit {
     pub msg_key: Option<String>,
     /// Excerpt without markers…
     pub snippet: String,
+    /// Set when the hit is in a sub-agent session folded into this entry:
+    /// `--kb-show` that session, not the entry's, to read around `seq`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub subagent_session_id: Option<String>,
     /// …and the matched ranges in it, as character offsets `[start, end)`.
     pub highlights: Vec<[usize; 2]>,
     pub show: String,
@@ -243,7 +258,15 @@ pub struct SessionHit {
     pub resume: Resume,
     pub paths: Paths,
     pub hit_messages: usize,
+    /// Matching messages from sub-agent sessions folded into this entry.
+    #[serde(skip_serializing_if = "is_zero")]
+    pub subagent_hits: usize,
     pub hits: Vec<Hit>,
+}
+
+#[allow(clippy::trivially_copy_pass_by_ref)] // the signature serde's skip_serializing_if needs
+fn is_zero(n: &usize) -> bool {
+    *n == 0
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -448,6 +471,22 @@ fn session_row(index: &Index, file_id: i64) -> Result<Option<SessionRow>, Search
         .optional()?)
 }
 
+/// The file of the session `source`/`session_id`, when it is in the index.
+fn file_of_session(
+    index: &Index,
+    source: &str,
+    session_id: &str,
+) -> Result<Option<i64>, SearchError> {
+    Ok(index
+        .conn
+        .query_row(
+            "SELECT file_id FROM sessions WHERE source=?1 AND session_id=?2 AND is_subagent=0 LIMIT 1",
+            rusqlite::params![source, session_id],
+            |r| r.get(0),
+        )
+        .optional()?)
+}
+
 fn recency_factor(last_activity: Option<&str>) -> f64 {
     let Some(ts) = last_activity.and_then(|t| chrono::DateTime::parse_from_rfc3339(t).ok()) else {
         return 1.0;
@@ -542,13 +581,17 @@ fn match_ranges(text: &str, groups: &[QueryGroup]) -> Vec<(usize, usize)> {
 
 /// An excerpt around the first match, with matched ranges as char offsets.
 pub fn snippet(text: &str, groups: &[QueryGroup]) -> (String, Vec<[usize; 2]>) {
+    snippet_with(text, groups, SNIPPET_AFTER)
+}
+
+fn snippet_with(text: &str, groups: &[QueryGroup], after: usize) -> (String, Vec<[usize; 2]>) {
     let flat: String = text.split_whitespace().collect::<Vec<_>>().join(" ");
     let ranges = match_ranges(&flat, groups);
     let chars: Vec<(usize, char)> = flat.char_indices().collect();
     let char_index_of = |byte: usize| chars.partition_point(|(b, _)| *b < byte);
     let first_char = ranges.first().map_or(0, |(s, _)| char_index_of(*s));
     let start = first_char.saturating_sub(SNIPPET_BEFORE);
-    let end = (first_char + SNIPPET_AFTER).min(chars.len());
+    let end = (first_char + after).min(chars.len());
     let begin_byte = chars.get(start).map_or(flat.len(), |(b, _)| *b);
     let end_byte = chars.get(end).map_or(flat.len(), |(b, _)| *b);
     let mut out = String::new();
@@ -637,18 +680,50 @@ pub fn search(index: &Index, params: &SearchParams) -> Result<SearchResponse, Se
         }
     };
 
-    // Group the messages by session.
-    let mut by_session: BTreeMap<i64, Vec<Candidate>> = BTreeMap::new();
-    for c in candidates {
-        by_session.entry(c.file_id).or_default().push(c);
-    }
-    let matched_sessions = by_session.len();
-    let exe = current_exe_string();
-    let mut results: Vec<SessionHit> = Vec::new();
-    for (file_id, mut messages) in by_session {
-        let Some(row) = session_row(index, file_id)? else {
+    // Fold sub-agent sessions into the session that started them (unless asked
+    // to list them separately), then group the messages by entry.
+    let expand = params.expand_subagents == Some(true);
+    let mut rows: BTreeMap<i64, SessionRow> = BTreeMap::new();
+    let mut group_of: BTreeMap<i64, i64> = BTreeMap::new();
+    for c in &candidates {
+        if group_of.contains_key(&c.file_id) {
+            continue;
+        }
+        let Some(row) = session_row(index, c.file_id)? else {
             continue;
         };
+        let mut group = c.file_id;
+        if !expand && row.info.is_subagent {
+            if let Some(parent) = &row.info.parent_session_id {
+                if let Some(parent_file) = file_of_session(index, &row.info.source, parent)? {
+                    group = parent_file;
+                }
+            }
+        }
+        group_of.insert(c.file_id, group);
+        rows.insert(c.file_id, row);
+    }
+    let mut by_group: BTreeMap<i64, Vec<Candidate>> = BTreeMap::new();
+    for mut c in candidates {
+        let Some(&group) = group_of.get(&c.file_id) else {
+            continue;
+        };
+        if rows.get(&c.file_id).is_some_and(|r| r.info.is_subagent) {
+            c.score *= SUBAGENT_WEIGHT;
+        }
+        by_group.entry(group).or_default().push(c);
+    }
+    let matched_sessions = by_group.len();
+    let exe = current_exe_string();
+    let mut results: Vec<SessionHit> = Vec::new();
+    for (group, mut messages) in by_group {
+        if let std::collections::btree_map::Entry::Vacant(slot) = rows.entry(group) {
+            let Some(row) = session_row(index, group)? else {
+                continue;
+            };
+            slot.insert(row);
+        }
+        let row = &rows[&group];
         messages.sort_by(|a, b| b.score.total_cmp(&a.score));
         let mut score = messages[0].score;
         if let Some(second) = messages.get(1) {
@@ -658,30 +733,35 @@ pub fn search(index: &Index, params: &SearchParams) -> Result<SearchResponse, Se
             score += 0.1 * third.score;
         }
         score *= recency_factor(row.info.last_activity_at.as_deref());
-        if row.info.is_subagent {
-            score *= 0.8;
-        }
-        let hit_messages = messages.len();
+        let hit_messages = messages.iter().filter(|m| m.file_id == group).count();
+        let subagent_hits = messages.len() - hit_messages;
         let hits = messages
             .into_iter()
             .take(per_session)
             .map(|m| {
-                let (excerpt, highlights) = snippet(&redact(&m.text), &groups);
+                let after = if m.kind == Kind::Assistant {
+                    SNIPPET_AFTER_ANSWER
+                } else {
+                    SNIPPET_AFTER
+                };
+                let (excerpt, highlights) = snippet_with(&redact(&m.text), &groups, after);
+                let from = rows.get(&m.file_id).unwrap_or(row);
                 Hit {
                     seq: m.seq,
                     kind: m.kind.as_str().to_string(),
                     at: m.ts,
                     msg_key: m.msg_key,
                     snippet: excerpt,
+                    subagent_session_id: (m.file_id != group).then(|| from.info.session_id.clone()),
                     highlights,
                     show: format!(
                         "{exe} --kb-show {}:{} --around {}",
-                        row.info.source, row.info.session_id, m.seq
+                        from.info.source, from.info.session_id, m.seq
                     ),
                 }
             })
             .collect();
-        let mut info = row.info;
+        let mut info = row.info.clone();
         info.title = info.title.map(|t| redact(&t).into_owned());
         let mirror = index.data.mirror_path(&row.mirror_rel).map_or_else(
             |_| row.mirror_rel.clone(),
@@ -693,10 +773,11 @@ pub fn search(index: &Index, params: &SearchParams) -> Result<SearchResponse, Se
             resume: resume_for(&info, &exe),
             paths: Paths {
                 mirror,
-                original: row.source_path,
+                original: row.source_path.clone(),
             },
             session: info,
             hit_messages,
+            subagent_hits,
             hits,
         });
     }
@@ -1040,6 +1121,61 @@ fn local_time(iso: Option<&str>) -> String {
         .unwrap_or_default()
 }
 
+/// `title` cut to [`TITLE_CHARS`] characters.
+pub fn short_title(title: &str) -> String {
+    let flat: String = title.split_whitespace().collect::<Vec<_>>().join(" ");
+    if flat.chars().count() <= TITLE_CHARS {
+        return flat;
+    }
+    flat.chars().take(TITLE_CHARS).collect::<String>() + "…"
+}
+
+/// Fields an agent has no use for: offsets for drawing highlights, the
+/// message id of the viewer, the file locations (the skill forbids reading
+/// them), a ready-made `--kb-show` line that repeats the program path, and
+/// session facts the resume command already carries.
+const HUMAN_ONLY_KEYS: [&str; 10] = [
+    "tokens",
+    "paths",
+    "highlights",
+    "msg_key",
+    "show",
+    "cwd",
+    "started_at",
+    "message_count",
+    "is_subagent",
+    "parent_session_id",
+];
+
+fn strip_for_agent(value: &mut serde_json::Value) {
+    match value {
+        serde_json::Value::Object(map) => {
+            map.retain(|key, _| !HUMAN_ONLY_KEYS.contains(&key.as_str()));
+            if let Some(serde_json::Value::String(title)) =
+                map.get_mut("session").and_then(|s| s.get_mut("title"))
+            {
+                *title = short_title(title);
+            }
+            map.values_mut().for_each(strip_for_agent);
+        }
+        serde_json::Value::Array(items) => items.iter_mut().for_each(strip_for_agent),
+        _ => {}
+    }
+}
+
+/// The JSON the command line prints. Compact by default; `verbose` is the full
+/// structure the home page search also gets.
+///
+/// Fields the installed skill texts mention are never removed or renamed here
+/// (a test pins them): an older skill must keep working.
+pub fn agent_json<T: Serialize>(value: &T, verbose: bool) -> serde_json::Value {
+    let mut json = serde_json::to_value(value).unwrap_or(serde_json::Value::Null);
+    if !verbose {
+        strip_for_agent(&mut json);
+    }
+    json
+}
+
 pub fn format_search_text(response: &SearchResponse) -> String {
     let mut out = format!(
         "Found {} session(s), showing {} (data as of {}; mode {}).\n",
@@ -1058,7 +1194,9 @@ pub fn format_search_text(response: &SearchResponse) -> String {
                 .as_deref()
                 .map(|c| format!(" · {c}"))
                 .unwrap_or_default(),
-            s.title.as_deref().unwrap_or("(untitled)"),
+            s.title
+                .as_deref()
+                .map_or_else(|| "(untitled)".to_string(), short_title),
             s.project.as_deref().unwrap_or("-"),
             local_time(s.last_activity_at.as_deref())
         ));
@@ -1073,6 +1211,12 @@ pub fn format_search_text(response: &SearchResponse) -> String {
                 h.seq,
                 h.kind,
                 mark(&h.snippet, &h.highlights)
+            ));
+        }
+        if r.subagent_hits > 0 {
+            out.push_str(&format!(
+                "   (+{} matching messages in sub-agent sessions)\n",
+                r.subagent_hits
             ));
         }
         if r.hit_messages > r.hits.len() {
@@ -1095,7 +1239,9 @@ pub fn format_show_text(response: &ShowResponse) -> String {
     let s = &response.session;
     let mut out = format!(
         "{} [{}] {} · {}\n",
-        s.title.as_deref().unwrap_or("(untitled)"),
+        s.title
+            .as_deref()
+            .map_or_else(|| "(untitled)".to_string(), short_title),
         s.source,
         s.project.as_deref().unwrap_or("-"),
         local_time(s.last_activity_at.as_deref())
@@ -1154,6 +1300,19 @@ mod tests {
 
     fn groups(q: &str) -> Vec<QueryGroup> {
         tokenize::query_groups(q)
+    }
+
+    #[test]
+    fn long_titles_are_cut_on_a_character_boundary_and_flattened() {
+        let long = format!("第一行\n{}", "问".repeat(3000));
+        let short = short_title(&long);
+        assert_eq!(short.chars().count(), TITLE_CHARS + 1);
+        assert!(short.starts_with("第一行 问") && short.ends_with('…'));
+        assert_eq!(short_title("  a \n b  "), "a b");
+        assert_eq!(
+            short_title(&"x".repeat(TITLE_CHARS)),
+            "x".repeat(TITLE_CHARS)
+        );
     }
 
     #[test]

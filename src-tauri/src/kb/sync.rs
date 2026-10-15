@@ -1562,6 +1562,165 @@ mod tests {
         assert!(search("redis", &|_| {}).data_as_of.is_some());
     }
 
+    fn search_with(
+        sb: &Sandbox,
+        query: &str,
+        tweak: &dyn Fn(&mut crate::kb::search::SearchParams),
+    ) -> crate::kb::search::SearchResponse {
+        let mut params = crate::kb::search::SearchParams {
+            query: query.to_string(),
+            ..Default::default()
+        };
+        tweak(&mut params);
+        crate::kb::search::search_in(&sb.env.data, &params).unwrap()
+    }
+
+    fn subagent_file(sb: &Sandbox, name: &str) -> PathBuf {
+        sb.claude.join(format!(
+            "projects/-Users-me-proj/{CLAUDE_ID}/subagents/{name}.jsonl"
+        ))
+    }
+
+    #[test]
+    fn sub_agent_hits_fold_into_the_session_that_started_them() {
+        let sb = Sandbox::new();
+        // The parent itself does not mention the word; its two sub-agents do.
+        write(
+            &sb.claude_file(),
+            &user_line("2026-01-01T00:00:01Z", "start"),
+        );
+        for (name, at) in [("agent-a", "02"), ("agent-b", "03")] {
+            write(
+                &subagent_file(&sb, name),
+                &(user_line(
+                    &format!("2026-01-01T00:00:{at}Z"),
+                    "look into the zebra bug",
+                ) + &assistant_line(
+                    &format!("2026-01-01T00:00:{at}Z"),
+                    serde_json::json!([{"type":"text","text":"the zebra bug is a race"}]),
+                )),
+            );
+        }
+        sb.sync();
+
+        let folded = search_with(&sb, "zebra", &|_| {});
+        assert_eq!(folded.returned, 1, "one entry for the parent");
+        let entry = &folded.results[0];
+        assert_eq!(entry.session.session_id, CLAUDE_ID);
+        assert_eq!((entry.hit_messages, entry.subagent_hits), (0, 4));
+        assert!(entry.hits.iter().all(|h| h
+            .subagent_session_id
+            .as_deref()
+            .is_some_and(|id| id.starts_with("agent-"))));
+        assert!(entry.hits[0].show.contains("agent-"));
+
+        // `--include-subagents`: each sub-agent session is an entry of its own.
+        let expanded = search_with(&sb, "zebra", &|p| p.expand_subagents = Some(true));
+        assert_eq!(expanded.returned, 2);
+        assert!(expanded.results.iter().all(|r| r.session.is_subagent));
+        // `--no-subagents` drops them altogether.
+        assert_eq!(
+            search_with(&sb, "zebra", &|p| p.include_subagents = Some(false)).returned,
+            0
+        );
+    }
+
+    #[test]
+    fn a_limit_counts_parent_sessions_not_their_sub_agents() {
+        let sb = Sandbox::new();
+        write(
+            &sb.claude_file(),
+            &user_line("2026-01-01T00:00:01Z", "the zebra bug"),
+        );
+        for name in ["agent-a", "agent-b", "agent-c"] {
+            write(
+                &subagent_file(&sb, name),
+                &user_line("2026-01-01T00:00:02Z", "the zebra bug again"),
+            );
+        }
+        write(
+            &sb.codex_file(),
+            &codex_text().replace("add a retry", "zebra too"),
+        );
+        sb.sync();
+        let found = search_with(&sb, "zebra", &|p| p.limit = Some(2));
+        assert_eq!(found.returned, 2, "claude parent and the codex session");
+        assert!(found.results.iter().all(|r| !r.session.is_subagent));
+        assert_eq!(found.matched_sessions, 2);
+    }
+
+    #[test]
+    fn command_output_is_compact_but_keeps_what_the_skill_text_uses() {
+        let sb = Sandbox::new();
+        let long = "zebra ".to_string() + &"very long question ".repeat(200);
+        write(
+            &sb.claude_file(),
+            &(user_line("2026-01-01T00:00:01Z", &long)
+                + &assistant_line(
+                    "2026-01-01T00:00:02Z",
+                    serde_json::json!([{"type":"text","text":
+                        format!("zebra {} the answer is a race", "filler ".repeat(30))}]),
+                )),
+        );
+        sb.sync();
+        let response = search_with(&sb, "zebra", &|_| {});
+
+        let compact = crate::kb::search::agent_json(&response, false);
+        let verbose = crate::kb::search::agent_json(&response, true);
+        let hit = &compact["results"][0];
+        // A long first message does not become a long title.
+        let title = hit["session"]["title"].as_str().unwrap();
+        assert!(
+            title.chars().count() <= crate::kb::search::TITLE_CHARS + 1,
+            "{title}"
+        );
+        // Noise is gone…
+        for key in ["tokens", "paths", "highlights", "msg_key", "show", "cwd"] {
+            assert!(
+                !compact.to_string().contains(&format!("\"{key}\":")),
+                "{key}"
+            );
+            assert!(
+                verbose.to_string().contains(&format!("\"{key}\":")),
+                "{key}"
+            );
+        }
+        assert!(compact.to_string().len() < verbose.to_string().len());
+
+        // Everything the v1 skill text reads is still there, under the same name.
+        for path in [
+            "/data_as_of",
+            "/results/0/session/title",
+            "/results/0/session/last_activity_at",
+            "/results/0/session/source",
+            "/results/0/session/session_id",
+            "/results/0/hits/0/snippet",
+            "/results/0/hits/0/seq",
+            "/results/0/resume/command",
+            "/results/0/resume/available",
+        ] {
+            assert!(!compact.pointer(path).unwrap().is_null(), "{path}");
+        }
+
+        // An answer's excerpt reaches past the matched words to the conclusion.
+        let answer = response.results[0]
+            .hits
+            .iter()
+            .find(|h| h.kind == "assistant")
+            .unwrap();
+        assert!(
+            answer.snippet.contains("the answer is a race"),
+            "{}",
+            answer.snippet
+        );
+        let question = response.results[0]
+            .hits
+            .iter()
+            .find(|h| h.kind == "user")
+            .unwrap();
+        assert!(question.snippet.chars().count() < 220);
+    }
+
     #[test]
     fn unreadable_titles_db_degrades_to_a_warning_not_a_failed_sync() {
         let sb = Sandbox::new();

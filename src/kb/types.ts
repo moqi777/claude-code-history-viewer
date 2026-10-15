@@ -282,6 +282,8 @@ export interface KbSearchParams {
   limit?: number;
   per_session?: number;
   include_subagents?: boolean;
+  /** List sub-agent sessions as entries of their own. */
+  expand_subagents?: boolean;
   mode?: "auto" | "all" | "any";
 }
 
@@ -292,6 +294,8 @@ export interface KbHit {
   /** Viewer message id (Claude `uuid`); null for Codex. */
   msg_key: string | null;
   snippet: string;
+  /** Set when the hit is in a sub-agent session folded into this entry. */
+  subagent_session_id?: string | null;
   /** Matched ranges in `snippet`, as character offsets `[start, end)`. */
   highlights: [number, number][];
   show: string;
@@ -319,6 +323,8 @@ export interface KbSessionHit {
   resume: { available: boolean; command: string | null; note: string | null };
   paths: { mirror: string; original: string };
   hit_messages: number;
+  /** Matching messages in sub-agent sessions folded into this entry. */
+  subagent_hits?: number;
   hits: KbHit[];
 }
 
