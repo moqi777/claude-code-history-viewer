@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { useAppStore } from "@/store/useAppStore";
 import { isTauri } from "@/utils/platform";
+import { kbApi } from "./api";
 import { KbSettings } from "./KbSettings";
 import { KbWizard } from "./KbWizard";
 import type { KbProgress } from "./types";
@@ -33,6 +34,17 @@ export const KbRoot = () => {
       cancelled = true;
       unlisten?.();
     };
+  }, []);
+
+  // The status bar's backup count must not wait for the home page to be opened.
+  useEffect(() => {
+    if (!isTauri()) return;
+    void kbApi
+      .getStatus()
+      .then((overview) => useKbStore.setState({ overview }))
+      .catch(() => {
+        /* the status bar keeps its usual count */
+      });
   }, []);
 
   useEffect(() => {

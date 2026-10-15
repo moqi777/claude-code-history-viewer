@@ -32,7 +32,7 @@ import { BottomTabBar } from "@/components/mobile/BottomTabBar";
 import { MobileNavigatorSheet } from "@/components/mobile/MobileNavigatorSheet";
 import { Header } from "@/layouts/Header/Header";
 import { ModalContainer } from "@/layouts/Header/SettingDropdown/ModalContainer";
-import { KbHome, KbRoot } from "@/kb";
+import { KbHome, KbRoot, useKbStore } from "@/kb";
 import { useIsLgUp, useIsXlUp } from "@/hooks/useMediaQuery";
 import { useResizablePanel } from "@/hooks/useResizablePanel";
 import { SessionsPane } from "@/components/SessionsPane/SessionsPane";
@@ -155,6 +155,12 @@ export const AppLayout: React.FC<AppLayoutProps> = (props) => {
   // The dock is panel state, not layout state, so it is read from the store
   // rather than threaded through props like the navigator's older toggle.
   const isRecentEditsDockOpen = useAppStore((s) => s.isRecentEditsDockOpen);
+  // With no project open the status bar reports the knowledge base's size.
+  const kbSessionTotal = useKbStore((s) =>
+    s.overview == null
+      ? null
+      : Object.values(s.overview.sessions_by_source).reduce((sum, n) => sum + (n ?? 0), 0),
+  );
   const {
     projects,
     sessions,
@@ -875,7 +881,11 @@ export const AppLayout: React.FC<AppLayoutProps> = (props) => {
             <span className="text-border">&bull;</span>
             <span>{t("project.count", { count: projects.length })}</span>
             <span className="text-border">&bull;</span>
-            <span>{t("session.count", { count: sessions.length })}</span>
+            <span>
+              {selectedProject == null && isDesktop && kbSessionTotal != null
+                ? t("kb.status.backedUpCount", { count: kbSessionTotal })
+                : t("session.count", { count: sessions.length })}
+            </span>
             {selectedSession && computed.isMessagesView && (
               <>
                 <span className="text-border">&bull;</span>

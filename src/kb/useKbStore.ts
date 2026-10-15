@@ -59,6 +59,8 @@ export interface KbState {
   skills: KbSkillStatus[] | null;
   digest: KbDigestStatus | null;
   homeTab: KbHomeTab;
+  /** Set by ⌘K: the search box takes the focus as soon as it is on screen. */
+  searchFocusPending: boolean;
 }
 
 export interface KbActions {
@@ -84,6 +86,8 @@ export interface KbActions {
   uninstallSkill: (target: KbSkillTarget) => Promise<{ error?: string }>;
   refreshDigest: () => Promise<void>;
   setHomeTab: (tab: KbHomeTab) => void;
+  requestSearchFocus: () => void;
+  clearSearchFocus: () => void;
   /** Start a manual digest (its own process); the card follows its progress. */
   runDigest: (request: KbDigestRunRequest) => Promise<{ started?: KbDigestRunStarted; error?: string }>;
   cancelDigest: () => Promise<{ error?: string }>;
@@ -154,6 +158,7 @@ const initialState: KbState = {
   skills: null,
   digest: null,
   homeTab: "sessions",
+  searchFocusPending: false,
 };
 
 // Responses of overlapping refreshes can arrive out of order; only the newest
@@ -336,6 +341,8 @@ export const useKbStore = create<KbState & KbActions>((set, get) => ({
   },
 
   setHomeTab: (homeTab) => set({ homeTab }),
+  requestSearchFocus: () => set({ homeTab: "sessions", searchFocusPending: true }),
+  clearSearchFocus: () => set({ searchFocusPending: false }),
 
   runDigest: async (request) => {
     try {

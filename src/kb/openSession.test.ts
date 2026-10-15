@@ -12,14 +12,28 @@ const mocks = vi.hoisted(() => ({
     fetchFullSessionMessages: vi.fn(),
     navigateToMessage: vi.fn(),
   },
-  loaded: { list: [] as unknown[] },
+  loaded: {
+    list: [] as unknown[],
+    session: null as { file_path: string } | null,
+    loading: false,
+  },
+  listeners: new Set<(state: unknown) => void>(),
   setState: vi.fn(),
 }));
 
 vi.mock("./api", () => ({ kbApi: { listSessions: mocks.listSessions } }));
 vi.mock("@/store/useAppStore", () => ({
   useAppStore: {
-    getState: () => ({ ...mocks.app, messages: mocks.loaded.list }),
+    getState: () => ({
+      ...mocks.app,
+      messages: mocks.loaded.list,
+      selectedSession: mocks.loaded.session,
+      isLoadingMessages: mocks.loaded.loading,
+    }),
+    subscribe: (listener: (state: unknown) => void) => {
+      mocks.listeners.add(listener);
+      return () => mocks.listeners.delete(listener);
+    },
     setState: mocks.setState,
   },
 }));
@@ -50,6 +64,9 @@ describe("opening a backed-up session", () => {
     for (const fn of Object.values(mocks.app)) fn.mockReset();
     mocks.app.selectSession.mockResolvedValue(undefined);
     mocks.loaded.list = [];
+    mocks.loaded.session = null;
+    mocks.loaded.loading = false;
+    mocks.listeners.clear();
   });
 
   it("builds a stand-in project that carries the source and the working directory", () => {
@@ -122,6 +139,31 @@ describe("opening a backed-up session", () => {
     expect(found).toBe(true);
     expect(mocks.app.fetchFullSessionMessages).not.toHaveBeenCalled();
     expect(mocks.app.navigateToMessage).toHaveBeenCalledWith("u-1", { history: "none" });
+  });
+
+  it("waits for the messages when the open call returns before they are there", async () => {
+    // Opening the messages view makes the app select the same session once
+    // more, which supersedes the first call: it resolves with nothing loaded.
+    mocks.listSessions.mockResolvedValue([codex]);
+    mocks.loaded.session = { file_path: codex.file_path };
+    mocks.loaded.loading = true;
+    mocks.app.fetchFullSessionMessages.mockResolvedValue([]);
+    const opened = openKbSession(codex, { msgKey: "u-1", at: null, kind: "assistant" });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(mocks.app.navigateToMessage).not.toHaveBeenCalled();
+
+    mocks.loaded.list = [{ uuid: "u-1", type: "assistant", timestamp: "2026-10-14T09:00:00Z" }];
+    mocks.loaded.loading = false;
+    for (const listener of mocks.listeners) {
+      listener({
+        messages: mocks.loaded.list,
+        selectedSession: mocks.loaded.session,
+        isLoadingMessages: false,
+      });
+    }
+    expect(await opened).toBe(true);
+    expect(mocks.app.navigateToMessage).toHaveBeenCalledWith("u-1", { history: "none" });
+    expect(mocks.listeners.size, "the wait leaves no subscription behind").toBe(0);
   });
 
   it("finds a Codex message by time among the complete message list", async () => {

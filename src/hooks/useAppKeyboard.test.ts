@@ -2,8 +2,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { renderHook } from "@testing-library/react";
 import { useAppKeyboard } from "./useAppKeyboard";
 
-const { openModalMock, toggleNavigatorMock, toggleMinimapMock, platformState } = vi.hoisted(() => ({
+const { openModalMock, openKbSearchMock, toggleNavigatorMock, toggleMinimapMock, platformState } = vi.hoisted(() => ({
   openModalMock: vi.fn(),
+  openKbSearchMock: vi.fn(),
   toggleNavigatorMock: vi.fn(),
   toggleMinimapMock: vi.fn(),
   platformState: { isMobile: false },
@@ -12,6 +13,8 @@ const { openModalMock, toggleNavigatorMock, toggleMinimapMock, platformState } =
 vi.mock("@/contexts/modal", () => ({
   useModal: () => ({ openModal: openModalMock }),
 }));
+
+vi.mock("@/kb/openSearch", () => ({ openKbSearch: openKbSearchMock }));
 
 vi.mock("@/contexts/platform", () => ({
   usePlatform: () => platformState,
@@ -35,7 +38,17 @@ describe("useAppKeyboard", () => {
     document.body.innerHTML = "";
   });
 
-  it("opens global search on Cmd/Ctrl+K", () => {
+  it("opens the knowledge base's search on Cmd/Ctrl+K", () => {
+    openKbSearchMock.mockReturnValue(true);
+    renderHook(() => useAppKeyboard());
+    const event = press("k", { ctrlKey: true });
+    expect(openKbSearchMock).toHaveBeenCalledTimes(1);
+    expect(openModalMock).not.toHaveBeenCalled();
+    expect(event.defaultPrevented).toBe(true);
+  });
+
+  it("keeps the base app's global search where there is no knowledge base", () => {
+    openKbSearchMock.mockReturnValue(false);
     renderHook(() => useAppKeyboard());
     press("k", { ctrlKey: true });
     expect(openModalMock).toHaveBeenCalledWith("globalSearch");

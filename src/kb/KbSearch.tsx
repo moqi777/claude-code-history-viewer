@@ -1,4 +1,4 @@
-import { Fragment, useEffect } from "react";
+import { Fragment, useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { AlertTriangle, Loader2, Search, X } from "lucide-react";
@@ -41,6 +41,16 @@ export const SearchBox = () => {
   const { t } = useTranslation();
   const query = useKbStore((s) => s.search.query);
   const status = useKbStore((s) => s.search.status);
+  const focusPending = useKbStore((s) => s.searchFocusPending);
+  const input = useRef<HTMLInputElement>(null);
+
+  // ⌘K asked for the search box: take the focus once, with the text selected.
+  useEffect(() => {
+    if (!focusPending) return;
+    input.current?.focus();
+    input.current?.select();
+    useKbStore.getState().clearSearchFocus();
+  }, [focusPending]);
 
   // Search as the user types, once they pause.
   useEffect(() => {
@@ -56,6 +66,7 @@ export const SearchBox = () => {
         aria-hidden="true"
       />
       <Input
+        ref={input}
         value={query}
         onChange={(e) => useKbStore.getState().setSearchQuery(e.target.value)}
         onKeyDown={(e) => {

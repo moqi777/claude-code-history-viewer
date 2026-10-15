@@ -109,6 +109,17 @@ describe("home page search", () => {
     });
   };
 
+  it("takes the focus when ⌘K asked for the search box, once", () => {
+    const box = screen.getByLabelText("kb.search.placeholder");
+    expect(document.activeElement).not.toBe(box);
+    act(() => useKbStore.getState().requestSearchFocus());
+    expect(document.activeElement).toBe(box);
+    expect(useKbStore.getState().searchFocusPending).toBe(false);
+    (box as HTMLInputElement).blur();
+    act(() => useKbStore.getState().setHomeTab("sessions"));
+    expect(document.activeElement).not.toBe(box);
+  });
+
   it("searches once the typing pauses and replaces the session list with the hits", async () => {
     await runSearch({ state: "ok", response: response() });
     expect(mocks.api.search).toHaveBeenCalledTimes(1);

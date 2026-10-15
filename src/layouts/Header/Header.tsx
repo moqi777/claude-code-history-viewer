@@ -22,7 +22,7 @@ import { getAssetPath, isMacOS, isTauri } from "@/utils/platform";
 import { SettingDropdown } from "./SettingDropdown";
 import { getProjectDisplayName } from "@/utils/pathUtils";
 import { SessionCopyMenu } from "./SessionCopyMenu";
-import { KbSessionNotesButton } from "@/kb";
+import { KbSessionNotesButton, openKbSearch } from "@/kb";
 
 interface HeaderProps {
   analyticsActions: UseAnalyticsReturn["actions"];
@@ -212,7 +212,9 @@ export const Header = ({ analyticsActions, analyticsComputed }: HeaderProps) => 
 
         {/* Search button with shortcut hint */}
         <button
-          onClick={() => openModal("globalSearch")}
+          onClick={() => {
+            if (!openKbSearch()) openModal("globalSearch");
+          }}
           className="hidden md:inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors border border-border/50 text-xs"
           aria-label={t("common.commandPalette")}
         >
@@ -223,7 +225,9 @@ export const Header = ({ analyticsActions, analyticsComputed }: HeaderProps) => 
           </kbd>
         </button>
         <button
-          onClick={() => openModal("globalSearch")}
+          onClick={() => {
+            if (!openKbSearch()) openModal("globalSearch");
+          }}
           className="md:hidden p-2 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
           aria-label={t("common.commandPalette")}
         >

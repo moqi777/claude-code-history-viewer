@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { useModal } from "@/contexts/modal";
 import { usePlatform } from "@/contexts/platform";
+import { openKbSearch } from "@/kb/openSearch";
 import { useAppStore } from "@/store/useAppStore";
 
 /**
@@ -16,7 +17,7 @@ function isEditableTarget(target: EventTarget | null): boolean {
 
 /**
  * Global keyboard shortcuts for the app.
- * - Cmd+K: open global search
+ * - Cmd+K: search the knowledge base (the base app's live search where there is none)
  * - Cmd+Shift+M: toggle message navigator (desktop only)
  * - Cmd+Shift+F: toggle the session minimap (anywhere, including mobile; the
  *   strip's own mount gate decides whether that has any visible effect)
@@ -31,7 +32,7 @@ export function useAppKeyboard() {
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === "k") {
         e.preventDefault();
-        openModal("globalSearch");
+        if (!openKbSearch()) openModal("globalSearch");
       }
       if (
         (e.metaKey || e.ctrlKey) &&

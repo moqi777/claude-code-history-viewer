@@ -81,8 +81,34 @@ export async function openKbSession(session: KbSession, focus?: KbFocus): Promis
 /** Scroll the session that is already open to the message `focus` points at. */
 export const jumpToFocus = (focus: KbFocus): Promise<boolean> => scrollToFocus(focus);
 
+const LOAD_WAIT_MS = 15_000;
+
+/**
+ * `selectSession` can resolve before the messages are there: opening the
+ * messages view makes the app's own "restore an empty view" effect select the
+ * same session again, which supersedes the first call. Wait for whichever
+ * load wins.
+ */
+const whenMessagesAreLoaded = (filePath: string): Promise<void> =>
+  new Promise((resolve) => {
+    const ready = (s: ReturnType<typeof useAppStore.getState>) =>
+      s.selectedSession?.file_path === filePath && !s.isLoadingMessages && s.messages.length > 0;
+    if (ready(useAppStore.getState())) return resolve();
+    const stop = (): void => {
+      clearTimeout(timer);
+      unsubscribe();
+      resolve();
+    };
+    const unsubscribe = useAppStore.subscribe((s) => {
+      if (ready(s)) stop();
+    });
+    const timer = setTimeout(stop, LOAD_WAIT_MS);
+  });
+
 /** Scroll the opened session to the message a search hit points at. */
 async function scrollToFocus(focus: KbFocus): Promise<boolean> {
+  const path = useAppStore.getState().selectedSession?.file_path;
+  if (path != null) await whenMessagesAreLoaded(path);
   const store = useAppStore.getState();
   // The loaded window is only the newest page; the whole list is needed to
   // find a Codex message, whose id the viewer derives itself.
