@@ -59,8 +59,8 @@
 | 2 | 设置向导 + 配置 + 知识库主页 + 移动硬盘备份 + 正式打包（AgentKB） | ✅ 已验收，见 `P2-acceptance.md`（注销重登一项待补） |
 | 3 | 全文搜索（中文分词）+ `--kb-search` 命令 + skill 一键安装到 Claude 和 Codex | ✅ 已验收，见 `P3-acceptance.md`、`P3.1-acceptance.md` |
 | 4 | 每日整理成笔记 + 完结标识 + 补跑 + 手动总结按钮 | ✅ 已验收，见 `P4-acceptance.md`、`P4.1-acceptance.md` |
-| **5** | **一键导出 / 导入迁移** | 新设备导入后会话数、笔记数、搜索结果与原设备一致，见 `P5-export-import.md` |
-| 6 | 语义搜索（本地向量） | 不用记准关键词也能搜到 |
+| 5 | 一键导出 / 导入迁移 | ✅ 已验收，见 `P5-acceptance.md` |
+| **6** | **语义搜索（本地向量）** | 不用记准关键词也能搜到，见 `P6-semantic-search.md` |
 | 7 | Windows 版 | 见下方"第 7 期约定" |
 
 ### 第 4 期整理规则（已和用户确认，先记在这里）
@@ -103,4 +103,5 @@
 - Rust 测试按底座要求用 `cargo test -- --test-threads=1` 运行
 - 每期结束时必须通过：`pnpm tsc --build .`、`pnpm vitest run`、`pnpm lint`、`pnpm run i18n:validate`、`cargo test -- --test-threads=1`、`cargo clippy --all-targets --all-features -- -D warnings`、`cargo fmt --all -- --check`
 - 不引入需要联网的服务，不加任何遥测
+  - **唯一例外**（第 6 期起）：用户在设置页点"下载模型"时，下载一次向量模型，并按程序里写死的 SHA-256 校验；之后建索引和搜索完全离线
 - 底座 CLAUDE.md 里的代码质量清单（原子写入、路径校验、错误要给用户反馈等）同样适用；底座的 specs / harness 流程不强制，以 `docs/agent-kb/` 下的文档为准
