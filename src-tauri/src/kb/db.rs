@@ -162,6 +162,10 @@ const MIGRATIONS: &[&str] = &[
       PRIMARY KEY (round_id, source, session_id)
     );
     ",
+    // v5: sessions that came in with an import from another device. NULL =
+    // collected on this machine; otherwise the name of the device. Such a
+    // file has no source on this machine, which is not the same as deleted.
+    "ALTER TABLE files ADD COLUMN origin TEXT;",
 ];
 
 /// Same definition as in migration v2, for [`reset_message_index`].
@@ -242,6 +246,26 @@ fn migrate(conn: &mut Connection) -> Result<(), String> {
     tx.commit().map_err(|e| err("commit migration", e))
 }
 
+/// `f.origin` when `files` has the column, `NULL` for a database that has not
+/// been migrated to v5 yet (read-only queries never migrate).
+pub fn origin_column(conn: &Connection) -> &'static str {
+    let has = conn
+        .prepare("SELECT 1 FROM pragma_table_info('files') WHERE name='origin'")
+        .and_then(|mut stmt| stmt.exists([]))
+        .unwrap_or(false);
+    if has {
+        "f.origin"
+    } else {
+        "NULL"
+    }
+}
+
+/// The status shown to users: a present file with an origin was never on
+/// this machine, which is not the same as deleted here.
+pub fn status_expr(origin: &str) -> String {
+    format!("CASE WHEN {origin} IS NOT NULL AND f.source_status = 'present' THEN 'elsewhere' ELSE f.source_status END")
+}
+
 /// A consistent copy of the database next to it, as `kb.db.<label>`. Existing
 /// copies are never overwritten.
 pub fn snapshot(conn: &Connection, label: &str) -> Result<std::path::PathBuf, String> {
@@ -277,10 +301,12 @@ pub struct FileRow {
     pub mirror_offset: i64,
     pub is_compressed: bool,
     pub deleted: bool,
+    /// The device an imported file came from; `None` for files collected here.
+    pub origin: Option<String>,
 }
 
 const FILE_COLUMNS: &str = "id, source, source_path, mirror_rel, src_size, src_mtime_ns, \
-     head_hash, head_len, mirror_offset, is_compressed, source_status";
+     head_hash, head_len, mirror_offset, is_compressed, source_status, origin";
 
 fn file_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<FileRow> {
     let source: String = row.get(1)?;
@@ -297,6 +323,7 @@ fn file_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<FileRow> {
         mirror_offset: row.get(8)?,
         is_compressed: row.get::<_, i64>(9)? != 0,
         deleted: status == "deleted",
+        origin: row.get(11)?,
     })
 }
 
@@ -355,6 +382,107 @@ pub fn insert_file(
     Ok(tx.last_insert_rowid())
 }
 
+/// A `files` row as an export carries it, to be inserted as it is.
+#[derive(Debug, Clone)]
+pub struct ImportedFile {
+    pub source: Source,
+    pub source_path: String,
+    pub mirror_rel: String,
+    pub src_size: i64,
+    pub src_mtime_ns: i64,
+    pub head_hash: Vec<u8>,
+    pub head_len: i64,
+    pub mirror_offset: i64,
+    pub is_compressed: bool,
+    pub source_status: String,
+    pub deleted_at: Option<String>,
+    pub first_seen_at: String,
+    pub last_synced_at: String,
+    pub origin: Option<String>,
+}
+
+pub fn load_imported_files(conn: &Connection) -> Result<Vec<ImportedFile>, String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT source, source_path, mirror_rel, src_size, src_mtime_ns, head_hash, \
+             head_len, mirror_offset, is_compressed, source_status, deleted_at, \
+             first_seen_at, last_synced_at, origin FROM files ORDER BY id",
+        )
+        .map_err(|e| err("prepare files", e))?;
+    let rows = stmt
+        .query_map([], |r| {
+            let source: String = r.get(0)?;
+            Ok(ImportedFile {
+                source: Source::parse(&source).unwrap_or(Source::Claude),
+                source_path: r.get(1)?,
+                mirror_rel: r.get(2)?,
+                src_size: r.get(3)?,
+                src_mtime_ns: r.get(4)?,
+                head_hash: r.get(5)?,
+                head_len: r.get(6)?,
+                mirror_offset: r.get(7)?,
+                is_compressed: r.get::<_, i64>(8)? != 0,
+                source_status: r.get(9)?,
+                deleted_at: r.get(10)?,
+                first_seen_at: r.get(11)?,
+                last_synced_at: r.get(12)?,
+                origin: r.get(13)?,
+            })
+        })
+        .map_err(|e| err("query files", e))?;
+    rows.collect::<Result<_, _>>()
+        .map_err(|e| err("read files", e))
+}
+
+pub fn insert_imported_file(tx: &Transaction<'_>, f: &ImportedFile) -> Result<i64, String> {
+    tx.execute(
+        "INSERT INTO files (source, source_path, mirror_rel, src_size, src_mtime_ns, head_hash, \
+         head_len, mirror_offset, is_compressed, source_status, deleted_at, first_seen_at, \
+         last_synced_at, origin) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)",
+        params![
+            f.source.as_str(),
+            f.source_path,
+            f.mirror_rel,
+            f.src_size,
+            f.src_mtime_ns,
+            f.head_hash,
+            f.head_len,
+            f.mirror_offset,
+            i64::from(f.is_compressed),
+            f.source_status,
+            f.deleted_at,
+            f.first_seen_at,
+            f.last_synced_at,
+            f.origin
+        ],
+    )
+    .map_err(|e| err("insert imported file", e))?;
+    Ok(tx.last_insert_rowid())
+}
+
+/// A merge appended to the mirror: advance the cursor without touching the
+/// status or origin (the source is not on this machine).
+pub fn set_merged_cursor(
+    tx: &Transaction<'_>,
+    file_id: i64,
+    cursor: &Cursor,
+) -> Result<(), String> {
+    tx.execute(
+        "UPDATE files SET src_size=?2, src_mtime_ns=?3, head_hash=?4, head_len=?5, \
+         mirror_offset=?6 WHERE id=?1",
+        params![
+            file_id,
+            cursor.src_size,
+            cursor.src_mtime_ns,
+            cursor.head_hash,
+            cursor.head_len,
+            cursor.mirror_offset
+        ],
+    )
+    .map_err(|e| err("update merged cursor", e))?;
+    Ok(())
+}
+
 /// Advance a file's cursor; also marks the source present again.
 pub fn update_cursor(
     tx: &Transaction<'_>,
@@ -364,8 +492,8 @@ pub fn update_cursor(
 ) -> Result<(), String> {
     tx.execute(
         "UPDATE files SET src_size=?2, src_mtime_ns=?3, head_hash=?4, head_len=?5, \
-         mirror_offset=?6, source_status='present', deleted_at=NULL, last_synced_at=?7 \
-         WHERE id=?1",
+         mirror_offset=?6, source_status='present', deleted_at=NULL, last_synced_at=?7, \
+         origin=NULL WHERE id=?1",
         params![
             file_id,
             cursor.src_size,
@@ -386,8 +514,8 @@ pub fn mark_present_without_content_change(
     now: &str,
 ) -> Result<(), String> {
     conn.execute(
-        "UPDATE files SET source_status='present', deleted_at=NULL, last_synced_at=?2 \
-         WHERE id=?1 AND source_status!='present'",
+        "UPDATE files SET source_status='present', deleted_at=NULL, last_synced_at=?2, \
+         origin=NULL WHERE id=?1 AND (source_status!='present' OR origin IS NOT NULL)",
         params![file_id, now],
     )
     .map_err(|e| err("mark present", e))?;
@@ -396,7 +524,8 @@ pub fn mark_present_without_content_change(
 
 pub fn set_source_path(tx: &Transaction<'_>, file_id: i64, new_path: &str) -> Result<(), String> {
     tx.execute(
-        "UPDATE files SET source_path=?2, source_status='present', deleted_at=NULL WHERE id=?1",
+        "UPDATE files SET source_path=?2, source_status='present', deleted_at=NULL, origin=NULL \
+         WHERE id=?1",
         params![file_id, new_path],
     )
     .map_err(|e| err("move source path", e))?;
@@ -415,7 +544,7 @@ pub fn convert_file(
 ) -> Result<(), String> {
     tx.execute(
         "UPDATE files SET source_path=?2, mirror_rel=?3, is_compressed=?4, \
-         source_status='present', deleted_at=NULL WHERE id=?1",
+         source_status='present', deleted_at=NULL, origin=NULL WHERE id=?1",
         params![file_id, new_path, new_mirror_rel, i64::from(compressed)],
     )
     .map_err(|e| err("convert file", e))?;

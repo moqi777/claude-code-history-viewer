@@ -227,6 +227,9 @@ pub struct SessionInfo {
     pub started_at: Option<String>,
     pub last_activity_at: Option<String>,
     pub source_status: String,
+    /// The device an imported session came from.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub origin: Option<String>,
     pub is_subagent: bool,
     pub parent_session_id: Option<String>,
     pub message_count: u64,
@@ -498,13 +501,18 @@ fn fetch_candidates(
 }
 
 fn session_row(index: &Index, file_id: i64) -> Result<Option<SessionRow>, SearchError> {
+    let origin = super::db::origin_column(&index.conn);
     Ok(index
         .conn
         .query_row(
-            "SELECT s.source, s.session_id, s.title, s.client, s.project_name, s.cwd, \
-                    s.started_at, s.last_activity_at, f.source_status, s.is_subagent, \
-                    s.parent_session_id, s.message_count, f.mirror_rel, f.source_path \
-             FROM sessions s JOIN files f ON f.id = s.file_id WHERE s.file_id = ?1",
+            &format!(
+                "SELECT s.source, s.session_id, s.title, s.client, s.project_name, s.cwd, \
+                        s.started_at, s.last_activity_at, {}, s.is_subagent, \
+                        s.parent_session_id, s.message_count, f.mirror_rel, f.source_path, \
+                        {origin} \
+                 FROM sessions s JOIN files f ON f.id = s.file_id WHERE s.file_id = ?1",
+                super::db::status_expr(origin)
+            ),
             [file_id],
             |r| {
                 Ok(SessionRow {
@@ -518,6 +526,7 @@ fn session_row(index: &Index, file_id: i64) -> Result<Option<SessionRow>, Search
                         started_at: r.get(6)?,
                         last_activity_at: r.get(7)?,
                         source_status: r.get(8)?,
+                        origin: r.get(14)?,
                         is_subagent: r.get::<_, i64>(9)? != 0,
                         parent_session_id: r.get(10)?,
                         message_count: u64::try_from(r.get::<_, i64>(11)?).unwrap_or(0),
@@ -569,6 +578,21 @@ fn shell_quote(text: &str) -> String {
 
 /// The command that reopens the session in its own tool.
 pub fn resume_for(info: &SessionInfo, exe: &str) -> Resume {
+    if info.source_status == "elsewhere" {
+        return Resume {
+            available: false,
+            command: None,
+            note: Some(format!(
+                "This session came from another device{}, so it cannot be resumed here; \
+                 read the backup with: {exe} --kb-show {}:{} --head 10",
+                info.origin
+                    .as_deref()
+                    .map_or_else(String::new, |o| format!(" ({o})")),
+                info.source,
+                info.session_id
+            )),
+        };
+    }
     if info.source_status == "deleted" {
         return Resume {
             available: false,
@@ -1912,6 +1936,7 @@ mod tests {
             started_at: None,
             last_activity_at: None,
             source_status: "present".into(),
+            origin: None,
             is_subagent: false,
             parent_session_id: None,
             message_count: 1,
@@ -1935,6 +1960,12 @@ mod tests {
         let r = resume_for(&info, "AgentKB");
         assert!(!r.available && r.command.is_none());
         assert!(r.note.unwrap().contains("--kb-show"));
+        info.source_status = "elsewhere".into();
+        info.origin = Some("MacBook-A".into());
+        let r = resume_for(&info, "AgentKB");
+        assert!(!r.available && r.command.is_none());
+        let note = r.note.unwrap();
+        assert!(note.contains("another device (MacBook-A)") && note.contains("--kb-show"));
     }
 
     #[test]

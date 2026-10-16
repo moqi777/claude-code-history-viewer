@@ -211,6 +211,8 @@ pub struct KbSession {
     // --- KB only ---
     pub cwd: Option<String>,
     pub source_status: String,
+    /// The device an imported session came from.
+    pub origin: Option<String>,
     pub source_path: String,
     pub parent_session_id: Option<String>,
     pub is_subagent: bool,
@@ -225,6 +227,8 @@ pub struct SessionFilter {
     pub include_empty: Option<bool>,
     /// Sessions whose working directory the user excluded.
     pub include_excluded: Option<bool>,
+    /// Only sessions imported from another device whose source is not here.
+    pub only_elsewhere: Option<bool>,
     /// `cli`, `vscode`, `exec`… as recorded by the indexer.
     pub client: Option<String>,
     pub project: Option<String>,
@@ -247,12 +251,13 @@ pub fn list_sessions(env: &KbEnv, filter: &SessionFilter) -> Result<Vec<KbSessio
         return Ok(Vec::new());
     };
     let limit = filter.limit.unwrap_or(DEFAULT_LIMIT).clamp(1, MAX_LIMIT);
+    let origin = db::origin_column(&conn);
     let mut stmt = conn
-        .prepare(
-            "SELECT s.source, s.session_id, f.mirror_rel, f.source_path, f.source_status, \
+        .prepare(&format!(
+            "SELECT s.source, s.session_id, f.mirror_rel, f.source_path, {status}, \
                     s.project_name, s.cwd, s.title, s.title_source, s.client, s.started_at, \
                     s.last_activity_at, f.last_synced_at, s.message_count, \
-                    s.parent_session_id, s.is_subagent \
+                    s.parent_session_id, s.is_subagent, {origin} \
              FROM sessions s JOIN files f ON f.id = s.file_id \
              WHERE (?1 IS NULL OR s.source = ?1) \
                AND (?2 = 0 OR f.source_status = 'deleted') \
@@ -265,9 +270,11 @@ pub fn list_sessions(env: &KbEnv, filter: &SessionFilter) -> Result<Vec<KbSessio
                AND (?11 IS NULL OR instr(lower(COALESCE(s.title, '')), lower(?11)) > 0) \
                AND (?12 IS NULL OR s.cwd = ?12) \
                AND (?13 = 1 OR s.cwd_excluded = 0) \
+               AND (?14 = 0 OR ({origin} IS NOT NULL AND f.source_status = 'present')) \
              ORDER BY COALESCE(s.last_activity_at, f.last_synced_at) DESC, s.id DESC \
              LIMIT ?4 OFFSET ?5",
-        )
+            status = db::status_expr(origin)
+        ))
         .map_err(|e| e.to_string())?;
     let rows = stmt
         .query_map(
@@ -285,6 +292,7 @@ pub fn list_sessions(env: &KbEnv, filter: &SessionFilter) -> Result<Vec<KbSessio
                 filter.query.as_deref().filter(|q| !q.is_empty()),
                 filter.cwd,
                 i64::from(filter.include_excluded.unwrap_or(false)),
+                i64::from(filter.only_elsewhere.unwrap_or(false)),
             ],
             |r| {
                 let mirror_rel: String = r.get(2)?;
@@ -318,6 +326,7 @@ pub fn list_sessions(env: &KbEnv, filter: &SessionFilter) -> Result<Vec<KbSessio
                     storage_type: "jsonl",
                     source_path: r.get(3)?,
                     source_status: r.get(4)?,
+                    origin: r.get(16)?,
                     parent_session_id: r.get(14)?,
                     is_subagent: r.get::<_, i64>(15)? != 0,
                 })

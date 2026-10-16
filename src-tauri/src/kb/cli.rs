@@ -15,7 +15,9 @@ use super::sync::{self, KbEnv};
 const USAGE: &str = "usage: --kb-sync | --kb-reindex | --kb-backup | --kb-move-data <new dir> \
 | --kb-schedule install|uninstall|status|ensure | --kb-search \"<words>\" [options] \
 | --kb-show <source:session-id> [--around <seq>] [options] | --kb-skill-print claude|codex \
-| --kb-digest --auto|--all|--session <source:session-id>|--test";
+| --kb-digest --auto|--all|--session <source:session-id>|--test \
+| --kb-export <file.agentkb> [--overwrite] \
+| --kb-import <file.agentkb> [--inspect|--plan] [--no-sync] [--no-settings] [--adopt-settings]";
 
 /// `Some(exit code)` when `args` is a KB command, `None` to let the app start
 /// normally. Only `argv[1]` is inspected, so a stray `--kb-…` value elsewhere
@@ -33,6 +35,8 @@ pub fn try_run(args: &[String]) -> Option<i32> {
         "--kb-skill-print" => run_skill_print_command(args.get(2).map(String::as_str)),
         "--kb-digest" => run_digest_command(&args[2..]),
         "--kb-backup" => run_backup_command(),
+        "--kb-export" => run_export_command(&args[2..]),
+        "--kb-import" => run_import_command(&args[2..]),
         "--kb-move-data" => run_move_data_command(args.get(2).map(String::as_str)),
         "--kb-schedule" => run_schedule_command(args.get(2).map(String::as_str)),
         other => {
@@ -513,6 +517,151 @@ fn run_move_data_command(new_dir: Option<&str>) -> i32 {
             1
         }
     }
+}
+
+/// Phase changes and every tenth of the bytes, on stderr.
+fn transfer_progress() -> super::progress::ProgressSink {
+    let last = std::sync::Mutex::new((String::new(), 11u64));
+    super::progress::ProgressSink::new(move |p| {
+        let tenth = (p.bytes_done * 10).checked_div(p.bytes_total).unwrap_or(0);
+        let Ok(mut last) = last.lock() else { return };
+        if last.0 != p.phase || last.1 != tenth {
+            *last = (p.phase.clone(), tenth);
+            eprintln!(
+                "{} {}: {}/{} files, {}/{} bytes",
+                p.op, p.phase, p.done, p.total, p.bytes_done, p.bytes_total
+            );
+        }
+    })
+}
+
+fn transfer_failure(e: &super::transfer::TransferError) -> i32 {
+    eprintln!("{e}");
+    print_json(&serde_json::json!({ "error": e.code, "message": e.message }));
+    1
+}
+
+fn run_export_command(args: &[String]) -> i32 {
+    let flags = match parse_flags(args, &[], &["overwrite"]) {
+        Ok(flags) => flags,
+        Err(message) => return usage_error(&message),
+    };
+    let [dest] = flags.positional.as_slice() else {
+        return usage_error("--kb-export needs the file to write");
+    };
+    let config = match load_config() {
+        Ok(config) => config,
+        Err(code) => return code,
+    };
+    let env = KbEnv::from_config(&config);
+    let dest = super::migrate_dir::expand(dest);
+    match super::export::export(
+        &env,
+        &config,
+        &dest,
+        flags.switches.contains("overwrite"),
+        &super::transfer::Cancel::new(),
+        &transfer_progress(),
+    ) {
+        Ok(report) => {
+            print_json(&report);
+            0
+        }
+        Err(e) => transfer_failure(&e),
+    }
+}
+
+fn run_import_command(args: &[String]) -> i32 {
+    let flags = match parse_flags(
+        args,
+        &[],
+        &[
+            "inspect",
+            "plan",
+            "no-sync",
+            "no-settings",
+            "adopt-settings",
+        ],
+    ) {
+        Ok(flags) => flags,
+        Err(message) => return usage_error(&message),
+    };
+    let [package] = flags.positional.as_slice() else {
+        return usage_error("--kb-import needs the file to read");
+    };
+    let config_file = match super::config::config_path() {
+        Ok(file) => file,
+        Err(e) => {
+            eprintln!("{e}");
+            return 1;
+        }
+    };
+    let config = match load_config() {
+        Ok(config) => config,
+        Err(code) => return code,
+    };
+    let package = super::migrate_dir::expand(package);
+    let env = KbEnv::from_config(&config);
+    if flags.switches.contains("inspect") {
+        return match super::import::inspect(&env, &package) {
+            Ok(report) => {
+                print_json(&report);
+                i32::from(report.problem.is_some())
+            }
+            Err(e) => transfer_failure(&e),
+        };
+    }
+    let opts = super::import::Options {
+        adopt_settings: flags.switches.contains("adopt-settings"),
+        write_config: !flags.switches.contains("no-settings"),
+        config_exists: config_file.is_file(),
+    };
+    let cancel = super::transfer::Cancel::new();
+    let progress = transfer_progress();
+    if flags.switches.contains("plan") {
+        let prepared = super::import::prepare(&env, &config, &opts, &package, &cancel, &progress);
+        let _ = super::import::discard(&env, &package);
+        return match prepared {
+            Ok(prepared) => {
+                print_json(&prepared);
+                0
+            }
+            Err(e) => transfer_failure(&e),
+        };
+    }
+    let report = match super::import::import(
+        &env,
+        &config,
+        &opts,
+        &config_file,
+        &package,
+        &cancel,
+        &progress,
+    ) {
+        Ok(report) => report,
+        Err(e) => return transfer_failure(&e),
+    };
+    // Recognise sources that exist here, apply this machine's exclusions and
+    // bring an out-of-date index up to date.
+    let synced = if flags.switches.contains("no-sync") {
+        None
+    } else {
+        let env = KbEnv::from_config(&report.config).with_progress(progress);
+        Some(sync::run_sync(&env, "cli"))
+    };
+    let code = match &synced {
+        Some(Ok(summary)) if summary.status == "error" => 1,
+        Some(Err(_)) => 1,
+        _ => 0,
+    };
+    print_json(&serde_json::json!({
+        "import": report,
+        "sync": synced.map(|s| match s {
+            Ok(summary) => serde_json::to_value(summary).unwrap_or_default(),
+            Err(e) => serde_json::json!({ "error": e }),
+        }),
+    }));
+    code
 }
 
 fn run_schedule_command(action: Option<&str>) -> i32 {

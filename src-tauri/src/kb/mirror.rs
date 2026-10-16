@@ -374,6 +374,7 @@ mod tests {
             mirror_offset: m.cursor.mirror_offset,
             is_compressed: seen.compressed,
             deleted: false,
+            origin: None,
         }
     }
 

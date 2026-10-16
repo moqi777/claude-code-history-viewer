@@ -348,7 +348,9 @@ pub fn reconcile(
     let mut out = Reconciliation::default();
     for row in rows {
         let path = Path::new(&row.source_path);
-        let vanished = !row.deleted && !found.contains(row.source_path.as_str());
+        // A session imported from another device never had a source here.
+        let vanished =
+            !row.deleted && row.origin.is_none() && !found.contains(row.source_path.as_str());
         if !vanished
             || discover::is_excluded(path, exclude_prefixes)
             || !discovery
@@ -607,7 +609,7 @@ fn reindex_if_outdated(
     Ok(())
 }
 
-fn reindex_one(env: &KbEnv, conn: &Connection, row: &FileRow) -> Result<(), String> {
+pub(super) fn reindex_one(env: &KbEnv, conn: &Connection, row: &FileRow) -> Result<(), String> {
     let mirror_path = env.data.mirror_path(&row.mirror_rel)?;
     let file = std::fs::File::open(&mirror_path)
         .map_err(|e| format!("cannot open mirror {}: {e}", mirror_path.display()))?;
