@@ -182,9 +182,9 @@ pub fn status(target: Target, root: Option<&Path>, current_exe: &Path) -> SkillS
     let exe_exists = parsed.exe.as_deref().map(|e| Path::new(e).is_file());
     out.installed_exe_exists = exe_exists;
     out.state = State::Current;
-    if parsed.version.as_deref() != Some(AGENTKB_VERSION)
-        || parsed.template != Some(TEMPLATE_VERSION)
-    {
+    // The text only depends on the template revision and the program path, so a
+    // new app version alone does not make the copy stale.
+    if parsed.template != Some(TEMPLATE_VERSION) {
         out.state = State::Stale;
         out.stale_reason = Some("version");
     } else if exe_exists == Some(false) {
@@ -418,13 +418,23 @@ mod tests {
         assert_eq!(s.stale_reason, Some("missing_exe"));
         assert_eq!(s.installed_exe.as_deref(), old_exe.to_str());
 
-        // A copy from another app version is stale even if the path is fine.
+        // A copy written by another app version is still current: only the
+        // template revision and the program path matter.
+        install(Target::Codex, &root, Path::new(EXE)).unwrap();
         let file = skill_dir(&root).join(SKILL_FILE);
         let text = std::fs::read_to_string(&file)
             .unwrap()
             .replace(&format!("app {AGENTKB_VERSION}"), "app 0.0.1");
         std::fs::write(&file, text).unwrap();
-        let s = status(Target::Codex, Some(&root), old_exe);
+        let s = status(Target::Codex, Some(&root), Path::new(EXE));
+        assert_eq!((s.state, s.stale_reason), (State::Current, None));
+
+        // A copy from an older template is stale even if the path is fine.
+        let text = std::fs::read_to_string(&file)
+            .unwrap()
+            .replace(&format!("template {TEMPLATE_VERSION}"), "template 0");
+        std::fs::write(&file, text).unwrap();
+        let s = status(Target::Codex, Some(&root), Path::new(EXE));
         assert_eq!((s.state, s.stale_reason), (State::Stale, Some("version")));
 
         install(Target::Codex, &root, Path::new(EXE)).unwrap();

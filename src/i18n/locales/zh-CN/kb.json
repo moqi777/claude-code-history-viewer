@@ -234,7 +234,7 @@
   "kb.skill.state.foreign": "那个位置已有一个别的同名技能，不会改动",
   "kb.skill.state.notInstalled": "未安装",
   "kb.skill.state.toolMissing": "这台电脑上没找到",
-  "kb.skill.stale.version": "是别的 AgentKB 版本写的",
+  "kb.skill.stale.version": "是旧版技能模板写的",
   "kb.skill.stale.path": "指向的程序位置变了",
   "kb.skill.stale.missing_exe": "它指向的程序已不存在",
   "kb.skill.install": "安装",

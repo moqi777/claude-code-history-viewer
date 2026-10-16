@@ -234,7 +234,7 @@
   "kb.skill.state.foreign": "A different skill with this name is there; left untouched",
   "kb.skill.state.notInstalled": "Not installed",
   "kb.skill.state.toolMissing": "Not found on this Mac",
-  "kb.skill.stale.version": "written by another AgentKB version",
+  "kb.skill.stale.version": "written from an older skill template",
   "kb.skill.stale.path": "points to another location",
   "kb.skill.stale.missing_exe": "the program it points to is gone",
   "kb.skill.install": "Install",
