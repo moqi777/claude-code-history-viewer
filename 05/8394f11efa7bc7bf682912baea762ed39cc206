@@ -1,0 +1,50 @@
+src/kb/digestFormat.ts
+  s_cca7c29607588b::t_3201eee4d64ce6 2,48-85
+src/i18n/types.generated.ts
+  ai_agent 8
+src/i18n/locales/en/kb.json
+  s_cca7c29607588b::t_022e22e23ca18c 351-370
+docs/agent-kb/P4-acceptance.md
+  s_d58d4b162ae7dc::t_6d941664d78957 1-25
+src/i18n/locales/zh-CN/kb.json
+  s_cca7c29607588b::t_022e22e23ca18c 351-370
+src/kb/KbHome.tsx
+  s_cca7c29607588b::t_3201eee4d64ce6 4-14,22,171-180,252,259-260,281-288,293,455-547,648,653-660,663-696,698-704,706-768
+  s_cca7c29607588b::t_a9963d965769a6 168-169
+src/i18n/locales/zh-TW/kb.json
+  s_cca7c29607588b::t_022e22e23ca18c 351-370
+src/kb/KbHome.test.tsx
+  s_cca7c29607588b::t_84d04725766381 123
+  s_cca7c29607588b::t_f3386901edd4c1 41,44,50,283-357
+src/kb/KbNotes.tsx
+  s_cca7c29607588b::t_3201eee4d64ce6 168
+  s_cca7c29607588b::t_022e22e23ca18c 129
+src/i18n/locales/ja/kb.json
+  s_cca7c29607588b::t_022e22e23ca18c 351-370
+src/i18n/locales/ko/kb.json
+  s_cca7c29607588b::t_022e22e23ca18c 351-370
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.11",
+  "base_commit_sha": "058394f11efa7bc7bf682912baea762ed39cc206",
+  "prompts": {},
+  "sessions": {
+    "s_cca7c29607588b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ef228e77-8d37-45df-ab42-2d4c28a0387d",
+        "model": "claude-sonnet-5-5"
+      },
+      "human_author": "moqing <moqing@tsign.cn>"
+    },
+    "s_d58d4b162ae7dc": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "c4c081c6-aaf3-412b-8f62-de2a98c156fc",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "moqing <moqing@tsign.cn>"
+    }
+  }
+}
