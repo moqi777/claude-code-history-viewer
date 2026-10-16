@@ -236,7 +236,7 @@ pub fn merge_settings(
     let mut added = Vec::new();
     let mut union = |own: &mut Vec<String>, incoming: &[String], track: bool| {
         for item in incoming {
-            let item = convert_path(item, from, to);
+            let item = item.clone();
             if !own.contains(&item) {
                 if track {
                     added.push(item.clone());
@@ -245,16 +245,23 @@ pub fn merge_settings(
             }
         }
     };
-    union(
-        &mut merged.exclude_prefixes,
-        &settings.exclude_prefixes,
-        true,
-    );
-    union(
-        &mut merged.exclude_cwd_prefixes,
-        &settings.exclude_cwd_prefixes,
-        true,
-    );
+    let source_rules: Vec<String> = settings
+        .exclude_prefixes
+        .iter()
+        .map(|p| convert_path(p, from, to))
+        .collect();
+    union(&mut merged.exclude_prefixes, &source_rules, true);
+    // A working directory is matched against what the session file says, which
+    // for imported sessions is the other machine's path: keep the rule as it
+    // was written and add its form for this machine (for sessions collected here).
+    let original: Vec<String> = settings.exclude_cwd_prefixes.clone();
+    union(&mut merged.exclude_cwd_prefixes, &original, true);
+    let converted: Vec<String> = settings
+        .exclude_cwd_prefixes
+        .iter()
+        .map(|p| convert_path(p, from, to))
+        .collect();
+    union(&mut merged.exclude_cwd_prefixes, &converted, false);
     if adopt_all {
         if settings.interval_secs != 0 {
             merged.interval_secs = settings.interval_secs;
@@ -350,42 +357,15 @@ fn prepare_db(staging: &Path, manifest: &Manifest, local: &LocalPaths) -> TResul
                 TransferError::corrupt(format!("two sessions end up with the same path: {e}"))
             })?;
         }
-        let cwds: Vec<String> = {
-            let mut stmt = conn
-                .prepare("SELECT DISTINCT cwd FROM sessions WHERE cwd IS NOT NULL")
-                .map_err(|e| from_text("read sessions", e))?;
-            let rows = stmt
-                .query_map([], |r| r.get(0))
-                .map_err(|e| from_text("read sessions", e))?;
-            rows.collect::<Result<_, _>>()
-                .map_err(|e| from_text("read sessions", e))?
-        };
-        for cwd in cwds {
-            let converted = convert_path(&cwd, device, local);
-            if converted != cwd {
-                tx.execute(
-                    "UPDATE sessions SET cwd = ?2 WHERE cwd = ?1",
-                    rusqlite::params![cwd, converted],
-                )
-                .map_err(|e| from_text("update sessions", e))?;
-            }
-        }
         tx.commit().map_err(|e| from_text("commit", e))?;
     }
 
-    // The index was built under the exporter's exclusion list; say so in
-    // this machine's terms, so a matching list needs no rebuild.
-    if let Some(applied) = db::get_meta(&conn, EXCLUDE_CWD_KEY)? {
-        let converted: Vec<String> = applied
-            .split('\n')
-            .map(|p| convert_path(p, device, local))
-            .collect();
-        db::set_meta(&conn, EXCLUDE_CWD_KEY, &converted.join("\n"))?;
-    }
     db::delete_meta(&conn, "digest_first_round_seen")?;
 
-    // Notes are read from their files, which are the source of truth.
-    notes::rebuild_all(&conn, &DataPaths::new(staging))?;
+    // The note files are the source of truth. Rows that already agree with
+    // them stay as they are (equal scores sort by row order, which a rebuild
+    // would change); anything that does not agree is read again.
+    notes::reconcile(&conn, &DataPaths::new(staging))?;
 
     let check: String = conn
         .query_row("PRAGMA integrity_check", [], |r| r.get(0))
@@ -499,9 +479,18 @@ pub fn prepare(
         manifest.files.len() as u64,
         manifest.totals.uncompressed_bytes,
     );
-    pack::extract(package, &manifest, &staging, cancel, &mut |_, n| {
-        meter.add_bytes(n);
-    })?;
+    pack::extract(
+        package,
+        &manifest,
+        &staging,
+        cancel,
+        &mut |_, n, finished| {
+            meter.add_bytes(n);
+            if finished {
+                meter.file_done();
+            }
+        },
+    )?;
     meter.phase("database", 0, 0);
 
     let local_paths = LocalPaths::from_env(env);
@@ -887,6 +876,13 @@ pub fn commit(
         Mode::Empty => {
             meter.phase("switch", 3, 0);
             apply_empty(env, &staging, &stamp, &mut report)?;
+            // The index was built under the exporter's exclusion list, which the
+            // merged list contains: record this machine's list so a first collection
+            // does not rebuild everything for the sake of different spelling.
+            let applied = KbEnv::from_config(&merged).exclude_cwd_prefixes.join("\n");
+            let conn = db::open(&data.db())?;
+            db::set_meta(&conn, EXCLUDE_CWD_KEY, &applied)?;
+            drop(conn);
             report.checks = count_checks_empty(&manifest, data);
         }
         Mode::Merge => {

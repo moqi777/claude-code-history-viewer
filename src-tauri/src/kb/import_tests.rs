@@ -228,6 +228,19 @@ fn an_exported_library_imports_into_an_empty_one_with_the_same_numbers() {
     };
     assert_eq!(only(&ta), only(&tb));
 
+    // notes keep their row order, so equal scores sort the same way
+    let note_order = |l: &Lib| -> Vec<(String, String)> {
+        let conn = l.conn();
+        let mut stmt = conn
+            .prepare("SELECT session_id, entry_id FROM notes ORDER BY id")
+            .unwrap();
+        stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+            .unwrap()
+            .map(Result::unwrap)
+            .collect()
+    };
+    assert_eq!(note_order(&a), note_order(&b));
+
     // the search answers the same
     assert_eq!(ids(&b, "deadlock"), before);
     assert!(!before.is_empty());
@@ -254,6 +267,55 @@ fn an_exported_library_imports_into_an_empty_one_with_the_same_numbers() {
         .query_row("SELECT source_path FROM files LIMIT 1", [], |r| r.get(0))
         .unwrap();
     assert!(path.starts_with(b.claude.to_str().unwrap()), "{path}");
+}
+
+#[test]
+fn a_codex_title_given_by_the_other_computer_survives_the_collection_here() {
+    const CODEX: &str = "019e7371-a6b9-7a50-9825-b7acd6255914";
+    let root = tempfile::tempdir().unwrap();
+    let a = Lib::new(root.path(), "alice");
+    let file = a.home.join(format!(
+        ".codex/sessions/2026/05/29/rollout-2026-05-29T11-14-48-{CODEX}.jsonl"
+    ));
+    fs::create_dir_all(file.parent().unwrap()).unwrap();
+    fs::write(
+        &file,
+        format!(
+            r#"{{"timestamp":"2026-05-29T11:15:04Z","type":"session_meta","payload":{{"id":"{CODEX}","cwd":"/Users/me/app","originator":"codex-tui","source":"cli"}}}}
+{{"timestamp":"2026-05-29T11:15:06Z","type":"response_item","payload":{{"type":"message","role":"user","content":[{{"type":"input_text","text":"add a retry"}}]}}}}
+"#
+        ),
+    )
+    .unwrap();
+    // the title Codex itself gave the thread
+    fs::write(
+        a.home.join(".codex/session_index.jsonl"),
+        format!(r#"{{"id":"{CODEX}","thread_name":"Retry for the uploader","updated_at":"2026-05-29T12:00:00Z"}}"#),
+    )
+    .unwrap();
+    a.sync();
+    let title = |l: &Lib| -> (String, String) {
+        l.conn()
+            .query_row(
+                "SELECT title, title_source FROM sessions WHERE source='codex'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap()
+    };
+    assert_eq!(
+        title(&a),
+        ("Retry for the uploader".into(), "session_index".into())
+    );
+    let package = root.path().join("a.agentkb");
+    a.export(&package);
+
+    // the other computer's Codex has never heard of this thread
+    let b = Lib::new(root.path(), "bob");
+    b.import(&package).unwrap();
+    b.sync();
+    b.sync();
+    assert_eq!(title(&b), title(&a), "not mistaken for a deleted thread");
 }
 
 #[test]
@@ -377,9 +439,18 @@ fn a_crash_between_the_renames_of_an_empty_import_is_repaired_by_importing_again
 /// Unpack `package`, let `edit` change the database, pack it again claiming
 /// `schema` (the way a file from another version looks).
 fn repack(package: &Path, out: &Path, schema: i64, edit: impl Fn(&Path)) {
+    repack_with(package, out, edit, |m| m.schema_version = schema);
+}
+
+fn repack_with(
+    package: &Path,
+    out: &Path,
+    edit: impl Fn(&Path),
+    edit_manifest: impl Fn(&mut super::pack::Manifest),
+) {
     let manifest = super::pack::read_manifest(package).unwrap();
     let dir = out.with_extension("dir");
-    super::pack::extract(package, &manifest, &dir, &Cancel::new(), &mut |_, _| {}).unwrap();
+    super::pack::extract(package, &manifest, &dir, &Cancel::new(), &mut |_, _, _| {}).unwrap();
     edit(&dir.join("kb.db"));
     let mut writer = super::pack::Writer::new(fs::File::create(out).unwrap()).unwrap();
     for f in &manifest.files {
@@ -396,7 +467,7 @@ fn repack(package: &Path, out: &Path, schema: i64, edit: impl Fn(&Path)) {
             .unwrap();
     }
     let mut next = manifest.clone();
-    next.schema_version = schema;
+    edit_manifest(&mut next);
     writer.finish(next).unwrap();
     fs::remove_dir_all(dir).unwrap();
 }
@@ -619,6 +690,65 @@ fn a_crash_in_the_middle_of_a_merge_gives_the_same_result_as_one_run() {
 }
 
 #[test]
+fn a_tail_that_was_half_appended_when_the_process_died_is_cut_and_written_again() {
+    let root = tempfile::tempdir().unwrap();
+    let a = Lib::new(root.path(), "alice");
+    a.write_session(S1, 6, "alpha");
+    a.sync();
+    let package = root.path().join("a.agentkb");
+    a.export(&package);
+    let full = fs::read(
+        a.env()
+            .data
+            .raw()
+            .join(format!("claude/projects/-Users-me-proj/{S1}.jsonl")),
+    )
+    .unwrap();
+
+    let make = |name: &str| {
+        // bob has the first two exchanges of the session, whose source is gone
+        let b = Lib::new(root.path(), name);
+        b.write_session(S1, 2, "alpha");
+        b.sync();
+        fs::remove_file(b.session_file(S1)).unwrap();
+        b.sync();
+        b
+    };
+    let clean = make("clean");
+    let mirror = |l: &Lib| {
+        l.env()
+            .data
+            .raw()
+            .join(format!("claude/projects/-Users-me-proj/{S1}.jsonl"))
+    };
+    clean.import(&package).unwrap();
+    assert_eq!(fs::read(mirror(&clean)).unwrap(), full);
+
+    // the process died after writing half of the new bytes and before the
+    // database moved: junk past the cursor
+    let b = make("crashed");
+    let start = fs::read(mirror(&b)).unwrap();
+    assert!(start.len() < full.len() && full.starts_with(&start));
+    let half = start.len() + (full.len() - start.len()) / 2;
+    let mut torn = full[..half].to_vec();
+    torn.extend_from_slice(b"garbage that is not part of any session");
+    fs::write(mirror(&b), &torn).unwrap();
+
+    b.import(&package).unwrap();
+    b.sync();
+    assert_eq!(
+        fs::read(mirror(&b)).unwrap(),
+        full,
+        "same bytes as an import that never failed"
+    );
+    assert_eq!(
+        b.count("SELECT message_count FROM sessions"),
+        clean.count("SELECT message_count FROM sessions")
+    );
+    assert_eq!(ids(&b, "alpha"), ids(&clean, "alpha"));
+}
+
+#[test]
 fn settings_travel_but_the_machine_specific_ones_do_not() {
     let root = tempfile::tempdir().unwrap();
     let a = library_a(root.path());
@@ -659,9 +789,13 @@ fn settings_travel_but_the_machine_specific_ones_do_not() {
         saved.exclude_prefixes,
         vec![format!("{}/old", b.claude.display())]
     );
+    // as written (matches the sessions that came with the file) and for this home
     assert_eq!(
         saved.exclude_cwd_prefixes,
-        vec![format!("{}/secret", b.home.display())]
+        vec![
+            format!("{}/secret", a.home.display()),
+            format!("{}/secret", b.home.display())
+        ]
     );
 
     // a machine that is set up already: exclusions are merged, the rest is kept
@@ -675,7 +809,7 @@ fn settings_travel_but_the_machine_specific_ones_do_not() {
     let saved = KbConfig::load_from(&c.config_file).unwrap();
     assert_eq!(saved.interval_secs, 900);
     assert!(saved.digest.enabled, "the digest switch is left as it was");
-    assert_eq!(saved.exclude_cwd_prefixes.len(), 2);
+    assert_eq!(saved.exclude_cwd_prefixes.len(), 3);
     assert!(report.backup_config.is_some());
     assert!(Path::new(report.backup_config.as_ref().unwrap()).is_file());
 }
@@ -835,5 +969,34 @@ fn paths_are_converted_for_a_different_user_and_left_alone_otherwise() {
     assert_eq!(
         convert_path("/Users/a/.claude/projects/p", &from, &moved),
         "/data/claude/projects/p"
+    );
+}
+
+/// Evidence helper, not a regression test: rewrite who made a real export so it
+/// reads as if it came from a machine whose user is `AGENTKB_AS_USER` (e.g.
+/// `/Users/mo7`). Run by hand:
+/// `AGENTKB_REPACK_FROM=a.agentkb AGENTKB_REPACK_TO=b.agentkb AGENTKB_AS_HOME=/Users/mo7 \
+///  cargo test --release --lib repack_as_another_machine -- --ignored`.
+#[test]
+#[ignore = "manual evidence helper"]
+fn repack_as_another_machine() {
+    let (Ok(from), Ok(to), Ok(home)) = (
+        std::env::var("AGENTKB_REPACK_FROM"),
+        std::env::var("AGENTKB_REPACK_TO"),
+        std::env::var("AGENTKB_AS_HOME"),
+    ) else {
+        return;
+    };
+    repack_with(
+        Path::new(&from),
+        Path::new(&to),
+        |_| {},
+        |m| {
+            m.source_device.home.clone_from(&home);
+            m.source_device.data_dir = format!("{home}/AgentKB");
+            m.source_device.claude_root = Some(format!("{home}/.claude"));
+            m.source_device.codex_root = Some(format!("{home}/.codex"));
+            m.source_device.name = "Other-Mac".into();
+        },
     );
 }

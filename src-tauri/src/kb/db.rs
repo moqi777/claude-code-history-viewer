@@ -784,11 +784,15 @@ pub struct CodexTitleRow {
     pub fallback_title: Option<String>,
 }
 
+/// Codex sessions collected on this machine. A session imported from another
+/// device keeps the title its own Codex gave it: this machine's Codex has never
+/// heard of it, which must not read as "the thread was deleted".
 pub fn load_codex_titles(conn: &Connection) -> Result<Vec<CodexTitleRow>, String> {
     let mut stmt = conn
         .prepare(
-            "SELECT id, session_id, title, title_source, fallback_title FROM sessions \
-             WHERE source='codex'",
+            "SELECT s.id, s.session_id, s.title, s.title_source, s.fallback_title \
+             FROM sessions s JOIN files f ON f.id = s.file_id \
+             WHERE s.source='codex' AND f.origin IS NULL",
         )
         .map_err(|e| err("prepare titles", e))?;
     let rows = stmt

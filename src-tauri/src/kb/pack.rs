@@ -519,7 +519,7 @@ pub fn extract(
     manifest: &Manifest,
     dest: &Path,
     cancel: &Cancel,
-    on_file: &mut dyn FnMut(&FileEntry, u64),
+    on_file: &mut dyn FnMut(&FileEntry, u64, bool),
 ) -> TResult<()> {
     let mut file =
         File::open(path).map_err(|e| io_err(&format!("cannot open {}", path.display()), e))?;
@@ -599,7 +599,10 @@ pub fn extract(
             out.write_all(&buf[..n])
                 .map_err(|e| io_err(&format!("cannot write {}", target.display()), e))?;
             left -= n as u64;
-            on_file(expected, n as u64);
+            on_file(expected, n as u64, left == 0);
+        }
+        if size == 0 {
+            on_file(expected, 0, true);
         }
         let file = out
             .into_inner()
@@ -689,7 +692,7 @@ mod tests {
         assert_eq!(m.totals.uncompressed_bytes, 18);
         let dest = dir.path().join("out");
         let mut seen = 0;
-        extract(&path, &m, &dest, &Cancel::new(), &mut |_, n| seen += n).unwrap();
+        extract(&path, &m, &dest, &Cancel::new(), &mut |_, n, _| seen += n).unwrap();
         assert_eq!(seen, 18);
         assert_eq!(std::fs::read(dest.join("kb.db")).unwrap(), b"hello");
         assert_eq!(
@@ -711,7 +714,7 @@ mod tests {
             std::fs::write(&broken, &bad).unwrap();
             let dest = dir.path().join(format!("o{at}"));
             let outcome = read_manifest(&broken)
-                .and_then(|m| extract(&broken, &m, &dest, &Cancel::new(), &mut |_, _| {}));
+                .and_then(|m| extract(&broken, &m, &dest, &Cancel::new(), &mut |_, _, _| {}));
             assert!(
                 outcome.is_err(),
                 "byte {at} changed but the file was accepted"

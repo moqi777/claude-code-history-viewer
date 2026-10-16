@@ -535,6 +535,16 @@ fn transfer_progress() -> super::progress::ProgressSink {
     })
 }
 
+/// `~` expanded and a relative path taken from the current directory.
+fn user_path(text: &str) -> std::path::PathBuf {
+    let path = super::migrate_dir::expand(text);
+    if path.is_absolute() {
+        path
+    } else {
+        std::env::current_dir().map_or(path.clone(), |cwd| cwd.join(path))
+    }
+}
+
 fn transfer_failure(e: &super::transfer::TransferError) -> i32 {
     eprintln!("{e}");
     print_json(&serde_json::json!({ "error": e.code, "message": e.message }));
@@ -554,7 +564,7 @@ fn run_export_command(args: &[String]) -> i32 {
         Err(code) => return code,
     };
     let env = KbEnv::from_config(&config);
-    let dest = super::migrate_dir::expand(dest);
+    let dest = user_path(dest);
     match super::export::export(
         &env,
         &config,
@@ -600,7 +610,7 @@ fn run_import_command(args: &[String]) -> i32 {
         Ok(config) => config,
         Err(code) => return code,
     };
-    let package = super::migrate_dir::expand(package);
+    let package = user_path(package);
     let env = KbEnv::from_config(&config);
     if flags.switches.contains("inspect") {
         return match super::import::inspect(&env, &package) {
@@ -641,6 +651,12 @@ fn run_import_command(args: &[String]) -> i32 {
         Ok(report) => report,
         Err(e) => return transfer_failure(&e),
     };
+    if report.config_written && !opts.config_exists {
+        eprintln!(
+            "settings saved; the scheduled collection is not installed yet: \
+             run --kb-schedule install (or open the app)"
+        );
+    }
     // Recognise sources that exist here, apply this machine's exclusions and
     // bring an out-of-date index up to date.
     let synced = if flags.switches.contains("no-sync") {
