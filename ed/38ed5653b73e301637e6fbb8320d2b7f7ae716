@@ -1,0 +1,27 @@
+docs/agent-kb/p5-evidence/run_all.sh
+  s_cca7c29607588b::t_62179bc0c821e8 75-82
+  s_cca7c29607588b::t_c238ecea8b0dfe 1-32,38-66,69-74,83-144
+  s_cca7c29607588b::t_3bef7bac011ba9 33-37,67-68
+docs/agent-kb/p5-evidence/compare.py
+  s_cca7c29607588b::t_9b61a07cdb3352 11-14,46
+  s_cca7c29607588b::t_f59f3aa563a228 49
+  s_cca7c29607588b::t_4950b0a1b09294 4-10,29-31,48
+docs/agent-kb/P5-report.md
+  s_cca7c29607588b::t_93251287e5afa0 1-110
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.11",
+  "base_commit_sha": "ed38ed5653b73e301637e6fbb8320d2b7f7ae716",
+  "prompts": {},
+  "sessions": {
+    "s_cca7c29607588b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ef228e77-8d37-45df-ab42-2d4c28a0387d",
+        "model": "claude-sonnet-5-5"
+      },
+      "human_author": "moqing <moqing@tsign.cn>"
+    }
+  }
+}
