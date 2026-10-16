@@ -126,7 +126,7 @@ export const KbNotes = () => {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-3">
-      <div className="flex flex-wrap items-center gap-2">
+      <div className="sticky top-[2.35rem] z-10 -mx-4 flex flex-wrap items-center gap-2 bg-background px-4 py-1 md:-mx-6 md:px-6">
         <div className="relative min-w-[12rem] flex-1">
           <Search
             className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground"
@@ -165,7 +165,7 @@ export const KbNotes = () => {
         </label>
       </div>
 
-      <div className="min-h-[12rem] flex-1 overflow-y-auto rounded-md border">
+      <div className="rounded-md border">
         {state.status === "loading" && (
           <p role="status" className="flex items-center justify-center gap-2 p-6 text-sm text-muted-foreground">
             <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />

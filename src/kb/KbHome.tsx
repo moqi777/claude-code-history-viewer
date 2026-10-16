@@ -1,7 +1,17 @@
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
-import { AlertTriangle, DatabaseBackup, HardDriveDownload, Loader2, RefreshCw, Settings, X } from "lucide-react";
+import {
+  AlertTriangle,
+  ChevronRight,
+  DatabaseBackup,
+  HardDriveDownload,
+  Loader2,
+  RefreshCw,
+  Settings,
+  SlidersHorizontal,
+  X,
+} from "lucide-react";
 import { Badge, Button } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import { formatTime } from "@/utils/time";
@@ -9,6 +19,7 @@ import { formatBytes } from "./format";
 import { describeBackup, scheduleHealth } from "./homeStatus";
 import { VerdictLine } from "./fields";
 import { openKbSession } from "./openSession";
+import { digestSummary, formatShortTime } from "./digestFormat";
 import { KbDigestCard } from "./KbDigestCard";
 import { KbNotes } from "./KbNotes";
 import { SearchBox, SearchResults } from "./KbSearch";
@@ -154,19 +165,21 @@ export const KbHome = () => {
   else if (busy) backupTitle = t("kb.action.backupBusy");
 
   return (
-    <div className="flex h-full flex-col gap-4 overflow-y-auto p-4 md:p-6" aria-busy={isLoading}>
-      <header className="flex flex-wrap items-start gap-3">
+    <div className="flex h-full flex-col gap-3 overflow-y-auto px-4 pb-4 md:px-6 md:pb-6" aria-busy={isLoading}>
+      <header className="flex flex-wrap items-start gap-3 pt-4 md:pt-6">
         <div className="min-w-0 flex-1">
-          <h2 className="flex items-center gap-2 text-lg font-semibold">
-            <DatabaseBackup className="h-5 w-5" aria-hidden="true" />
-            {t("kb.title")}
+          <h2 className="flex flex-wrap items-baseline gap-x-3 text-lg font-semibold">
+            <span className="flex items-center gap-2">
+              <DatabaseBackup className="h-5 w-5 self-center" aria-hidden="true" />
+              {t("kb.title")}
+            </span>
+            {overview != null && (
+              <span className="text-xs font-normal text-muted-foreground">
+                {t("kb.version", { version: overview.agentkb_version, base: overview.base_version })}
+              </span>
+            )}
           </h2>
           <p className="text-sm text-muted-foreground [text-wrap:balance]">{t("kb.description")}</p>
-          {overview != null && (
-            <p className="text-xs text-muted-foreground">
-              {t("kb.version", { version: overview.agentkb_version, base: overview.base_version })}
-            </p>
-          )}
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <Button onClick={() => void handleSync()} disabled={busy} title={syncTitle}>
@@ -236,15 +249,15 @@ export const KbHome = () => {
       )}
 
       {overview != null && (
-        <StatusSection
+        <Summary
           overview={overview}
           onRepair={() => void handleRepair()}
           repairing={isRepairing}
         />
       )}
 
-      <KbDigestCard />
-
+      {/* Stays at the top while the list scrolls under it. */}
+      <div className="sticky top-0 z-10 -mx-4 space-y-2 bg-background px-4 pt-1 md:-mx-6 md:px-6">
       <div role="tablist" aria-label={t("kb.tabs.label")} className="flex gap-1 border-b">
         {(["sessions", "notes"] as const).map((tab) => (
           <button
@@ -265,15 +278,19 @@ export const KbHome = () => {
         ))}
       </div>
 
+      {homeTab === "sessions" && (
+        <div className="space-y-2 pb-2">
+          <SearchBox />
+          <Filters filters={filters} facets={facets} />
+        </div>
+      )}
+      </div>
+
       {homeTab === "notes" ? (
         <KbNotes />
       ) : (
         <>
-      <SearchBox />
-
-      <Filters filters={filters} facets={facets} />
-
-      <div className="min-h-[12rem] flex-1 overflow-y-auto rounded-md border" aria-busy={isLoading}>
+      <div className="rounded-md border" aria-busy={isLoading}>
         {searching ? (
           <SearchResults />
         ) : sessions.length === 0 ? (
@@ -435,6 +452,99 @@ const Banners = () => {
   );
 };
 
+const SUMMARY_KEY = "agentkb.home.summaryOpen";
+
+const readSummaryOpen = (): boolean => {
+  try {
+    return window.localStorage.getItem(SUMMARY_KEY) === "1";
+  } catch {
+    return false;
+  }
+};
+
+/**
+ * The collection status and the daily digest as one line; the details open
+ * on a click and the choice is remembered. Anything that needs attention
+ * (a dead schedule, a paused or failing digest) is marked in the line itself.
+ */
+const Summary = ({
+  overview,
+  onRepair,
+  repairing,
+}: {
+  overview: KbOverview;
+  onRepair: () => void;
+  repairing: boolean;
+}) => {
+  const { t } = useTranslation();
+  const digest = useKbStore((s) => s.digest);
+  const configValid = useKbStore((s) => s.configState?.state === "valid");
+  const [open, setOpen] = useState(readSummaryOpen);
+
+  const toggle = () => {
+    const next = !open;
+    setOpen(next);
+    try {
+      window.localStorage.setItem(SUMMARY_KEY, next ? "1" : "0");
+    } catch {
+      /* the choice is only not remembered */
+    }
+  };
+
+  const { last_run: lastRun } = overview;
+  let lastRunText = t("kb.summary.lastRun.never");
+  if (lastRun != null) {
+    const time = formatShortTime(lastRun.finished_at ?? lastRun.started_at);
+    const problems = lastRun.summary?.errors.length ?? 0;
+    lastRunText =
+      lastRun.finished_at == null
+        ? t("kb.summary.lastRun.running", { time })
+        : problems > 0
+          ? t("kb.summary.lastRun.problems", { time, count: problems })
+          : t("kb.summary.lastRun.ok", { time });
+  }
+  const scheduleDead = scheduleHealth(overview) === "dead";
+  const digestLine = configValid && digest != null ? digestSummary(digest, t) : null;
+  const attention = scheduleDead || digestLine?.attention === true;
+
+  return (
+    <section aria-label={t("kb.summary.label")} className="rounded-md border text-sm">
+      <button
+        type="button"
+        aria-expanded={open}
+        aria-controls="kb-summary-details"
+        onClick={toggle}
+        className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-muted/50"
+      >
+        <ChevronRight
+          className={cn("h-4 w-4 shrink-0 transition-transform", open && "rotate-90")}
+          aria-hidden="true"
+        />
+        <span className="min-w-0 flex-1 truncate">
+          {lastRunText}
+          {scheduleDead && <> · <span className="text-destructive">{t("kb.summary.scheduleDead")}</span></>}
+          {digestLine != null && (
+            <>
+              {" · "}
+              <span className={cn(digestLine.attention && "text-warning")}>{digestLine.text}</span>
+            </>
+          )}
+        </span>
+        {attention && <AlertTriangle className="h-4 w-4 shrink-0 text-warning" aria-hidden="true" />}
+        <span className="shrink-0 text-xs text-muted-foreground">
+          {open ? t("kb.summary.hide") : t("kb.summary.show")}
+        </span>
+      </button>
+      {open && (
+        <div id="kb-summary-details" className="space-y-3 border-t p-3">
+          <StatusSection overview={overview} onRepair={onRepair} repairing={repairing} />
+          <KbDigestCard />
+        </div>
+      )}
+    </section>
+  );
+};
+
 const StatusSection = ({
   overview,
   onRepair,
@@ -535,97 +645,127 @@ const Filters = ({
   facets: { clients: string[]; projects: [string, string][] };
 }) => {
   const { t } = useTranslation();
+  const [more, setMore] = useState(false);
   const set = (patch: Partial<KbFilters>) => void useKbStore.getState().setFilters(patch);
   const selectClass = "h-8 rounded-md border bg-background px-2 text-sm";
   const projects = [...new Set(facets.projects.map(([, name]) => name))];
   const changed = JSON.stringify(filters) !== JSON.stringify(defaultFilters);
+  // What the "more" row holds, counted so a hidden filter is never a surprise.
+  const hiddenActive = [
+    filters.client != null,
+    filters.project != null,
+    filters.onlyDeleted,
+    filters.includeSubagents,
+    filters.includeEmpty,
+  ].filter(Boolean).length;
 
   return (
-    <div className="flex flex-wrap items-center gap-2" role="group" aria-label={t("kb.sessions.filterLabel")}>
-      <label className="flex items-center gap-1 text-sm text-muted-foreground">
-        {t("kb.filters.source")}
-        <select
-          className={selectClass}
-          value={filters.source}
-          onChange={(e) => set({ source: e.target.value as KbFilters["source"] })}
+    <div className="space-y-2" role="group" aria-label={t("kb.sessions.filterLabel")}>
+      <div className="flex flex-wrap items-center gap-2">
+        <label className="flex items-center gap-1 text-sm text-muted-foreground">
+          {t("kb.filters.source")}
+          <select
+            className={selectClass}
+            value={filters.source}
+            onChange={(e) => set({ source: e.target.value as KbFilters["source"] })}
+          >
+            <option value="all">{t("kb.sessions.filter.all")}</option>
+            <option value="claude">{t("kb.sessions.filter.claude")}</option>
+            <option value="codex">{t("kb.sessions.filter.codex")}</option>
+          </select>
+        </label>
+        <label className="flex items-center gap-1 text-sm text-muted-foreground">
+          {t("kb.filters.range")}
+          <select
+            className={selectClass}
+            value={filters.range}
+            onChange={(e) => set({ range: e.target.value as KbTimeRange })}
+          >
+            {RANGES.map((r) => (
+              <option key={r} value={r}>
+                {t(`kb.filters.range.${r}`)}
+              </option>
+            ))}
+          </select>
+        </label>
+        <Button
+          size="sm"
+          variant="outline"
+          aria-expanded={more}
+          onClick={() => setMore(!more)}
+          className="h-8"
         >
-          <option value="all">{t("kb.sessions.filter.all")}</option>
-          <option value="claude">{t("kb.sessions.filter.claude")}</option>
-          <option value="codex">{t("kb.sessions.filter.codex")}</option>
-        </select>
-      </label>
-      <label className="flex items-center gap-1 text-sm text-muted-foreground">
-        {t("kb.filters.client")}
-        <select
-          className={selectClass}
-          value={filters.client ?? ""}
-          onChange={(e) => set({ client: e.target.value === "" ? null : e.target.value })}
-        >
-          <option value="">{t("kb.sessions.filter.all")}</option>
-          {facets.clients.map((c) => (
-            <option key={c} value={c}>
-              {c}
-            </option>
-          ))}
-        </select>
-      </label>
-      <label className="flex items-center gap-1 text-sm text-muted-foreground">
-        {t("kb.filters.project")}
-        <select
-          className={cn(selectClass, "max-w-[12rem]")}
-          value={filters.project ?? ""}
-          onChange={(e) => set({ project: e.target.value === "" ? null : e.target.value })}
-        >
-          <option value="">{t("kb.sessions.filter.all")}</option>
-          {projects.map((p) => (
-            <option key={p} value={p}>
-              {p}
-            </option>
-          ))}
-        </select>
-      </label>
-      <label className="flex items-center gap-1 text-sm text-muted-foreground">
-        {t("kb.filters.range")}
-        <select
-          className={selectClass}
-          value={filters.range}
-          onChange={(e) => set({ range: e.target.value as KbTimeRange })}
-        >
-          {RANGES.map((r) => (
-            <option key={r} value={r}>
-              {t(`kb.filters.range.${r}`)}
-            </option>
-          ))}
-        </select>
-      </label>
-      <label className="flex items-center gap-2 text-sm text-muted-foreground">
-        <input
-          type="checkbox"
-          checked={filters.onlyDeleted}
-          onChange={(e) => set({ onlyDeleted: e.target.checked })}
-        />
-        {t("kb.filters.onlyDeleted")}
-      </label>
-      <label className="flex items-center gap-2 text-sm text-muted-foreground">
-        <input
-          type="checkbox"
-          checked={filters.includeSubagents}
-          onChange={(e) => set({ includeSubagents: e.target.checked })}
-        />
-        {t("kb.sessions.includeSubagents")}
-      </label>
-      <label className="flex items-center gap-2 text-sm text-muted-foreground">
-        <input
-          type="checkbox"
-          checked={filters.includeEmpty}
-          onChange={(e) => set({ includeEmpty: e.target.checked })}
-        />
-        {t("kb.sessions.includeEmpty")}
-      </label>
-      {changed && (
-        <Button size="sm" variant="ghost" onClick={() => set({ ...defaultFilters })}>
-          {t("kb.filters.reset")}
+          <SlidersHorizontal className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />
+          {t("kb.filters.more")}
+          {hiddenActive > 0 && (
+            <Badge variant="secondary" className="ml-1.5">
+              {hiddenActive}
+            </Badge>
+          )}
         </Button>
+        {changed && (
+          <Button size="sm" variant="ghost" onClick={() => set({ ...defaultFilters })}>
+            {t("kb.filters.reset")}
+          </Button>
+        )}
+      </div>
+      {more && (
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-md border p-2">
+          <label className="flex items-center gap-1 text-sm text-muted-foreground">
+            {t("kb.filters.client")}
+            <select
+              className={selectClass}
+              value={filters.client ?? ""}
+              onChange={(e) => set({ client: e.target.value === "" ? null : e.target.value })}
+            >
+              <option value="">{t("kb.sessions.filter.all")}</option>
+              {facets.clients.map((c) => (
+                <option key={c} value={c}>
+                  {c}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="flex items-center gap-1 text-sm text-muted-foreground">
+            {t("kb.filters.project")}
+            <select
+              className={cn(selectClass, "max-w-[12rem]")}
+              value={filters.project ?? ""}
+              onChange={(e) => set({ project: e.target.value === "" ? null : e.target.value })}
+            >
+              <option value="">{t("kb.sessions.filter.all")}</option>
+              {projects.map((p) => (
+                <option key={p} value={p}>
+                  {p}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="flex items-center gap-2 text-sm text-muted-foreground">
+            <input
+              type="checkbox"
+              checked={filters.onlyDeleted}
+              onChange={(e) => set({ onlyDeleted: e.target.checked })}
+            />
+            {t("kb.filters.onlyDeleted")}
+          </label>
+          <label className="flex items-center gap-2 text-sm text-muted-foreground">
+            <input
+              type="checkbox"
+              checked={filters.includeSubagents}
+              onChange={(e) => set({ includeSubagents: e.target.checked })}
+            />
+            {t("kb.sessions.includeSubagents")}
+          </label>
+          <label className="flex items-center gap-2 text-sm text-muted-foreground">
+            <input
+              type="checkbox"
+              checked={filters.includeEmpty}
+              onChange={(e) => set({ includeEmpty: e.target.checked })}
+            />
+            {t("kb.sessions.includeEmpty")}
+          </label>
+        </div>
       )}
     </div>
   );

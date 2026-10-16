@@ -1,5 +1,5 @@
 import type { TFunction } from "i18next";
-import type { KbDigestPaused, KbDigestTestReport } from "./types";
+import type { KbDigestPaused, KbDigestStatus, KbDigestTestReport } from "./types";
 import type { Verdict } from "./messages";
 
 /**
@@ -43,5 +43,45 @@ export const describeDigestTest = (report: KbDigestTestReport, t: TFunction): Ve
   return {
     tone: "error",
     text: t(`kb.digest.test.${kind}`, { message: report.message ?? "" }),
+  };
+};
+
+/** "10-17 06:40" in the reader's own order and language; the year is left out. */
+export const formatShortTime = (iso: string): string => {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return iso;
+  return date.toLocaleString(undefined, {
+    month: "numeric",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+};
+
+/** The home page's one-line digest summary, and whether it asks for attention. */
+export const digestSummary = (
+  digest: KbDigestStatus,
+  t: TFunction,
+): { text: string; attention: boolean } => {
+  const next = digest.next_run_at != null ? formatShortTime(digest.next_run_at) : null;
+  if (digest.running != null) {
+    return {
+      text: t("kb.summary.digest.running", {
+        done: digest.running.finished,
+        total: digest.running.total,
+      }),
+      attention: false,
+    };
+  }
+  if (!digest.enabled) return { text: t("kb.summary.digest.off"), attention: false };
+  if (digest.paused != null) return { text: t("kb.summary.digest.paused"), attention: true };
+  if (digest.failures.length > 0) {
+    return { text: t("kb.summary.digest.failures", { count: digest.failures.length }), attention: true };
+  }
+  const last = digest.last_round;
+  const state = last == null ? "never" : last.state === "done" ? "done" : "open";
+  return {
+    text: t(next != null ? `kb.summary.digest.${state}Next` : `kb.summary.digest.${state}`, { time: next }),
+    attention: false,
   };
 };

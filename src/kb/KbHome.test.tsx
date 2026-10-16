@@ -38,13 +38,16 @@ const mirrorOverview = (patch = {}) =>
     ...patch,
   });
 
+/** The home page with the status details open (they start folded into one line). */
 const show = async () => {
   render(<KbHome />);
+  fireEvent.click(await screen.findByRole("button", { name: /kb\.summary\.lastRun/ }));
   await screen.findByText("kb.status.lastRun");
 };
 
 describe("KbHome", () => {
   beforeEach(() => {
+    window.localStorage.clear();
     useKbStore.setState(useKbStore.getInitialState(), true);
     for (const group of [mocks.api, mocks.toast]) {
       for (const fn of Object.values(group)) fn.mockReset();
@@ -117,6 +120,7 @@ describe("KbHome", () => {
 
   it("filters go through the backend", async () => {
     await show();
+    fireEvent.click(screen.getByRole("button", { name: /kb\.filters\.more/ }));
     fireEvent.click(screen.getByLabelText("kb.filters.onlyDeleted"));
     await waitFor(() =>
       expect(mocks.api.listSessions).toHaveBeenLastCalledWith({
@@ -275,5 +279,81 @@ describe("KbHome", () => {
 
     fireEvent.click(screen.getByRole("tab", { name: "kb.tabs.sessions" }));
     expect(await screen.findByText("Fix the login bug")).toBeTruthy();
+  });
+
+  describe("the folded status line", () => {
+    const line = () => screen.findByRole("button", { name: /kb\.summary\.lastRun/ });
+
+    it("starts as one line that says what ran last and what the digest is doing", async () => {
+      mocks.api.digestStatus.mockResolvedValue(digestStatusFixture());
+      render(<KbHome />);
+      const button = await line();
+      await waitFor(() => expect(button.textContent).toContain("kb.summary.digest.doneNext"));
+      expect(button.getAttribute("aria-expanded")).toBe("false");
+      expect(screen.queryByText("kb.status.lastRun")).toBeNull();
+      expect(screen.queryByRole("region", { name: "kb.digest.title" })).toBeNull();
+    });
+
+    it("opens the details on a click and remembers the choice", async () => {
+      mocks.api.digestStatus.mockResolvedValue(digestStatusFixture());
+      const first = render(<KbHome />);
+      fireEvent.click(await line());
+      expect(await screen.findByText("kb.status.lastRun")).toBeTruthy();
+      expect(await screen.findByRole("region", { name: "kb.digest.title" })).toBeTruthy();
+      expect(window.localStorage.getItem("agentkb.home.summaryOpen")).toBe("1");
+
+      first.unmount();
+      render(<KbHome />);
+      expect((await line()).getAttribute("aria-expanded")).toBe("true");
+
+      fireEvent.click(await line());
+      expect(screen.queryByText("kb.status.lastRun")).toBeNull();
+      expect(window.localStorage.getItem("agentkb.home.summaryOpen")).toBe("0");
+    });
+
+    it("marks a paused or failing digest in the line itself", async () => {
+      mocks.api.digestStatus.mockResolvedValue(
+        digestStatusFixture({ paused: { reason: "quota", until: "2026-10-16T10:00:00Z", message: null } }),
+      );
+      render(<KbHome />);
+      const button = await line();
+      await waitFor(() => expect(button.textContent).toContain("kb.summary.digest.paused"));
+      expect(button.querySelector("svg.text-warning")).not.toBeNull();
+    });
+
+    it("does not nest a scrolling box inside the page for the list", async () => {
+      render(<KbHome />);
+      const row = await screen.findByText("Fix the login bug");
+      for (let el = row.parentElement; el != null; el = el.parentElement) {
+        expect(el.className).not.toMatch(/overflow-y-auto.*rounded-md border|rounded-md border.*overflow-y-auto/);
+      }
+    });
+  });
+
+  describe("compact filters", () => {
+    it("keeps source and time in the row and puts the rest behind 'more filters'", async () => {
+      render(<KbHome />);
+      await screen.findByText("Fix the login bug");
+      expect(screen.getByLabelText("kb.filters.source")).toBeTruthy();
+      expect(screen.getByLabelText("kb.filters.range")).toBeTruthy();
+      expect(screen.queryByLabelText("kb.filters.client")).toBeNull();
+      expect(screen.queryByLabelText("kb.sessions.includeSubagents")).toBeNull();
+
+      fireEvent.click(screen.getByRole("button", { name: /kb\.filters\.more/ }));
+      expect(screen.getByLabelText("kb.filters.client")).toBeTruthy();
+      expect(screen.getByLabelText("kb.filters.project")).toBeTruthy();
+      fireEvent.click(screen.getByLabelText("kb.sessions.includeSubagents"));
+      await waitFor(() =>
+        expect(mocks.api.listSessions.mock.calls.at(-1)?.[0]).toMatchObject({ include_subagents: true }),
+      );
+    });
+
+    it("counts the filters hidden behind the button so they are never a surprise", async () => {
+      render(<KbHome />);
+      await screen.findByText("Fix the login bug");
+      act(() => void useKbStore.getState().setFilters({ includeEmpty: true, onlyDeleted: true }));
+      const more = await screen.findByRole("button", { name: /kb\.filters\.more/ });
+      await waitFor(() => expect(more.textContent).toContain("2"));
+    });
   });
 });
