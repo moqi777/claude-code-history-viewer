@@ -1,0 +1,9 @@
+docs/agent-kb/P5-acceptance.md
+  ai_agent 33-38
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.11",
+  "base_commit_sha": "3f5c4a228879b9c31d0fcef611820b04b242c45e",
+  "prompts": {}
+}
