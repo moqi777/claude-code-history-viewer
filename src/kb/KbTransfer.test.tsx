@@ -113,7 +113,7 @@ describe("TransferSection export", () => {
     expect(await screen.findByText(/kb\.transfer\.export\.done/)).toBeTruthy();
     const text = screen.getByText(/kb\.transfer\.export\.done/).textContent ?? "";
     expect(text).toContain('"sessions":313');
-    expect(text).toContain("1.96 GB");
+    expect(text).toContain("2.10 GB");
     expect(text).toContain('"seconds":8');
     expect(mocks.api.exportStart).toHaveBeenCalledWith("/Volumes/Disk/AgentKB.agentkb", true);
     expect(screen.getByText("/Volumes/Disk/AgentKB.agentkb")).toBeTruthy();

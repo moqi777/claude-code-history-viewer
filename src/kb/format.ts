@@ -1,8 +1,9 @@
+/** Decimal units (1 GB = 1000^3 bytes), the same as the command line prints. */
 export const formatBytes = (bytes: number): string => {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  if (bytes < 1024 ** 3) return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
-  return `${(bytes / 1024 ** 3).toFixed(2)} GB`;
+  if (bytes < 1000) return `${bytes} B`;
+  if (bytes < 1000 ** 2) return `${(bytes / 1000).toFixed(1)} KB`;
+  if (bytes < 1000 ** 3) return `${(bytes / 1000 ** 2).toFixed(1)} MB`;
+  return `${(bytes / 1000 ** 3).toFixed(2)} GB`;
 };
 
 /** Whole days since `iso`, or `null` when it is missing or unparsable. */
