@@ -1,0 +1,20 @@
+docs/agent-kb/P6-eval.md
+  ai_agent 22-23,27,29
+  s_cca7c29607588b::t_87d4432580dbba 1-21,24-26,28,30-45
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.11",
+  "base_commit_sha": "188a77b8fb3f28d258134ab72288798a2bedebeb",
+  "prompts": {},
+  "sessions": {
+    "s_cca7c29607588b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ef228e77-8d37-45df-ab42-2d4c28a0387d",
+        "model": "unknown"
+      },
+      "human_author": "moqing <moqing@tsign.cn>"
+    }
+  }
+}
