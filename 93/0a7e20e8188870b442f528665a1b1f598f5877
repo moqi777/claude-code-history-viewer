@@ -1,0 +1,38 @@
+src-tauri/src/kb/import_tests.rs
+  s_cca7c29607588b::t_9f0ef0ef49b885 442-450,470,974-989
+  s_cca7c29607588b::t_e03696c9b9ed3a 792,795-798,812
+  s_cca7c29607588b::t_1e988df880ef6f 693-699,707-738,744-750
+  s_cca7c29607588b::t_2970cd3795864d 306-309,700-706,739-743,990-1001
+  s_cca7c29607588b::t_167c7d03d85d48 273-305,310-320
+  s_cca7c29607588b::t_4eeb1fbfa1b779 453
+  s_cca7c29607588b::t_5617411b0b1a7c 231-243
+src-tauri/src/kb/pack.rs
+  s_cca7c29607588b::t_4eeb1fbfa1b779 522,602-605,695,717
+src-tauri/src/kb/import.rs
+  s_cca7c29607588b::t_743054469593bd 365-368
+  s_cca7c29607588b::t_ea5ebc90a0cd1d 254-264
+  s_cca7c29607588b::t_2970cd3795864d 248-253,482-493
+  s_cca7c29607588b::t_5d9e60e2e0b8c5 239,879-885
+src-tauri/src/kb/cli.rs
+  s_cca7c29607588b::t_8626ac6f39233d 538-547,567,613
+  s_cca7c29607588b::t_743054469593bd 654-659
+src-tauri/src/kb/db.rs
+  s_cca7c29607588b::t_5cd404e0e0a98c 787-789,793-794
+  s_cca7c29607588b::t_c86fd0b47ac05a 795
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.11",
+  "base_commit_sha": "930a7e20e8188870b442f528665a1b1f598f5877",
+  "prompts": {},
+  "sessions": {
+    "s_cca7c29607588b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ef228e77-8d37-45df-ab42-2d4c28a0387d",
+        "model": "claude-sonnet-5-5"
+      },
+      "human_author": "moqing <moqing@tsign.cn>"
+    }
+  }
+}
