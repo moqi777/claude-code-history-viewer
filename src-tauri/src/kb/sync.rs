@@ -1762,8 +1762,15 @@ mod tests {
         crate::kb::notes::write(&sb.env.data, &file).unwrap();
         sb.sync();
         let response = search_notes_with(&sb, "IOSurface", None);
-        assert!(response.results.is_empty());
         assert_eq!(response.notes.len(), 1);
+        // The session of the matching note is listed although none of its
+        // messages matched: no message hits, but the note flag and the resume.
+        assert_eq!(response.results.len(), 1);
+        let only = &response.results[0];
+        assert_eq!(only.session.session_id, CLAUDE_ID);
+        assert!(only.has_note && only.hits.is_empty() && only.hit_messages == 0);
+        assert!(only.resume.available);
+        assert_eq!(response.matched_sessions, 1);
         assert!(
             response.hint.is_none(),
             "no 'no match' hint when a note matched"
@@ -1778,6 +1785,98 @@ mod tests {
         assert!(search_notes_with(&sb, "完全无关的内容 其他", None)
             .notes
             .is_empty());
+    }
+
+    /// A Claude session that talks about deadlocks and a Codex one that does
+    /// not (its note does), both synced, the Codex one with a note.
+    fn deadlock_sandbox(note_for: &str) -> Sandbox {
+        let sb = Sandbox::new();
+        write(
+            &sb.claude_file(),
+            &(user_line("2026-01-01T00:00:01Z", "线程池里出现死锁怎么办")
+                + &assistant_line(
+                    "2026-01-01T00:00:02Z",
+                    serde_json::json!([{"type":"text","text":"按固定顺序加锁就能避免死锁"}]),
+                )),
+        );
+        write(&sb.codex_file(), &codex_text());
+        sb.sync();
+        let (source, id) = if note_for == "codex" {
+            ("codex", CODEX_ID)
+        } else {
+            ("claude", CLAUDE_ID)
+        };
+        let file = crate::kb::notes::testing::sample(source, id, 1);
+        crate::kb::notes::write(&sb.env.data, &file).unwrap();
+        sb.sync();
+        sb
+    }
+
+    #[test]
+    fn the_session_of_a_matching_note_comes_first_even_without_a_matching_message() {
+        let sb = deadlock_sandbox("codex");
+        let response = search_notes_with(&sb, "死锁", None);
+        let ids: Vec<_> = response
+            .results
+            .iter()
+            .map(|r| (r.session.session_id.as_str(), r.has_note, r.hits.len()))
+            .collect();
+        assert_eq!(
+            ids.iter().map(|i| i.0).collect::<Vec<_>>(),
+            [CODEX_ID, CLAUDE_ID],
+            "the noted session first, then the message hits: {ids:?}"
+        );
+        assert!(ids[0].1 && ids[0].2 == 0);
+        assert!(!ids[1].1 && ids[1].2 > 0);
+        assert_eq!(response.matched_sessions, 2);
+        assert_eq!(
+            response.results.iter().map(|r| r.rank).collect::<Vec<_>>(),
+            [1, 2]
+        );
+        // The flag is in the default command-line output too.
+        let json = crate::kb::search::agent_json(&response, false);
+        assert_eq!(json["results"][0]["has_note"], true);
+        assert!(json["results"][1].get("has_note").is_none());
+
+        // `--notes 0` turns the notes off, and the order goes back to the messages.
+        let off = search_notes_with(&sb, "死锁", Some(0));
+        assert_eq!(off.results.len(), 1);
+        assert_eq!(off.results[0].session.session_id, CLAUDE_ID);
+    }
+
+    #[test]
+    fn a_session_with_both_a_note_and_message_hits_is_listed_once_with_its_hits() {
+        let sb = deadlock_sandbox("claude");
+        let response = search_notes_with(&sb, "死锁", None);
+        assert_eq!(response.results.len(), 1);
+        let only = &response.results[0];
+        assert!(only.has_note && !only.hits.is_empty());
+        assert_eq!(response.matched_sessions, 1);
+    }
+
+    #[test]
+    fn a_loosely_matching_note_does_not_push_the_message_hits_down() {
+        let sb = deadlock_sandbox("codex");
+        // The note has 死锁 but not the made-up word: only a relaxed match.
+        let response = search_notes_with(&sb, "死锁 zzqqword", None);
+        assert_eq!(response.notes.len(), 1);
+        assert_eq!(
+            response
+                .results
+                .first()
+                .map(|r| r.session.session_id.as_str()),
+            Some(CLAUDE_ID),
+            "{:?}",
+            response
+                .results
+                .iter()
+                .map(|r| &r.session.session_id)
+                .collect::<Vec<_>>()
+        );
+        assert!(response
+            .results
+            .iter()
+            .all(|r| r.session.session_id != CODEX_ID));
     }
 
     #[test]

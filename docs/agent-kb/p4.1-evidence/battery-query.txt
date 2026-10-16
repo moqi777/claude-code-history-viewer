@@ -1,0 +1,14 @@
+== /Applications/AgentKB.app/Contents/MacOS/AgentKB
+NOTE a3dc8377 ToDesk_Service 占满CPU导致掉电快
+1 33.45 019f69f8 - 2 hits 我的 mac 的 windowserver 为什么这么大啊，
+2 27.96 01a0ccf1 - 2 hits 为什么我的mac现在这么烫啊
+3 25.46 c4c081c6 - 1 hits 本地 Agent 历史会话知识库
+4 22.18 15bf7c02 has_note 1 hits 地图选点进阶功能
+5 18.08 019f49ee - 1 hits 找出耗电大户
+== src-tauri/target/debug/claude-code-history-viewer
+NOTE a3dc8377 ToDesk_Service 占满CPU导致掉电快
+1 16.56 a3dc8377 has_note 0 hits 笔记本电池掉电过快
+2 33.45 019f69f8 - 2 hits 我的 mac 的 windowserver 为什么这么大啊，
+3 27.96 01a0ccf1 - 2 hits 为什么我的mac现在这么烫啊
+4 25.46 c4c081c6 - 1 hits 本地 Agent 历史会话知识库
+5 22.6 019f49ee - 1 hits 找出耗电大户

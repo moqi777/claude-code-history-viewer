@@ -1,0 +1,17 @@
+502 网关                         expected 019ef330 rank 1  notes=1  top5: 019ef330 019ed9cc ef228e77* 01a085fc
+充电功率 命令                        expected 019ef243 rank 1  notes=0  top5: 019ef243 449d0233 c4c081c6 ef228e77*
+dubbo provider RpcException    expected 019ef2b4 rank 1  notes=0  top5: 019ef2b4 019ecb1b ef228e77*
+重庆 攻略 航班                       expected 01a0aa7f rank 1  notes=0  top5: 01a0aa7f ef228e77* c4c081c6
+Claude 订阅 中转站                  expected 019fb241 rank 1  notes=2  top5: 019fb241 01a01dc8 019ff507 019fb2b5 ef228e77*
+手写 Excel 报价单 还原度               expected 019f79e1 rank 1  notes=0  top5: 019f79e1 ef228e77* 019f8383 019f8d01 019fa28d
+agent-browser Chrome CDP       expected 019fbd9b rank 1  notes=0  top5: 019fbd9b 019fbd90 01a085fc ef228e77*
+访达 右键 新建文件                     expected 019ef305 rank 2  notes=2  top5: 01a08958 019ef305 ef228e77*
+熄屏 睡眠 插电                       expected 019f640f rank 1  notes=0  top5: 019f640f ef228e77*
+tedis 依赖                       expected 01a0424c rank 2  notes=1  top5: 01a09ea0* 01a0424c 01a019a7 3081a5b8* 52261b64*
+提醒 渠道 写死                       expected 00d3c5de rank 1  notes=3  top5: 00d3c5de aef82eb2* ef228e77* d55790ac*
+giftInfo null 新用户              expected a5731e79 rank 1  notes=3  top5: a5731e79 ef228e77* 019fa28d 019f5a40 52261b64*
+Ghostty 默认目录 zshrc             expected 019ef25a rank 1  notes=1  top5: 019ef25a 019f01c7 019fb241 01a0cc1c 019f01d7
+fastjson 升级 空指针                expected 01a03daf rank 2  notes=3  top5: ef228e77* 01a03daf 019ed9cb 01a09ea0* 01a019a7
+红手指 AutoHotkey 滚轮              expected 630f9b1b rank 1  notes=1  top5: 630f9b1b* 15bf7c02* ef228e77*
+电池 耗电                          expected a3dc8377 rank 1  notes=1  top5: a3dc8377* 019f69f8 01a0ccf1 c4c081c6 019f49ee
+in top 5: 16/16   in top 3: 16/16   average output 7501 B

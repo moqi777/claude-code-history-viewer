@@ -50,6 +50,11 @@ pub const TITLE_CHARS: usize = 60;
 /// A sub-agent's hits count a little less than the main session's own.
 const SUBAGENT_WEIGHT: f64 = 0.8;
 
+/// A session whose title has the query's words is what the user is likely
+/// after, however few of its messages repeat them: the score grows by up to
+/// this fraction of itself, scaled by how many of the words the title has.
+const TITLE_BOOST: f64 = 0.5;
+
 #[derive(Debug)]
 pub enum SearchError {
     /// No database yet (never collected or not configured).
@@ -541,6 +546,14 @@ fn file_of_session(
         .optional()?)
 }
 
+/// 1.0 for a title without any query word, up to `1 + TITLE_BOOST` for one with all.
+fn title_factor(title: Option<&str>, groups: &[QueryGroup]) -> f64 {
+    let Some(title) = title else {
+        return 1.0;
+    };
+    1.0 + TITLE_BOOST * coverage(groups, &token_set(title))
+}
+
 fn recency_factor(last_activity: Option<&str>) -> f64 {
     let Some(ts) = last_activity.and_then(|t| chrono::DateTime::parse_from_rfc3339(t).ok()) else {
         return 1.0;
@@ -826,7 +839,8 @@ fn fetch_notes(
     Ok(rows.collect::<Result<_, _>>()?)
 }
 
-/// The best notes for the query: strict match first (every word), relaxed
+/// The best notes for the query, and whether they matched only loosely (not
+/// every word): strict match first (every word), relaxed
 /// only when strict finds nothing, like the message search. At most
 /// [`NOTES_PER_SESSION`] per session so one chatty session cannot fill the list.
 fn search_notes(
@@ -835,9 +849,9 @@ fn search_notes(
     params: &SearchParams,
     limit: usize,
     exe: &str,
-) -> Result<Vec<NoteHit>, SearchError> {
+) -> Result<(Vec<NoteHit>, bool), SearchError> {
     if limit == 0 || !has_note_tables(index)? {
-        return Ok(Vec::new());
+        return Ok((Vec::new(), false));
     }
     let mode = params.mode.as_deref().unwrap_or("auto");
     let mut rows = match mode {
@@ -891,7 +905,7 @@ fn search_notes(
     for (i, note) in out.iter_mut().enumerate() {
         note.rank = i + 1;
     }
-    Ok(out)
+    Ok((out, relaxed))
 }
 
 /// A found row as the output shows it; `None` when its session left the index.
@@ -1048,6 +1062,7 @@ pub fn find_notes_in(
         limit.clamp(1, 50),
         &current_exe_string(),
     )
+    .map(|(notes, _)| notes)
 }
 
 fn session_has_note(index: &Index, source: &str, session_id: &str) -> bool {
@@ -1063,6 +1078,61 @@ fn session_has_note(index: &Index, source: &str, session_id: &str) -> bool {
             .ok()
             .flatten()
             .is_some()
+}
+
+/// The sessions of the notes that matched come first in `results`, in the
+/// notes' order, whether or not any of their messages matched: a note is a
+/// summary somebody already wrote about exactly this, so the session it
+/// belongs to is the best candidate. A session in both lists appears once,
+/// with its message hits. Returns how many sessions had to be added.
+fn promote_note_sessions(
+    index: &Index,
+    notes: &[NoteHit],
+    results: &mut Vec<SessionHit>,
+    exe: &str,
+) -> Result<usize, SearchError> {
+    let mut front: Vec<SessionHit> = Vec::new();
+    let mut added = 0;
+    for note in notes {
+        let same = |r: &SessionHit| {
+            r.session.source == note.session.source
+                && r.session.session_id == note.session.session_id
+        };
+        if front.iter().any(same) {
+            continue;
+        }
+        if let Some(at) = results.iter().position(same) {
+            front.push(results.remove(at));
+            continue;
+        }
+        let Some(file_id) = file_of_session(index, &note.session.source, &note.session.session_id)?
+        else {
+            continue;
+        };
+        let Some(row) = session_row(index, file_id)? else {
+            continue;
+        };
+        let mut info = row.info;
+        info.title = info.title.map(|t| redact(&t).into_owned());
+        front.push(SessionHit {
+            rank: 0,
+            score: note.score,
+            resume: resume_for(&info, exe),
+            paths: Paths {
+                mirror: note.paths.mirror.clone(),
+                original: row.source_path,
+            },
+            has_note: true,
+            session: info,
+            hit_messages: 0,
+            subagent_hits: 0,
+            hits: Vec::new(),
+        });
+        added += 1;
+    }
+    front.append(results);
+    *results = front;
+    Ok(added)
 }
 
 pub fn search(index: &Index, params: &SearchParams) -> Result<SearchResponse, SearchError> {
@@ -1146,6 +1216,7 @@ pub fn search(index: &Index, params: &SearchParams) -> Result<SearchResponse, Se
             score += 0.1 * third.score;
         }
         score *= recency_factor(row.info.last_activity_at.as_deref());
+        score *= title_factor(row.info.title.as_deref(), &groups);
         let hit_messages = messages.iter().filter(|m| m.file_id == group).count();
         let subagent_hits = messages.len() - hit_messages;
         let hits = messages
@@ -1196,12 +1267,20 @@ pub fn search(index: &Index, params: &SearchParams) -> Result<SearchResponse, Se
         });
     }
     results.sort_by(|a, b| b.score.total_cmp(&a.score));
+    let notes_limit = params.notes.unwrap_or(DEFAULT_NOTES).min(MAX_NOTES);
+    let (notes, notes_are_loose) = search_notes(index, &groups, params, notes_limit, &exe)?;
+    // Only a note that has every word of the query says "this session is about
+    // exactly this"; a loose one must not push the message hits down.
+    let added = if notes_are_loose {
+        0
+    } else {
+        promote_note_sessions(index, &notes, &mut results, &exe)?
+    };
+    let matched_sessions = matched_sessions + added;
     results.truncate(limit);
     for (i, r) in results.iter_mut().enumerate() {
         r.rank = i + 1;
     }
-    let notes_limit = params.notes.unwrap_or(DEFAULT_NOTES).min(MAX_NOTES);
-    let notes = search_notes(index, &groups, params, notes_limit, &exe)?;
     let hint = (results.is_empty() && notes.is_empty()).then(|| {
         "No match. Try fewer or different words (a synonym, the English/Chinese variant, \
          a class or error name), or widen --since/--source/--project."
@@ -1771,6 +1850,17 @@ mod tests {
 
     fn groups(q: &str) -> Vec<QueryGroup> {
         tokenize::query_groups(q)
+    }
+
+    #[test]
+    fn a_title_with_the_query_words_raises_the_score_by_how_many_it_has() {
+        let g = groups("电池 耗电");
+        assert!((title_factor(None, &g) - 1.0).abs() < 1e-9);
+        assert!((title_factor(Some("今天吃什么"), &g) - 1.0).abs() < 1e-9);
+        let one = title_factor(Some("找出耗电大户"), &g);
+        let both = title_factor(Some("笔记本电池耗电过快"), &g);
+        assert!(one > 1.0 && both > one, "{one} {both}");
+        assert!((both - (1.0 + TITLE_BOOST)).abs() < 1e-9);
     }
 
     #[test]
