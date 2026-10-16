@@ -1,0 +1,62 @@
+src/kb/KbSearch.tsx
+  s_cca7c29607588b::t_4fc29ac3921cb6 202,218-223
+src/i18n/locales/en/kb.json
+  s_cca7c29607588b::t_9c04eaa47daf74 370-430
+src/i18n/locales/ja/kb.json
+  s_cca7c29607588b::t_9c04eaa47daf74 370-430
+src/kb/fixtures.ts
+  s_cca7c29607588b::t_a917b71c9f3cc6 22
+src/kb/progressLabel.ts
+  s_cca7c29607588b::t_4fc29ac3921cb6 13-21
+src/kb/testkit.ts
+  s_cca7c29607588b::t_3918885f4bc5ed 32-37
+src/kb/branding.ts
+  s_cca7c29607588b::t_a917b71c9f3cc6 5
+src/kb/KbTransfer.test.tsx
+  s_cca7c29607588b::t_91fc18564b4f93 3-4
+  s_cca7c29607588b::t_3918885f4bc5ed 1-2,5-262
+src/i18n/locales/zh-CN/kb.json
+  s_cca7c29607588b::t_9c04eaa47daf74 370-430
+src/kb/KbWizard.tsx
+  s_cca7c29607588b::t_c8924c7d4819e2 21,77,175-182,277-290
+src/kb/KbHome.test.tsx
+  s_cca7c29607588b::t_03923fce29be84 149-169
+  s_cca7c29607588b::t_a917b71c9f3cc6 75
+src/kb/transferErrors.ts
+  s_cca7c29607588b::t_91fc18564b4f93 1-30
+src/kb/KbSettings.tsx
+  s_cca7c29607588b::t_c8924c7d4819e2 20,171-172
+src/kb/types.ts
+  s_cca7c29607588b::t_4fc29ac3921cb6 4-5,11-12,256,278,287,343,549-645
+src/kb/useKbStore.ts
+  s_cca7c29607588b::t_4fc29ac3921cb6 104,120
+src/kb/api.ts
+  s_cca7c29607588b::t_4fc29ac3921cb6 17-20,76-86
+src/kb/KbHome.tsx
+  s_cca7c29607588b::t_4fc29ac3921cb6 658,753-760,787,803-808
+src/i18n/locales/ko/kb.json
+  s_cca7c29607588b::t_9c04eaa47daf74 370-430
+src/kb/KbTransfer.tsx
+  s_cca7c29607588b::t_df0c14311a9240 1-18,20-446
+  s_cca7c29607588b::t_91fc18564b4f93 19
+src/kb/KbWizard.test.tsx
+  s_cca7c29607588b::t_e0ff6141461522 10,18-19,103-142
+src/i18n/locales/zh-TW/kb.json
+  s_cca7c29607588b::t_9c04eaa47daf74 370-430
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.11",
+  "base_commit_sha": "c67b934be21093db134ffa8ec3ea188ad891bd23",
+  "prompts": {},
+  "sessions": {
+    "s_cca7c29607588b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ef228e77-8d37-45df-ab42-2d4c28a0387d",
+        "model": "claude-sonnet-5-5"
+      },
+      "human_author": "moqing <moqing@tsign.cn>"
+    }
+  }
+}
