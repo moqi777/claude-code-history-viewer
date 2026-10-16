@@ -1,0 +1,23 @@
+src/i18n/locales/en/kb.json
+  s_cca7c29607588b::t_538a835ca3a72d 237
+src-tauri/src/kb/skill.rs
+  s_cca7c29607588b::t_cf25abbc5f6fcc 185-187,421-423,429-437
+src/i18n/locales/zh-CN/kb.json
+  s_cca7c29607588b::t_538a835ca3a72d 237
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.11",
+  "base_commit_sha": "c89861681b5d64bb875ebfa93c5dd413c54417c4",
+  "prompts": {},
+  "sessions": {
+    "s_cca7c29607588b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ef228e77-8d37-45df-ab42-2d4c28a0387d",
+        "model": "claude-sonnet-5-5"
+      },
+      "human_author": "moqing <moqing@tsign.cn>"
+    }
+  }
+}
