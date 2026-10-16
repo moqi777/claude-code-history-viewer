@@ -72,7 +72,7 @@ describe("KbHome", () => {
     const badges = screen.getAllByText("kb.sessions.deletedBadge");
     expect(badges).toHaveLength(1);
     expect(badges[0]?.closest("button")?.textContent).toContain("Gone from disk");
-    expect(screen.getByText(/kb\.version/).textContent).toContain("0.4.1");
+    expect(screen.getByText(/kb\.version/).textContent).toContain("0.5.0");
   });
 
   it("opens a session through the viewer integration", async () => {
@@ -143,6 +143,27 @@ describe("KbHome", () => {
     fireEvent.click(screen.getByRole("button", { name: "kb.filters.reset" }));
     await waitFor(() =>
       expect(mocks.api.listSessions).toHaveBeenLastCalledWith({ include_subagents: false }),
+    );
+  });
+
+  it("marks a session that came from another device and can list only those", async () => {
+    mocks.api.listSessions.mockResolvedValue([
+      sessionFixture({ source_status: "elsewhere", origin: "MacBook-A", summary: "Imported one" }),
+      sessionFixture({ session_id: "/p/b", summary: "Local one" }),
+    ]);
+    await show();
+    const badge = screen.getByText("kb.sessions.elsewhereBadge");
+    expect(badge.closest("button")?.textContent).toContain("Imported one");
+    expect(badge.getAttribute("title")).toContain("MacBook-A");
+    // it is not called deleted
+    expect(screen.queryByText("kb.sessions.deletedBadge")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /kb\.filters\.more/ }));
+    fireEvent.click(screen.getByLabelText("kb.filters.onlyElsewhere"));
+    await waitFor(() =>
+      expect(mocks.api.listSessions).toHaveBeenLastCalledWith({
+        include_subagents: false,
+        only_elsewhere: true,
+      }),
     );
   });
 

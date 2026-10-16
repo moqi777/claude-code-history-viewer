@@ -18,6 +18,7 @@ import { DataDirField, IntervalField, MirrorField, SourcesField, VerdictLine } f
 import { DigestField } from "./KbDigestField";
 import { formatBytes } from "./format";
 import { SkillField } from "./SkillField";
+import { ImportDialog } from "./KbTransfer";
 import { dataDirAcceptable, digestValid } from "./logic";
 import { progressLabel } from "./progressLabel";
 import type { KbConfig, KbDataDirReport, KbWizardResult } from "./types";
@@ -73,6 +74,7 @@ export const KbWizard = () => {
   const [dirReport, setDirReport] = useState<KbDataDirReport | null>(null);
   const [mirrorOk, setMirrorOk] = useState(false);
   const [phase, setPhase] = useState<Phase>({ kind: "editing" });
+  const [importOpen, setImportOpen] = useState(false);
 
   // Every opening starts from the saved configuration (or the defaults): the
   // draft lives only in memory, so closing or quitting leaves nothing behind.
@@ -170,6 +172,14 @@ export const KbWizard = () => {
                 <p className="text-sm">{t("kb.wizard.welcome")}</p>
                 <LanguagePicker />
                 <SourcesField draft={draft} onChange={setDraft} />
+                {!locked && (
+                  <div className="space-y-2 rounded-md border p-3">
+                    <p className="text-sm">{t("kb.wizard.importFromFile")}</p>
+                    <Button variant="outline" onClick={() => setImportOpen(true)}>
+                      {t("kb.transfer.import.button")}
+                    </Button>
+                  </div>
+                )}
               </>
             )}
             {step === "dataDir" && (
@@ -264,6 +274,20 @@ export const KbWizard = () => {
           )}
         </DialogFooter>
       </DialogContent>
+      <ImportDialog
+        open={importOpen}
+        wizard
+        dataDir={draft?.data_dir}
+        onClose={() => setImportOpen(false)}
+        onImported={(report) => {
+          // The form takes the file's settings; this computer's data folder stays.
+          setDraft((current) => ({
+            ...report.config,
+            data_dir: current?.data_dir ?? report.config.data_dir,
+          }));
+          setStep("confirm");
+        }}
+      />
     </Dialog>
   );
 };

@@ -655,6 +655,7 @@ const Filters = ({
     filters.client != null,
     filters.project != null,
     filters.onlyDeleted,
+    filters.onlyElsewhere,
     filters.includeSubagents,
     filters.includeEmpty,
   ].filter(Boolean).length;
@@ -752,6 +753,14 @@ const Filters = ({
           <label className="flex items-center gap-2 text-sm text-muted-foreground">
             <input
               type="checkbox"
+              checked={filters.onlyElsewhere}
+              onChange={(e) => set({ onlyElsewhere: e.target.checked })}
+            />
+            {t("kb.filters.onlyElsewhere")}
+          </label>
+          <label className="flex items-center gap-2 text-sm text-muted-foreground">
+            <input
+              type="checkbox"
               checked={filters.includeSubagents}
               onChange={(e) => set({ includeSubagents: e.target.checked })}
             />
@@ -775,6 +784,7 @@ const SessionRow = ({ session, onOpen }: { session: KbSession; onOpen: () => voi
   const { t } = useTranslation();
   const title = session.summary ?? t("kb.sessions.untitled");
   const deleted = session.source_status === "deleted";
+  const elsewhere = session.source_status === "elsewhere";
   return (
     <li>
       <button
@@ -788,6 +798,14 @@ const SessionRow = ({ session, onOpen }: { session: KbSession; onOpen: () => voi
           {deleted && (
             <Badge variant="destructive" title={t("kb.sessions.deletedHint")}>
               {t("kb.sessions.deletedBadge")}
+            </Badge>
+          )}
+          {elsewhere && (
+            <Badge
+              variant="muted"
+              title={t("kb.sessions.elsewhereHint", { device: session.origin ?? "?" })}
+            >
+              {t("kb.sessions.elsewhereBadge")}
             </Badge>
           )}
         </span>

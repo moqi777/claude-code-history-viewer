@@ -1,12 +1,15 @@
 import type { ClaudeSession } from "@/types";
 
 export type KbSource = "claude" | "codex";
-export type KbSourceStatus = "present" | "deleted";
+/** `elsewhere`: imported from another device; its source file was never on this computer. */
+export type KbSourceStatus = "present" | "deleted" | "elsewhere";
 
 /** A collected session: `ClaudeSession`-compatible, plus what only the KB knows. */
 export interface KbSession extends ClaudeSession {
   cwd: string | null;
   source_status: KbSourceStatus;
+  /** The device an imported session came from. */
+  origin?: string | null;
   source_path: string;
   parent_session_id: string | null;
   is_subagent: boolean;
@@ -250,7 +253,7 @@ export interface KbMoveOutcome {
 }
 
 export interface KbProgress {
-  op: "sync" | "backup" | "migrate";
+  op: "sync" | "backup" | "migrate" | "export" | "import";
   phase: string;
   done: number;
   total: number;
@@ -272,6 +275,7 @@ export interface KbFilters {
   project: string | null;
   range: KbTimeRange;
   onlyDeleted: boolean;
+  onlyElsewhere: boolean;
   includeSubagents: boolean;
   includeEmpty: boolean;
   query: string;
@@ -280,6 +284,7 @@ export interface KbFilters {
 export interface KbSessionQuery {
   source?: KbSource;
   only_deleted?: boolean;
+  only_elsewhere?: boolean;
   include_subagents?: boolean;
   include_empty?: boolean;
   client?: string;
@@ -335,6 +340,7 @@ export interface KbHitSession {
   started_at: string | null;
   last_activity_at: string | null;
   source_status: KbSourceStatus;
+  origin?: string | null;
   is_subagent: boolean;
   parent_session_id: string | null;
   message_count: number;
@@ -539,4 +545,102 @@ export interface KbDigestTestReport {
   input_tokens: number;
   output_tokens: number;
   model: string | null;
+}
+
+// ---------------------------------------------------------------------------
+// Export and import
+// ---------------------------------------------------------------------------
+
+export interface KbExportReport {
+  path: string;
+  export_id: string;
+  file_bytes: number;
+  uncompressed_bytes: number;
+  files: number;
+  sessions: number;
+  notes: number;
+  sessions_with_notes: number;
+  raw_files: number;
+  note_files: number;
+  duration_ms: number;
+  paused_collection: boolean;
+}
+
+export interface KbTransferCounts {
+  sessions: number;
+  notes: number;
+  sessions_with_notes: number;
+  raw_files: number;
+  note_files: number;
+}
+
+export interface KbLocalState {
+  empty: boolean;
+  sessions: number;
+  notes: number;
+  raw_files: number;
+  note_files: number;
+}
+
+export interface KbImportInspect {
+  export_id: string;
+  exported_at: string;
+  app_version: string;
+  schema_version: number;
+  device_name: string;
+  device_os: string;
+  counts: KbTransferCounts;
+  uncompressed_bytes: number;
+  file_bytes: number;
+  local: KbLocalState;
+  needed_bytes: number;
+  free_bytes: number | null;
+  problem: string | null;
+}
+
+export interface KbMergeSummary {
+  sessions_added: number;
+  files_added: number;
+  identical: number;
+  extended: number;
+  kept_both_live: number;
+  kept_both_diverged: number;
+  kept_both_other: number;
+  row_collisions: number;
+  notes_added: number;
+  notes_identical: number;
+  notes_conflicts: number;
+}
+
+export interface KbImportPrepared {
+  export_id: string;
+  mode: "empty" | "merge";
+  device_name: string;
+  counts: KbTransferCounts;
+  summary: KbMergeSummary | null;
+  added_exclusions: string[];
+  local: KbLocalState;
+}
+
+export interface KbImportCheck {
+  name: string;
+  expected: number;
+  actual: number;
+}
+
+export interface KbImportReport {
+  mode: "empty" | "merge";
+  export_id: string;
+  device_name: string;
+  exported_at: string;
+  summary: KbMergeSummary | null;
+  checks: KbImportCheck[];
+  all_match: boolean;
+  backup_db: string | null;
+  backup_config: string | null;
+  added_exclusions: string[];
+  config: KbConfig;
+  config_written: boolean;
+  warnings: string[];
+  duration_ms: number;
 }

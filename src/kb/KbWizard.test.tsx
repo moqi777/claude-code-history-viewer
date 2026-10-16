@@ -7,6 +7,7 @@ import { useKbStore } from "./useKbStore";
 const mocks = vi.hoisted(() => ({
   api: {} as ReturnType<typeof import("./testkit").apiMocks>,
   app: { setAnalyticsCurrentView: vi.fn() },
+  dialog: { save: vi.fn(), open: vi.fn() },
 }));
 
 vi.mock("./api", async () => {
@@ -14,6 +15,8 @@ vi.mock("./api", async () => {
   mocks.api = apiMocks();
   return { kbApi: mocks.api };
 });
+vi.mock("@tauri-apps/plugin-dialog", () => mocks.dialog);
+vi.mock("@/utils/platform", () => ({ isTauri: () => true }));
 vi.mock("@/store/useAppStore", () => ({ useAppStore: { getState: () => mocks.app } }));
 vi.mock("react-i18next", async (importOriginal) => {
   const { fakeT } = await import("./testkit");
@@ -95,6 +98,48 @@ describe("KbWizard", () => {
       (screen.getByRole("button", { name: "kb.field.minutes {\"count\":15}" }) as HTMLButtonElement)
         .getAttribute("aria-pressed"),
     ).toBe("true");
+  });
+
+  it("a file from another computer fills the form and jumps to the last page; rerunning offers no import", async () => {
+    const imported = configFixture({ interval_secs: 300, data_dir: "/Users/other/AgentKB" });
+    mocks.dialog.open.mockResolvedValue("/f.agentkb");
+    mocks.api.importInspect.mockResolvedValue({
+      export_id: "id1", exported_at: "2026-10-16T08:40:12Z", app_version: "0.5.0", schema_version: 5,
+      device_name: "MacBook-A", device_os: "macos",
+      counts: { sessions: 3, notes: 1, sessions_with_notes: 1, raw_files: 3, note_files: 1 },
+      uncompressed_bytes: 1000, file_bytes: 500,
+      local: { empty: true, sessions: 0, notes: 0, raw_files: 0, note_files: 0 },
+      needed_bytes: 1100, free_bytes: 1e12, problem: null,
+    });
+    mocks.api.importPrepare.mockResolvedValue({
+      export_id: "id1", mode: "empty", device_name: "MacBook-A",
+      counts: { sessions: 3, notes: 1, sessions_with_notes: 1, raw_files: 3, note_files: 1 },
+      summary: null, added_exclusions: [],
+      local: { empty: true, sessions: 0, notes: 0, raw_files: 0, note_files: 0 },
+    });
+    mocks.api.importCommit.mockResolvedValue({
+      mode: "empty", export_id: "id1", device_name: "MacBook-A", exported_at: "x", summary: null,
+      checks: [{ name: "sessions", expected: 3, actual: 3 }], all_match: true,
+      backup_db: null, backup_config: null, added_exclusions: [], config: imported,
+      config_written: false, warnings: [], duration_ms: 1,
+    });
+    await open();
+    fireEvent.click(screen.getByRole("button", { name: "kb.transfer.import.button" }));
+    fireEvent.click(await screen.findByRole("button", { name: "kb.transfer.import.pick" }));
+    fireEvent.click(await screen.findByRole("button", { name: "kb.transfer.import.check" }));
+    fireEvent.click(await screen.findByRole("button", { name: "kb.transfer.import.confirm" }));
+    await screen.findByText(/kb\.transfer\.import\.doneWizard/);
+    // the wizard never writes config.json by itself; it uses the folder it had
+    expect(mocks.api.importCommit).toHaveBeenCalledWith("/f.agentkb", false, false, "/Users/me/AgentKB");
+    fireEvent.click(screen.getByRole("button", { name: "kb.transfer.close" }));
+    expect(current()).toContain("kb.wizard.step.confirm");
+    expect(screen.getByText(/"count":5/)).toBeTruthy(); // 300 s
+    expect(screen.getByText("/Users/me/AgentKB")).toBeTruthy();
+  });
+
+  it("offers no import when the wizard is rerun on an existing setup", async () => {
+    await open("rerun");
+    expect(screen.queryByRole("button", { name: "kb.transfer.import.button" })).toBeNull();
   });
 
   it("needs at least one source", async () => {

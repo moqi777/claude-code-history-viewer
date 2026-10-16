@@ -199,6 +199,7 @@ const ResultCard = ({ hit }: { hit: KbSessionHit }) => {
   const s = hit.session;
   const title = s.title ?? t("kb.sessions.untitled");
   const deleted = s.source_status === "deleted";
+  const elsewhere = s.source_status === "elsewhere";
   return (
     <li className="px-4 py-3">
       <button
@@ -212,6 +213,14 @@ const ResultCard = ({ hit }: { hit: KbSessionHit }) => {
           {deleted && (
             <Badge variant="destructive" title={t("kb.sessions.deletedHint")}>
               {t("kb.sessions.deletedBadge")}
+            </Badge>
+          )}
+          {elsewhere && (
+            <Badge
+              variant="muted"
+              title={t("kb.sessions.elsewhereHint", { device: s.origin ?? "?" })}
+            >
+              {t("kb.sessions.elsewhereBadge")}
             </Badge>
           )}
           {s.is_subagent && <Badge variant="muted">{t("kb.sessions.subagentBadge")}</Badge>}

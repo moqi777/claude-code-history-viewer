@@ -14,6 +14,10 @@ import type {
   KbConfig,
   KbConfigStateInfo,
   KbDataDirReport,
+  KbExportReport,
+  KbImportInspect,
+  KbImportPrepared,
+  KbImportReport,
   KbFacets,
   KbMigrateCheck,
   KbMirrorReport,
@@ -68,6 +72,18 @@ export const kbApi = {
       targetDir,
       expectedUuid: expectedUuid ?? null,
     }),
+
+  exportStart: (dest: string, overwrite: boolean) =>
+    api<KbExportReport>("kb_export_start", { dest, overwrite }),
+  transferCancel: () => api<void>("kb_transfer_cancel"),
+  importInspect: (path: string, dataDir?: string) =>
+    api<KbImportInspect>("kb_import_inspect", { path, dataDir }),
+  importPrepare: (path: string, adoptSettings: boolean, dataDir?: string) =>
+    api<KbImportPrepared>("kb_import_prepare", { path, adoptSettings, dataDir }),
+  importCommit: (path: string, adoptSettings: boolean, writeConfig: boolean, dataDir?: string) =>
+    api<KbImportReport>("kb_import_commit", { path, adoptSettings, writeConfig, dataDir }),
+  importDiscard: (path: string, dataDir?: string) =>
+    api<void>("kb_import_discard", { path, dataDir }),
 
   wizardCommit: (draft: KbConfig) => api<KbWizardResult>("kb_wizard_commit", { draft }),
   changeDataDirCheck: (newDir: string) =>

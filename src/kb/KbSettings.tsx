@@ -17,6 +17,7 @@ import { Field, IntervalField, MirrorField, SourcesField, VerdictLine } from "./
 import { DigestField } from "./KbDigestField";
 import { digestValid, excludesValid, parseExcludes } from "./logic";
 import { SkillField } from "./SkillField";
+import { TransferSection } from "./KbTransfer";
 import { useTest } from "./useTest";
 import { describeMigrateCheck } from "./messages";
 import { pickFolder } from "./pickFolder";
@@ -167,6 +168,8 @@ export const KbSettings = () => {
             <DigestField draft={draft} onChange={setDraft} />
 
             <MoveDataDir current={saved.data_dir} />
+
+            <TransferSection />
 
             <div className="flex flex-wrap items-center gap-2 border-t pt-4">
               <Button
