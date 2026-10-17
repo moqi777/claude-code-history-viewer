@@ -70,6 +70,7 @@ fn setup(data_dir: Option<&str>) -> Res<(KbConfig, KbEnv, PathBuf, bool)> {
 pub async fn kb_export_start(
     dest: String,
     overwrite: bool,
+    with_vectors: Option<bool>,
     app: tauri::AppHandle,
 ) -> Res<ExportReport> {
     blocking(move || {
@@ -82,6 +83,7 @@ pub async fn kb_export_start(
                 &config,
                 &migrate_dir::expand(&dest),
                 overwrite,
+                with_vectors.unwrap_or(true),
                 &cancel,
                 &sink(&app),
             )

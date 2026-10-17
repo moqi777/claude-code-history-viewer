@@ -110,6 +110,7 @@ impl Lib {
             &self.config(),
             to,
             false,
+            true,
             &Cancel::new(),
             &ProgressSink::default(),
         )
@@ -766,6 +767,7 @@ fn settings_travel_but_the_machine_specific_ones_do_not() {
         &config,
         &package,
         false,
+        true,
         &Cancel::new(),
         &ProgressSink::default(),
     )
@@ -859,6 +861,7 @@ fn a_running_digest_stops_the_export_and_a_bad_destination_is_refused() {
             &a.config(),
             &package,
             false,
+            true,
             &Cancel::new(),
             &ProgressSink::default(),
         )
@@ -872,6 +875,7 @@ fn a_running_digest_stops_the_export_and_a_bad_destination_is_refused() {
         &a.config(),
         &inside,
         false,
+        true,
         &Cancel::new(),
         &ProgressSink::default(),
     )
@@ -883,6 +887,7 @@ fn a_running_digest_stops_the_export_and_a_bad_destination_is_refused() {
         &a.config(),
         &package,
         false,
+        true,
         &Cancel::new(),
         &ProgressSink::default(),
     )
@@ -910,6 +915,7 @@ fn cancelling_leaves_no_file_and_no_work_folder() {
         &a.config(),
         &package,
         false,
+        true,
         &cancel,
         &ProgressSink::default(),
     )
@@ -999,4 +1005,135 @@ fn repack_as_another_machine() {
             m.source_device.name = "Other-Mac".into();
         },
     );
+}
+
+// ----- the semantic index -------------------------------------------------
+
+fn put_vectors(lib: &Lib, rows: usize, model_sha: &str) {
+    use super::semantic::chunk::{text_sha, Chunk};
+    use super::semantic::store::{path, Store};
+    lib.enter();
+    let data = lib.env().data;
+    let mut store = Store::open(&path(&data), model_sha).unwrap();
+    let chunks: Vec<Chunk> = (0..rows)
+        .map(|i| Chunk {
+            source: "claude".into(),
+            session_id: S1.into(),
+            key: format!("m:{i}:0"),
+            kind: "user",
+            text: format!("text {i}"),
+            sha: text_sha(&format!("text {i}")),
+        })
+        .collect();
+    let pairs: Vec<(&Chunk, Vec<f32>)> = chunks
+        .iter()
+        .enumerate()
+        .map(|(i, c)| {
+            let mut v = vec![0f32; super::semantic::DIM];
+            v[i % super::semantic::DIM] = 1.0;
+            (c, v)
+        })
+        .collect();
+    store.put(&pairs).unwrap();
+}
+
+fn vector_rows(lib: &Lib) -> usize {
+    use super::semantic::{model, store};
+    lib.enter();
+    store::Store::open_ro(&store::path(&lib.env().data), model::model_sha())
+        .unwrap()
+        .map_or(0, |s| s.count())
+}
+
+fn export_with(lib: &Lib, to: &Path, vectors: bool) {
+    lib.enter();
+    export::export(
+        &lib.env(),
+        &lib.config(),
+        to,
+        false,
+        vectors,
+        &Cancel::new(),
+        &ProgressSink::default(),
+    )
+    .unwrap();
+}
+
+#[test]
+fn the_semantic_index_travels_into_an_empty_library_and_only_there() {
+    use super::semantic::model;
+    let root = tempfile::tempdir().unwrap();
+    let a = library_a(root.path());
+    put_vectors(&a, 3, model::model_sha());
+    let with = root.path().join("with.agentkb");
+    let without = root.path().join("without.agentkb");
+    export_with(&a, &with, true);
+    export_with(&a, &without, false);
+    let listed = |p: &Path| -> Vec<String> {
+        super::pack::read_manifest(p)
+            .unwrap()
+            .files
+            .into_iter()
+            .map(|f| f.path)
+            .collect()
+    };
+    assert!(listed(&with).iter().any(|f| f.starts_with("vectors/")));
+    assert!(listed(&without).iter().all(|f| !f.starts_with("vectors/")));
+
+    let b = Lib::new(root.path(), "bob");
+    let report = b.import(&with).unwrap();
+    assert!(
+        report.vectors_adopted && report.all_match,
+        "{:?}",
+        report.checks
+    );
+    assert_eq!(vector_rows(&b), 3);
+
+    let c = Lib::new(root.path(), "carol");
+    assert!(!c.import(&without).unwrap().vectors_adopted);
+    assert_eq!(vector_rows(&c), 0);
+
+    // a library that has data of its own keeps its vectors and does not take the file's
+    let d = Lib::new(root.path(), "dave");
+    d.write_session("bbbbbbbb-0000-0000-0000-000000000009", 2, "delta");
+    assert_eq!(d.sync().status, "ok");
+    put_vectors(&d, 1, model::model_sha());
+    let report = d.import(&with).unwrap();
+    assert_eq!(report.mode, Mode::Merge);
+    assert!(!report.vectors_adopted);
+    assert_eq!(vector_rows(&d), 1);
+}
+
+#[test]
+fn vectors_made_by_another_model_are_not_exported_or_taken() {
+    let root = tempfile::tempdir().unwrap();
+    let a = library_a(root.path());
+    put_vectors(&a, 2, "some-other-model-sha");
+    // the file on disk is for another model: the exporter does not even see it as usable
+    let package = root.path().join("a.agentkb");
+    export_with(&a, &package, true);
+    let manifest = super::pack::read_manifest(&package).unwrap();
+    assert!(manifest
+        .files
+        .iter()
+        .all(|f| !f.path.starts_with("vectors/")));
+}
+
+#[test]
+fn an_import_does_not_start_while_the_vector_builder_runs() {
+    let root = tempfile::tempdir().unwrap();
+    let a = library_a(root.path());
+    let package = root.path().join("a.agentkb");
+    a.export(&package);
+    let b = Lib::new(root.path(), "bob");
+    b.enter();
+    let _builder = SyncLock::acquire(
+        &super::semantic::build::lock_path(&b.env().data),
+        std::time::Duration::ZERO,
+    )
+    .unwrap()
+    .unwrap();
+    let err = b.import(&package).unwrap_err();
+    assert_eq!(err.code, "embed_running", "{err}");
+    assert!(!b.env().data.raw().exists(), "nothing was applied");
 }

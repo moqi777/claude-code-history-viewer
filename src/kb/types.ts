@@ -185,6 +185,7 @@ export interface KbConfig {
   exclude_cwd_prefixes: string[];
   mirror: KbMirrorConfig;
   digest: KbDigestConfig;
+  semantic: { enabled: boolean; source: string };
   [extra: string]: unknown;
 }
 
@@ -355,6 +356,9 @@ export interface KbSessionHit {
   resume: { available: boolean; command: string | null; note: string | null };
   paths: { mirror: string; original: string };
   hit_messages: number;
+  /** With semantic search on: how the session was found. */
+  match?: "keyword" | "semantic" | "both";
+  semantic_score?: number;
   /** Matching messages in sub-agent sessions folded into this entry. */
   subagent_hits?: number;
   hits: KbHit[];
@@ -363,7 +367,7 @@ export interface KbSessionHit {
 export interface KbSearchResponse {
   query: string;
   tokens: string[];
-  mode_used: "all" | "any";
+  mode_used: "all" | "any" | "hybrid";
   read_mode: "normal" | "immutable";
   data_as_of: string | null;
   matched_sessions: number;
@@ -372,6 +376,25 @@ export interface KbSearchResponse {
   notes?: KbNote[];
   results: KbSessionHit[];
   hint: string | null;
+  /** Whether the vectors were used, and if not, why. */
+  semantic?: KbSemanticUse;
+}
+
+export type KbSemanticUseState =
+  | "used"
+  | "off"
+  | "model_missing"
+  | "model_corrupt"
+  | "index_building"
+  | "index_empty"
+  | "skipped"
+  | "error";
+
+export interface KbSemanticUse {
+  state: KbSemanticUseState;
+  indexed: number;
+  total: number;
+  note: string;
 }
 
 export type KbSearchOutcome =
@@ -642,5 +665,53 @@ export interface KbImportReport {
   config: KbConfig;
   config_written: boolean;
   warnings: string[];
+  vectors_adopted?: boolean;
   duration_ms: number;
+}
+
+// ---------------------------------------------------------------------------
+// Semantic search
+// ---------------------------------------------------------------------------
+
+export type KbModelStatus =
+  | { state: "missing" }
+  | { state: "corrupt"; file: string; reason: string }
+  | { state: "ready" };
+
+export interface KbEmbedState {
+  /** `idle`, `running`, `postponed_memory`, `paused_model`, `error`. */
+  status: string;
+  total: number;
+  done: number;
+  updated_at: string;
+  message: string;
+  postponed_rounds: number;
+  indexed: number;
+  building: boolean;
+}
+
+export interface KbSemanticStatus {
+  enabled: boolean;
+  source: string;
+  sources: { id: string; host: string }[];
+  model_name: string;
+  model_bytes: number;
+  model: KbModelStatus;
+  downloading: boolean;
+  index: KbEmbedState;
+  vectors_bytes: number;
+  models_dir: string;
+}
+
+export interface KbSemanticTest {
+  ok: boolean;
+  seconds: number;
+  dim: number;
+  message: string;
+}
+
+export interface KbDownloadProgress {
+  file: string;
+  done_bytes: number;
+  total_bytes: number;
 }

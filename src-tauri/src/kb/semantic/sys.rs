@@ -1,20 +1,36 @@
 //! Operating system touches of the background builder: priority and memory.
 
-/// Make this process as polite as the system allows. macOS: background
-/// scheduling class (low CPU priority, throttled disk) plus the lowest `nice`;
-/// other Unix: `nice` 19. Failures are ignored: it only affects speed.
+/// Make this process polite. `AGENTKB_PRIORITY` (`none`, `nice`, `utility`, `background`)
+/// overrides the default, which was chosen by measurement (design review, item 2):
+/// see `docs/agent-kb/P6-report.md`. Failures are ignored: it only affects speed.
 #[allow(unsafe_code)] // plain libc calls
 pub fn lower_priority() {
+    let mode = std::env::var("AGENTKB_PRIORITY").unwrap_or_else(|_| DEFAULT_PRIORITY.to_string());
     #[cfg(unix)]
     // SAFETY: plain libc calls with constant arguments.
     unsafe {
-        libc::setpriority(libc::PRIO_PROCESS, 0, 19);
-        #[cfg(target_os = "macos")]
-        {
-            libc::setpriority(libc::PRIO_DARWIN_PROCESS, 0, libc::PRIO_DARWIN_BG);
+        match mode.as_str() {
+            "none" => {}
+            "background" => {
+                libc::setpriority(libc::PRIO_PROCESS, 0, 19);
+                #[cfg(target_os = "macos")]
+                libc::setpriority(libc::PRIO_DARWIN_PROCESS, 0, libc::PRIO_DARWIN_BG);
+            }
+            "utility" => {
+                libc::setpriority(libc::PRIO_PROCESS, 0, 10);
+                #[cfg(target_os = "macos")]
+                libc::pthread_set_qos_class_self_np(libc::qos_class_t::QOS_CLASS_UTILITY, 0);
+            }
+            _ => {
+                libc::setpriority(libc::PRIO_PROCESS, 0, 19);
+            }
         }
     }
+    #[cfg(not(unix))]
+    let _ = mode;
 }
+
+const DEFAULT_PRIORITY: &str = "nice";
 
 /// Memory the system can give without swapping, in bytes: free, inactive,
 /// speculative and purgeable pages on macOS (free pages alone are almost

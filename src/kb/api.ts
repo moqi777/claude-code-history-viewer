@@ -28,6 +28,8 @@ import type {
   KbScheduleEnvReport,
   KbScheduleStatus,
   KbSearchOutcome,
+  KbSemanticStatus,
+  KbSemanticTest,
   KbSearchParams,
   KbSkillStatus,
   KbSkillTarget,
@@ -73,8 +75,8 @@ export const kbApi = {
       expectedUuid: expectedUuid ?? null,
     }),
 
-  exportStart: (dest: string, overwrite: boolean) =>
-    api<KbExportReport>("kb_export_start", { dest, overwrite }),
+  exportStart: (dest: string, overwrite: boolean, withVectors = true) =>
+    api<KbExportReport>("kb_export_start", { dest, overwrite, withVectors }),
   transferCancel: () => api<void>("kb_transfer_cancel"),
   importInspect: (path: string, dataDir?: string) =>
     api<KbImportInspect>("kb_import_inspect", { path, dataDir }),
@@ -99,6 +101,21 @@ export const kbApi = {
   digestCancel: () => api<boolean>("kb_digest_cancel"),
   digestFindCli: (engine: string) => api<string | null>("kb_digest_find_cli", { engine }),
   digestTest: (draft: KbDigestConfig) => api<KbDigestTestReport>("kb_digest_test", { draft }),
+  semanticStatus: () => api<KbSemanticStatus>("kb_semantic_status"),
+  semanticSet: (patch: { enabled?: boolean; source?: string }) =>
+    api<KbSemanticStatus>("kb_semantic_set", {
+      enabled: patch.enabled ?? null,
+      source: patch.source ?? null,
+    }),
+  semanticDownload: () => api<void>("kb_semantic_download"),
+  semanticDownloadCancel: () => api<void>("kb_semantic_download_cancel"),
+  semanticImportFolder: (path: string) =>
+    api<KbSemanticStatus>("kb_semantic_import_folder", { path }),
+  semanticDeleteModel: () => api<KbSemanticStatus>("kb_semantic_delete_model"),
+  semanticTest: () => api<KbSemanticTest>("kb_semantic_test"),
+  semanticBuild: (everything: boolean) => api<void>("kb_semantic_build", { everything }),
+  semanticBuildCancel: () => api<boolean>("kb_semantic_build_cancel"),
+  semanticRebuild: () => api<void>("kb_semantic_rebuild"),
   notesList: (query: KbNotesQuery) => api<KbNotesPage>("kb_notes_list", { query }),
   notesForSession: (source: string, sessionId: string) =>
     api<KbSessionNotes>("kb_notes_for_session", { source, sessionId }),

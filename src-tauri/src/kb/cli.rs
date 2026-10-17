@@ -17,7 +17,7 @@ const USAGE: &str = "usage: --kb-sync | --kb-reindex | --kb-backup | --kb-move-d
 | --kb-show <source:session-id> [--around <seq>] [options] | --kb-skill-print claude|codex \
 | --kb-digest --auto|--all|--session <source:session-id>|--test \
 | --kb-embed --auto|--all|--status|--test \
-| --kb-export <file.agentkb> [--overwrite] \
+| --kb-export <file.agentkb> [--overwrite] [--no-vectors] \
 | --kb-import <file.agentkb> [--inspect|--plan] [--no-sync] [--no-settings] [--adopt-settings]";
 
 /// `Some(exit code)` when `args` is a KB command, `None` to let the app start
@@ -631,7 +631,7 @@ fn transfer_failure(e: &super::transfer::TransferError) -> i32 {
 }
 
 fn run_export_command(args: &[String]) -> i32 {
-    let flags = match parse_flags(args, &[], &["overwrite"]) {
+    let flags = match parse_flags(args, &[], &["overwrite", "no-vectors"]) {
         Ok(flags) => flags,
         Err(message) => return usage_error(&message),
     };
@@ -649,6 +649,7 @@ fn run_export_command(args: &[String]) -> i32 {
         &config,
         &dest,
         flags.switches.contains("overwrite"),
+        !flags.switches.contains("no-vectors"),
         &super::transfer::Cancel::new(),
         &transfer_progress(),
     ) {

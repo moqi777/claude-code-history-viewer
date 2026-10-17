@@ -2666,7 +2666,15 @@ mod tests {
         crate::kb::notes::write(&sb.env.data, &file).unwrap();
         sb.sync();
 
-        let response = search_notes_with(&sb, "zebra", None);
+        // with the vectors in play, so that the fields they add are there to be found
+        let index = crate::kb::search::Index::open(&sb.env.data).unwrap();
+        let input = vector_input(
+            crate::kb::semantic::UseState::Used,
+            &[("claude", CLAUDE_ID, 0.7, "m:1:0")],
+        );
+        let mut params = params("zebra");
+        params.notes = None;
+        let response = crate::kb::search::search_with(&index, &params, input).unwrap();
         let json = crate::kb::search::agent_json(&response, false);
         let mut paths = Vec::new();
         key_paths(&json, "", &mut paths);

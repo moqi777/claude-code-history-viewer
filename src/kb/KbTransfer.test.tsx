@@ -115,7 +115,7 @@ describe("TransferSection export", () => {
     expect(text).toContain('"sessions":313');
     expect(text).toContain("2.10 GB");
     expect(text).toContain('"seconds":8');
-    expect(mocks.api.exportStart).toHaveBeenCalledWith("/Volumes/Disk/AgentKB.agentkb", true);
+    expect(mocks.api.exportStart).toHaveBeenCalledWith("/Volumes/Disk/AgentKB.agentkb", true, true);
     expect(screen.getByText("/Volumes/Disk/AgentKB.agentkb")).toBeTruthy();
   });
 

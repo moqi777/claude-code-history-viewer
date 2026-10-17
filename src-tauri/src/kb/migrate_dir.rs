@@ -22,7 +22,11 @@ use super::{db, fsutil};
 pub const MARKER: &str = ".agentkb-migrating";
 pub const REPORT: &str = "migration-report.json";
 /// A migration may legitimately wait for a running collection to finish.
-const LOCK_WAIT: Duration = Duration::from_secs(60);
+const LOCK_WAIT: Duration = if cfg!(test) {
+    Duration::from_millis(300)
+} else {
+    Duration::from_secs(60)
+};
 const SPACE_MARGIN_PERCENT: u64 = 110;
 
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
@@ -235,6 +239,12 @@ pub fn migrate_data(
     let Some(_lock) = SyncLock::acquire(&old_paths.lock(), LOCK_WAIT)? else {
         return Err("a collection is still running; try again in a moment".into());
     };
+    // A vector builder would be writing next to the copy too.
+    let Some(_embed_lock) =
+        SyncLock::acquire(&super::semantic::build::lock_path(&old_paths), LOCK_WAIT)?
+    else {
+        return Err("the semantic index is being built; try again in a moment".into());
+    };
     // So is a digest writing notes: they must be in the copy too.
     let Some(_digest_lock) = SyncLock::acquire(&old_paths.digest_lock(), LOCK_WAIT)? else {
         return Err("a digest is still running; try again in a moment".into());
@@ -254,12 +264,23 @@ pub fn migrate_data(
     let new_raw = DataPaths::new(new).raw();
     let old_notes = old_paths.notes();
     let new_notes = DataPaths::new(new).notes();
+    // The semantic index and the model travel too: the index takes hours to
+    // make again, the model is a 570 MB download.
+    let extras = ["vectors", "models"];
     let total_files = (fsutil::walk_files(&old_raw).len()
         + fsutil::walk_files(&old_notes).len()
-        + fsutil::walk_files(&old_paths.logs()).len()) as u64;
+        + fsutil::walk_files(&old_paths.logs()).len()
+        + extras
+            .iter()
+            .map(|d| fsutil::walk_files(&old_paths.root().join(d)).len())
+            .sum::<usize>()) as u64;
     let total_bytes = fsutil::dir_size(&old_raw)
         + fsutil::dir_size(&old_notes)
-        + fsutil::dir_size(&old_paths.logs());
+        + fsutil::dir_size(&old_paths.logs())
+        + extras
+            .iter()
+            .map(|d| fsutil::dir_size(&old_paths.root().join(d)))
+            .sum::<u64>();
     let mut meter = Meter {
         sink: progress,
         phase: "copy",
@@ -278,6 +299,15 @@ pub fn migrate_data(
         copy_tree(&old_paths.logs(), &DataPaths::new(new).logs(), &mut meter)?;
     files += log_files;
     bytes += log_bytes;
+    for extra in extras {
+        let (f, b) = copy_tree(
+            &old_paths.root().join(extra),
+            &DataPaths::new(new).root().join(extra),
+            &mut meter,
+        )?;
+        files += f;
+        bytes += b;
+    }
 
     // The database: a consistent snapshot, never a raw file copy.
     let new_db = DataPaths::new(new).db();
@@ -300,6 +330,13 @@ pub fn migrate_data(
     let mut verified = verify_tree(&old_raw, &new_raw, &mut meter)?;
     verified += verify_tree(&old_notes, &new_notes, &mut meter)?;
     verified += verify_tree(&old_paths.logs(), &DataPaths::new(new).logs(), &mut meter)?;
+    for extra in extras {
+        verified += verify_tree(
+            &old_paths.root().join(extra),
+            &DataPaths::new(new).root().join(extra),
+            &mut meter,
+        )?;
+    }
     if has_db {
         let a = db_fingerprint(&old_paths.db())?;
         let b = db_fingerprint(&new_db)?;
@@ -415,7 +452,12 @@ mod tests {
     fn snapshot(dir: &Path) -> Vec<(String, String)> {
         fsutil::walk_files(dir)
             .into_iter()
-            .filter(|(n, _)| !n.starts_with("kb.db-") && n != "kb.lock" && n != "digest.lock")
+            .filter(|(n, _)| {
+                !n.starts_with("kb.db-")
+                    && n != "kb.lock"
+                    && n != "digest.lock"
+                    && n != "vectors/embed.lock"
+            })
             .map(|(n, _)| {
                 let h = fsutil::sha256_file(&dir.join(&n)).unwrap();
                 (n, h)
@@ -463,6 +505,48 @@ mod tests {
         );
         // ...and the old one is exactly as it was.
         assert_eq!(snapshot(&rig.old), old_before);
+    }
+
+    #[test]
+    fn the_semantic_index_and_the_model_move_along() {
+        let rig = rig();
+        fs::create_dir_all(rig.old.join("vectors")).unwrap();
+        fs::write(rig.old.join("vectors/bge-m3-int8-v1.sqlite3"), b"vectors").unwrap();
+        fs::create_dir_all(rig.old.join("models/bge-m3-int8")).unwrap();
+        fs::write(rig.old.join("models/bge-m3-int8/model.onnx"), b"model").unwrap();
+        apply(
+            &rig.config_file,
+            &rig.config,
+            &rig.new,
+            &ProgressSink::default(),
+        )
+        .unwrap();
+        assert_eq!(
+            fs::read(rig.new.join("vectors/bge-m3-int8-v1.sqlite3")).unwrap(),
+            b"vectors"
+        );
+        assert_eq!(
+            fs::read(rig.new.join("models/bge-m3-int8/model.onnx")).unwrap(),
+            b"model"
+        );
+        assert!(
+            rig.old.join("models/bge-m3-int8/model.onnx").is_file(),
+            "the old copy is left alone"
+        );
+    }
+
+    #[test]
+    fn a_move_waits_for_a_running_vector_builder_instead_of_copying_under_it() {
+        let rig = rig();
+        let _builder = SyncLock::acquire(
+            &crate::kb::semantic::build::lock_path(&DataPaths::new(&rig.old)),
+            Duration::ZERO,
+        )
+        .unwrap()
+        .unwrap();
+        let err = migrate_data(&rig.old, &rig.new, &ProgressSink::default()).unwrap_err();
+        assert!(err.contains("semantic index is being built"), "{err}");
+        assert!(!rig.new.join("raw").exists(), "nothing was copied");
     }
 
     #[test]

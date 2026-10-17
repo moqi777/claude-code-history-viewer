@@ -197,8 +197,8 @@ pub fn check_entry_path(path: &str) -> Result<(), String> {
     }
     let mut parts = path.split('/').peekable();
     let first = parts.peek().copied().unwrap_or("");
-    if !(path == "kb.db" || first == "raw" || first == "notes") {
-        return bad("not under raw/ or notes/");
+    if !(path == "kb.db" || matches!(first, "raw" | "notes" | "vectors")) {
+        return bad("not under raw/, notes/ or vectors/");
     }
     if first != "kb.db" && path.split('/').count() < 2 {
         return bad("a folder name, not a file");

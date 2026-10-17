@@ -45,6 +45,7 @@ export const TransferSection = () => {
   const [report, setReport] = useState<KbExportReport | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [importOpen, setImportOpen] = useState(false);
+  const [withVectors, setWithVectors] = useState(true);
 
   const exportNow = async () => {
     if (!isTauri()) return;
@@ -59,7 +60,7 @@ export const TransferSection = () => {
     setError(null);
     try {
       // The save dialog has already asked about replacing an existing file.
-      setReport(await kbApi.exportStart(dest, true));
+      setReport(await kbApi.exportStart(dest, true, withVectors));
     } catch (e) {
       const { code } = splitTransferError(e);
       if (code !== "cancelled") setError(transferErrorText(e, t));
@@ -78,6 +79,15 @@ export const TransferSection = () => {
           <p className="text-xs text-warning" role="note">
             {t("kb.transfer.export.warn")}
           </p>
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={withVectors}
+              disabled={exporting}
+              onChange={(e) => setWithVectors(e.target.checked)}
+            />
+            {t("kb.transfer.export.withVectors")}
+          </label>
           <div className="flex items-center gap-2">
             <Button variant="outline" disabled={exporting} onClick={() => void exportNow()}>
               {exporting && <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" />}

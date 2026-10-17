@@ -7,7 +7,7 @@ import { formatTime } from "@/utils/time";
 import { NoteCard } from "./KbNotes";
 import { openKbSession } from "./openSession";
 import { focusOf, sessionFromHit } from "./searchHit";
-import type { KbHit, KbSessionHit } from "./types";
+import type { KbHit, KbSemanticUse, KbSessionHit } from "./types";
 import { useKbStore } from "./useKbStore";
 
 const DEBOUNCE_MS = 300;
@@ -169,7 +169,9 @@ export const SearchResults = () => {
           time: response.data_as_of == null ? "—" : formatTime(response.data_as_of),
         })}
         {response.mode_used === "any" && <> · {t("kb.search.relaxed")}</>}
+        {response.mode_used === "hybrid" && <> · {t("kb.search.hybrid")}</>}
       </p>
+      <SemanticNote semantic={response.semantic} />
       {notes.length > 0 && (
         <section aria-label={t("kb.search.notesTitle")} className="border-b bg-muted/30">
           <h3 className="px-4 pt-2 text-xs font-medium text-muted-foreground">
@@ -192,6 +194,19 @@ export const SearchResults = () => {
       </ul>
     </div>
   );
+};
+
+/** One grey line when the vectors could not be used (or are not all built). */
+const SemanticNote = ({ semantic }: { semantic?: KbSemanticUse }) => {
+  const { t } = useTranslation();
+  if (semantic == null || semantic.state === "used" || semantic.state === "off") return null;
+  const text =
+    semantic.state === "index_building"
+      ? t("kb.search.semanticBuilding", {
+          percent: semantic.total > 0 ? Math.floor((semantic.indexed * 100) / semantic.total) : 0,
+        })
+      : t(`kb.search.semanticState.${semantic.state}`);
+  return <p className="border-b px-4 py-1 text-xs text-muted-foreground">{text}</p>;
 };
 
 const ResultCard = ({ hit }: { hit: KbSessionHit }) => {
@@ -225,6 +240,9 @@ const ResultCard = ({ hit }: { hit: KbSessionHit }) => {
           )}
           {s.is_subagent && <Badge variant="muted">{t("kb.sessions.subagentBadge")}</Badge>}
           {hit.has_note === true && <Badge variant="outline">{t("kb.search.hasNote")}</Badge>}
+          {(hit.match === "semantic" || hit.match === "both") && (
+            <Badge variant="outline">{t(`kb.search.match.${hit.match}`)}</Badge>
+          )}
         </span>
         <span className="flex flex-wrap items-center gap-x-3 text-xs text-muted-foreground">
           <Badge variant="outline">{s.source}</Badge>

@@ -263,7 +263,7 @@ impl ScheduleApply for SystemSchedule {
 
 pub fn save_config(
     file: &Path,
-    next: KbConfig,
+    mut next: KbConfig,
     query: &dyn volume::SystemQuery,
     scheduler: &dyn ScheduleApply,
 ) -> Res<SaveOutcome> {
@@ -277,6 +277,11 @@ pub fn save_config(
                 "the data directory is changed with 'Move data directory', not by saving".into(),
             );
         }
+    }
+    // Semantic search has commands of its own (they download and test first);
+    // a settings page opened before one of them ran must not undo it.
+    if let Some(old) = &previous {
+        next.semantic = old.semantic.clone();
     }
     next.validate()?;
     // Enabling (or re-pointing) the backup disk requires the test to pass.
@@ -742,6 +747,31 @@ mod tests {
         config.schedule_enabled = false;
         save_config(&rig.file, config, &FakeQuery::default(), &sched).unwrap();
         assert_eq!(sched.uninstalls.get(), 1);
+    }
+
+    #[test]
+    fn a_settings_page_opened_earlier_cannot_undo_semantic_search() {
+        let rig = rig();
+        let mut config = draft(&rig);
+        config.semantic.enabled = true;
+        config.semantic.source = "huggingface".into();
+        config.save_to(&rig.file).unwrap();
+        // the page was opened before it was switched on: its copy says off
+        let mut stale = config.clone();
+        stale.semantic.enabled = false;
+        stale.semantic.source = "modelscope".into();
+        stale.interval_secs = 900;
+        save_config(
+            &rig.file,
+            stale,
+            &FakeQuery::default(),
+            &FakeSchedule::new(false),
+        )
+        .unwrap();
+        let now = KbConfig::load_from(&rig.file).unwrap();
+        assert_eq!(now.interval_secs, 900, "the page's own settings are saved");
+        assert!(now.semantic.enabled);
+        assert_eq!(now.semantic.source, "huggingface");
     }
 
     #[test]

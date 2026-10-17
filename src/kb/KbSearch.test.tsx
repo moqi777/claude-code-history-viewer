@@ -245,4 +245,35 @@ describe("home page search", () => {
     expect(screen.queryByText("kb.search.none")).toBeNull();
     expect(screen.getByText("WindowServer 内存膨胀至 28GB 的根因是 QQ")).toBeTruthy();
   });
+
+  it("marks sessions found by meaning, and says so when the vectors are only partly built", async () => {
+    await runSearch({
+      state: "ok",
+      response: response({
+        mode_used: "hybrid",
+        results: [hit({ match: "semantic", semantic_score: 0.7, hits: [] }), hit({ match: "keyword", rank: 2, session: { ...hit().session, session_id: "other" } })],
+        semantic: { state: "index_building", indexed: 600, total: 1000, note: "" },
+      }),
+    });
+    expect(screen.getByText("kb.search.match.semantic")).toBeTruthy();
+    expect(screen.getAllByText(/kb\.search\.match\./).length).toBe(1); // plain keyword hits stay unmarked
+    expect(document.body.textContent).toContain("kb.search.hybrid");
+    expect(screen.getByText(/kb\.search\.semanticBuilding/).textContent).toContain('"percent":60');
+  });
+
+  it("explains in one line why the vectors were not used, and stays quiet when they are off", async () => {
+    await runSearch({
+      state: "ok",
+      response: response({ semantic: { state: "model_corrupt", indexed: 0, total: 0, note: "x" } }),
+    });
+    expect(screen.getByText("kb.search.semanticState.model_corrupt")).toBeTruthy();
+  });
+
+  it("shows nothing about semantic search when it is off", async () => {
+    await runSearch({
+      state: "ok",
+      response: response({ semantic: { state: "off", indexed: 0, total: 0, note: "" } }),
+    });
+    expect(document.body.textContent).not.toContain("kb.search.semantic");
+  });
 });

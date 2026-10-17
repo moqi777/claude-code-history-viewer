@@ -36,6 +36,12 @@ use super::transfer::{
 };
 
 const LOCK_WAIT: Duration = Duration::from_secs(60);
+/// A vector builder is done within a minute or two; tests must not wait that long.
+const EMBED_WAIT: Duration = if cfg!(test) {
+    Duration::from_millis(300)
+} else {
+    Duration::from_secs(60)
+};
 const SPACE_MARGIN_PERCENT: u64 = 110;
 const STAGED_MARKER: &str = ".agentkb-staged";
 const EXCLUDE_CWD_KEY: &str = "exclude_cwd_applied";
@@ -572,6 +578,8 @@ pub struct ImportReport {
     pub config: KbConfig,
     pub config_written: bool,
     pub warnings: Vec<String>,
+    /// The file carried a semantic index made with the same model, and it was taken over.
+    pub vectors_adopted: bool,
     pub duration_ms: u64,
 }
 
@@ -641,8 +649,30 @@ fn apply_empty(env: &KbEnv, staging: &Path, stamp: &str, report: &mut ImportRepo
     std::fs::rename(&staged_notes, data.notes()).map_err(|e| rename_err("notes/", e))?;
     step("after_notes")?;
     std::fs::rename(staging.join("kb.db"), data.db()).map_err(|e| rename_err("kb.db", e))?;
+    report.vectors_adopted = adopt_vectors(data, staging);
     fsutil::fsync_dir(data.root());
     Ok(())
+}
+
+/// Take over the semantic index of the file, when it was made with the model
+/// this program uses and there is none here. Best effort: it is derived data,
+/// and the builder makes it again if this fails.
+fn adopt_vectors(data: &DataPaths, staging: &Path) -> bool {
+    use super::semantic::{model, store};
+    let target = store::path(data);
+    let Some(name) = target.file_name() else {
+        return false;
+    };
+    let staged = staging.join("vectors").join(name);
+    if target.exists()
+        || !matches!(
+            store::Store::open_ro(&staged, model::model_sha()),
+            Ok(Some(_))
+        )
+    {
+        return false;
+    }
+    std::fs::create_dir_all(store::dir(data)).is_ok() && std::fs::rename(&staged, &target).is_ok()
 }
 
 fn count_checks_empty(manifest: &Manifest, data: &DataPaths) -> Vec<Check> {
@@ -832,6 +862,14 @@ pub fn commit(
     })?;
     let _digest = SyncLock::acquire(&data.digest_lock(), Duration::ZERO)?
         .ok_or_else(|| TransferError::new("digest_running", "a digest is running"))?;
+    // A vector builder reads kb.db and writes next to it; let it finish.
+    let _embed = SyncLock::acquire(&super::semantic::build::lock_path(data), EMBED_WAIT)?
+        .ok_or_else(|| {
+            TransferError::new(
+                "embed_running",
+                "the semantic index is being built; try again in a moment",
+            )
+        })?;
     cancel.check()?;
 
     let local_paths = LocalPaths::from_env(env);
@@ -868,6 +906,7 @@ pub fn commit(
         config: merged.clone(),
         config_written: false,
         warnings: Vec::new(),
+        vectors_adopted: false,
         duration_ms: 0,
     };
     let mut meter = Meter::new(progress, "import");

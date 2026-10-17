@@ -384,4 +384,110 @@ mod tests {
             UseState::ModelMissing,
         );
     }
+
+    // ---- the whole path with a stand-in embedder -----------------------
+
+    use crate::kb::semantic::chunk::{text_sha, Chunk};
+    use crate::kb::semantic::embed::fake::vector_of;
+
+    const MODEL: &[u8] = b"model bytes";
+
+    fn data_with_model() -> (tempfile::TempDir, DataPaths) {
+        let tmp = tempfile::tempdir().unwrap();
+        let data = DataPaths::new(tmp.path());
+        std::fs::create_dir_all(model::dir(&data)).unwrap();
+        std::fs::write(model::dir(&data).join("model.onnx"), MODEL).unwrap();
+        (tmp, data)
+    }
+
+    fn fill(data: &DataPaths, rows: &[(&str, &str, &str)]) {
+        let mut store = Store::open(&super::super::store::path(data), model::model_sha()).unwrap();
+        let chunks: Vec<Chunk> = rows
+            .iter()
+            .map(|(session, key, text)| Chunk {
+                source: "claude".into(),
+                session_id: (*session).into(),
+                key: (*key).into(),
+                kind: "user",
+                text: (*text).into(),
+                sha: text_sha(text),
+            })
+            .collect();
+        let pairs: Vec<(&Chunk, Vec<f32>)> =
+            chunks.iter().map(|c| (c, vector_of(&c.text))).collect();
+        store.put(&pairs).unwrap();
+    }
+
+    fn ask(data: &DataPaths, query: &str) -> SemanticInput {
+        let fake: &MakeEmbedder<'_> = &|_| Ok(Box::new(FakeEmbedder::default()));
+        prepare_with(data, model::testing::spec(MODEL), true, false, query, fake)
+    }
+
+    #[test]
+    fn a_damaged_model_an_empty_index_and_a_failing_embedder_each_fall_back() {
+        let (_t, data) = data_with_model();
+        unusable(&ask(&data, "q"), UseState::IndexEmpty);
+        fill(&data, &[("s1", "m:1:0", "battery drains fast overnight")]);
+        let broken: &MakeEmbedder<'_> = &|_| Err("cannot load".into());
+        let input = prepare_with(&data, model::testing::spec(MODEL), true, false, "q", broken);
+        unusable(&input, UseState::Error);
+        assert!(input.info.note.contains("keywords used"));
+        std::fs::write(model::dir(&data).join("model.onnx"), b"model bytez").unwrap();
+        unusable(&ask(&data, "q"), UseState::ModelCorrupt);
+    }
+
+    #[test]
+    fn a_complete_index_finds_the_session_whose_words_match() {
+        let (_t, data) = data_with_model();
+        fill(
+            &data,
+            &[
+                ("s1", "m:1:0", "battery drains fast overnight"),
+                ("s2", "m:1:0", "nginx returns a bad gateway"),
+                ("s3", "t", "terminal opens in a given folder"),
+            ],
+        );
+        crate::kb::semantic::state::write(
+            &data,
+            &crate::kb::semantic::state::EmbedState {
+                total: 3,
+                done: 3,
+                ..Default::default()
+            },
+        );
+        let input = ask(&data, "battery drains");
+        assert_eq!(input.info.state, UseState::Used);
+        assert_eq!((input.info.indexed, input.info.total), (3, 3));
+        assert_eq!(input.sessions[0].session_id, "s1");
+        assert_eq!(
+            input.sessions[0].best,
+            ("user".to_string(), "m:1:0".to_string())
+        );
+    }
+
+    #[test]
+    fn a_half_built_index_is_used_and_says_so() {
+        let (_t, data) = data_with_model();
+        fill(&data, &[("s1", "m:1:0", "battery drains fast overnight")]);
+        crate::kb::semantic::state::write(
+            &data,
+            &crate::kb::semantic::state::EmbedState {
+                total: 4,
+                done: 1,
+                ..Default::default()
+            },
+        );
+        let input = ask(&data, "battery drains");
+        assert_eq!(input.info.state, UseState::IndexBuilding);
+        assert_eq!((input.info.indexed, input.info.total), (1, 4));
+        assert!(input.info.note.contains("25%"), "{}", input.info.note);
+        assert_eq!(input.sessions.len(), 1);
+    }
+
+    #[test]
+    fn the_state_is_written_as_snake_case_words() {
+        let v =
+            serde_json::to_value(SemanticInput::unused(UseState::ModelMissing, "x").info).unwrap();
+        assert_eq!(v["state"], "model_missing");
+    }
 }

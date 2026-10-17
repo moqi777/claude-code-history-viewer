@@ -11,6 +11,7 @@ const KNOWN_ERRORS = new Set([
   "corrupt",
   "too_new",
   "digest_running",
+  "embed_running",
   "busy",
   "no_space",
   "exists",

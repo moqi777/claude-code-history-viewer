@@ -19,7 +19,7 @@ pub const SKILL_DIR_NAME: &str = "agentkb";
 const SKILL_FILE: &str = "SKILL.md";
 const MARKER_PREFIX: &str = "<!-- agentkb-skill v1";
 /// Template revision; bump when the text changes so installed copies show as stale.
-pub const TEMPLATE_VERSION: u32 = 3;
+pub const TEMPLATE_VERSION: u32 = 4;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -111,6 +111,8 @@ description: Search the user's past Claude Code and Codex conversations (backed 
 注意：\n\
 - 需要完整字段或把子会话分开列出时才加 `--verbose` / `--include-subagents`。\n\
 - 只想要原始消息命中时加 `--no-notes`；想多看几条笔记加 `--notes 5`。\n\
+- `has_note` 为 true 而 `hits` 为空，表示这个会话是靠笔记找到的（笔记里有你要的内容，原消息里没有这些词）：看 `notes` 里属于它的那条，要核对原文就用那条笔记的 `show`。\n\
+- 结果带 `match` 时：“both”是关键词和语义都命中，最可信；“keyword”是词对上了；“semantic”只表示意思相近，原文不一定有这些词，`hits` 里给的是意思最近的一段，先用 `--kb-show` 读原文确认再引用。`semantic.state` 不是“used”时本次只用了关键词（`semantic.note` 写着原因），照常使用结果即可。\n\
 - 调用命令时不要加管道、`cd` 或其他命令拼接（会让预授权的前缀匹配失效，又弹确认）。\n\
 - 不要自己 grep 或读取 `~/.claude`、`~/.codex`、`~/AgentKB`，只用上面两个命令。\n\
 - 结果是过去的记录，可能已过时（看 `data_as_of` 和会话日期），据此动手前先到代码里核实。\n\

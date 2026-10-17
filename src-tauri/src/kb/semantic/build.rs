@@ -44,9 +44,15 @@ pub struct Options {
 
 impl Options {
     pub fn automatic() -> Self {
+        // The variables are for measuring and testing only.
+        let number = |name: &str| std::env::var(name).ok().and_then(|v| v.parse::<u64>().ok());
         Self {
-            budget: Some(AUTO_BUDGET),
-            threads: AUTO_THREADS,
+            budget: Some(
+                number("AGENTKB_EMBED_BUDGET_SECS").map_or(AUTO_BUDGET, Duration::from_secs),
+            ),
+            threads: number("AGENTKB_EMBED_THREADS")
+                .and_then(|n| usize::try_from(n).ok())
+                .map_or(AUTO_THREADS, |n| n.max(1)),
             polite: true,
         }
     }
@@ -242,15 +248,20 @@ pub fn run(env: &Env<'_>, opts: &Options, cancel: &AtomicBool) -> Result<Outcome
     ));
     let compute_from = Instant::now();
     let mut embedded = 0usize;
+    let out_of_time = || {
+        cancel.load(Ordering::SeqCst) || opts.budget.is_some_and(|b| compute_from.elapsed() >= b)
+    };
     for window in todo.chunks(WINDOW) {
-        if cancel.load(Ordering::SeqCst) || opts.budget.is_some_and(|b| compute_from.elapsed() >= b)
-        {
+        if out_of_time() {
             break;
         }
         let mut order: Vec<&Chunk> = window.to_vec();
         order.sort_by_key(|c| c.text.chars().count());
         let mut rows: Vec<(&Chunk, Vec<f32>)> = Vec::with_capacity(order.len());
         for batch in order.chunks(BATCH) {
+            if out_of_time() {
+                break;
+            }
             let texts: Vec<String> = batch
                 .iter()
                 .map(|c| crate::kb::redact::redact(&c.text).into_owned())
@@ -260,11 +271,15 @@ pub fn run(env: &Env<'_>, opts: &Options, cancel: &AtomicBool) -> Result<Outcome
         }
         vectors.put(&rows)?;
         embedded += rows.len();
+        let stopped_inside = rows.len() < window.len();
         let done = total - todo.len() + embedded;
         write_state(data, |s| {
             s.done = done;
             s.pid = Some(std::process::id());
         });
+        if stopped_inside {
+            break; // what was computed is saved
+        }
     }
     let secs = started.elapsed().as_secs_f64();
     let done = total - todo.len() + embedded;

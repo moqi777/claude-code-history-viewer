@@ -17,6 +17,7 @@ import { Field, IntervalField, MirrorField, SourcesField, VerdictLine } from "./
 import { DigestField } from "./KbDigestField";
 import { digestValid, excludesValid, parseExcludes } from "./logic";
 import { SkillField } from "./SkillField";
+import { SemanticField } from "./KbSemantic";
 import { TransferSection } from "./KbTransfer";
 import { useTest } from "./useTest";
 import { describeMigrateCheck } from "./messages";
@@ -166,6 +167,8 @@ export const KbSettings = () => {
             <SkillField />
 
             <DigestField draft={draft} onChange={setDraft} />
+
+            <SemanticField />
 
             <MoveDataDir current={saved.data_dir} />
 

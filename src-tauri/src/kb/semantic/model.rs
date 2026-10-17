@@ -465,6 +465,28 @@ pub fn import_folder(data: &DataPaths, spec: &ModelSpec, folder: &Path) -> Resul
     Ok(())
 }
 
+/// A one-file spec for tests elsewhere.
+#[cfg(test)]
+pub mod testing {
+    use super::*;
+
+    pub fn spec(content: &'static [u8]) -> &'static ModelSpec {
+        let sha: &'static str = Box::leak(hex(&Sha256::digest(content)).into_boxed_str());
+        let files: &'static [FileSpec] = Box::leak(Box::new([FileSpec {
+            name: "model.onnx",
+            size: content.len() as u64,
+            sha256: sha,
+            remote: "m",
+            local_names: &["model.onnx"],
+        }]));
+        Box::leak(Box::new(ModelSpec {
+            files,
+            hf_repo: "x",
+            ms_repo: "x",
+        }))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -129,6 +129,7 @@ pub fn export(
     config: &KbConfig,
     dest: &Path,
     overwrite: bool,
+    with_vectors: bool,
     cancel: &Cancel,
     progress: &ProgressSink,
 ) -> TResult<ExportReport> {
@@ -247,6 +248,29 @@ pub fn export(
             len: std::fs::metadata(&to).map_or(size, |m| m.len()),
             from: to,
         });
+    }
+
+    // The semantic index (a derived file, 25 MB): a consistent copy made with
+    // SQLite's backup interface, since a builder may be writing to it.
+    if with_vectors {
+        let vectors = super::semantic::store::path(data);
+        if let Ok(Some(store)) =
+            super::semantic::store::Store::open_ro(&vectors, super::semantic::model::model_sha())
+        {
+            let name = vectors
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            let to = staging.join("vectors").join(&name);
+            std::fs::create_dir_all(staging.join("vectors"))
+                .map_err(|e| TransferError::io(format!("cannot create the vectors folder: {e}")))?;
+            store.backup_to(&to).map_err(TransferError::io)?;
+            items.push(Item {
+                entry: format!("vectors/{name}"),
+                len: std::fs::metadata(&to).map_or(0, |m| m.len()),
+                from: to,
+            });
+        }
     }
 
     // Raw files: hard-linked, to the length the database vouches for.
