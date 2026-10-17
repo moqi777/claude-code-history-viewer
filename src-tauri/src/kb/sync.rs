@@ -1677,6 +1677,128 @@ mod tests {
         assert!(response.hint.is_none());
     }
 
+    /// `n` Claude sessions that all say the same common words; session 0 also has a word of its own.
+    fn common_word_sandbox(n: usize) -> (Sandbox, Vec<String>) {
+        let sb = Sandbox::new();
+        let dir = sb.claude.join("projects/-Users-me-proj");
+        let ids: Vec<String> = (0..n)
+            .map(|i| format!("{i:08}-2222-3333-4444-555555555555"))
+            .collect();
+        for (i, id) in ids.iter().enumerate() {
+            let own = if i == 0 { "幽灵标签" } else { "" };
+            write(
+                &dir.join(format!("{id}.jsonl")),
+                &(user_line(
+                    "2026-01-01T00:00:01Z",
+                    &format!("每次打开文件夹都要固定配置{own}"),
+                ) + &assistant_line(
+                    "2026-01-01T00:00:02Z",
+                    serde_json::json!([{"type":"text","text":"好的，这样处理"}]),
+                )),
+            );
+        }
+        let s = sb.sync();
+        assert_eq!(s.status, "ok", "{:?}", s.errors);
+        (sb, ids)
+    }
+
+    fn kinds_of(
+        sb: &Sandbox,
+        ids: &[String],
+        vectors: &[usize],
+    ) -> Vec<(String, Option<&'static str>)> {
+        use crate::kb::semantic::UseState;
+        let index = crate::kb::search::Index::open(&sb.env.data).unwrap();
+        let rows: Vec<(&str, &str, f32, &str)> = vectors
+            .iter()
+            .map(|i| ("claude", ids[*i].as_str(), 0.7, "m:1:0"))
+            .collect();
+        let response = crate::kb::search::search_with(
+            &index,
+            &params("每次 打开 固定 文件夹 幽灵标签"),
+            vector_input(UseState::Used, &rows),
+        )
+        .unwrap();
+        response
+            .results
+            .iter()
+            .map(|r| (r.session.session_id.clone(), r.match_kind))
+            .collect()
+    }
+
+    #[test]
+    fn a_session_found_only_through_common_words_is_not_a_keyword_hit_in_the_merge() {
+        let (sb, ids) = common_word_sandbox(60);
+        // 0 has the word of its own; 7 has only the words every session has
+        let got = kinds_of(&sb, &ids, &[0, 7]);
+        let kind = |i: usize| got.iter().find(|g| g.0 == ids[i]).unwrap().1;
+        assert_eq!(kind(0), Some("both"));
+        assert_eq!(
+            kind(7),
+            Some("semantic"),
+            "no bonus for 'every session says that'"
+        );
+        assert_eq!(got[0].0, ids[0]);
+        // it keeps its place among the keyword results when the vectors did not pick it
+        let got = kinds_of(&sb, &ids, &[0]);
+        assert!(
+            got.iter().skip(1).all(|g| g.1 == Some("keyword")),
+            "{got:?}"
+        );
+    }
+
+    #[test]
+    fn a_small_library_is_not_gated() {
+        let (sb, ids) = common_word_sandbox(10);
+        let got = kinds_of(&sb, &ids, &[0, 7]);
+        let kind = |i: usize| got.iter().find(|g| g.0 == ids[i]).unwrap().1;
+        assert_eq!(
+            kind(7),
+            Some("both"),
+            "under 50 sessions every word is 'common'"
+        );
+    }
+
+    #[test]
+    fn a_short_query_is_not_gated() {
+        use crate::kb::semantic::UseState;
+        let (sb, ids) = common_word_sandbox(60);
+        let index = crate::kb::search::Index::open(&sb.env.data).unwrap();
+        let rows: Vec<(&str, &str, f32, &str)> = (1..6)
+            .map(|i| ("claude", ids[i].as_str(), 0.7, "m:1:0"))
+            .collect();
+        let response = crate::kb::search::search_with(
+            &index,
+            &params("每次 打开"),
+            vector_input(UseState::Used, &rows),
+        )
+        .unwrap();
+        // the same sessions are all 'semantic' for a long question (above); a short one is not gated
+        assert!(response
+            .results
+            .iter()
+            .any(|r| r.match_kind == Some("both")));
+    }
+
+    #[test]
+    fn the_session_of_a_matching_note_still_comes_first_with_vectors() {
+        use crate::kb::semantic::UseState;
+        let sb = deadlock_sandbox("codex");
+        let index = crate::kb::search::Index::open(&sb.env.data).unwrap();
+        // the vectors prefer the Claude session
+        let input = vector_input(
+            UseState::Used,
+            &[
+                ("claude", CLAUDE_ID, 0.8, "m:1:0"),
+                ("codex", CODEX_ID, 0.6, "m:1:0"),
+            ],
+        );
+        let response = crate::kb::search::search_with(&index, &params("死锁"), input).unwrap();
+        assert_eq!(response.mode_used, "hybrid");
+        assert_eq!(response.results[0].session.session_id, CODEX_ID);
+        assert!(response.results[0].has_note);
+    }
+
     // ----- message index -------------------------------------------------
 
     fn user_line(ts: &str, text: &str) -> String {

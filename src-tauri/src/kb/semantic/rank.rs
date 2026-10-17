@@ -14,8 +14,15 @@ use crate::kb::paths::DataPaths;
 
 /// Sessions kept from the vector side.
 pub const TOP_SESSIONS: usize = 10;
-/// … and only those within this much (cosine) of the best one.
-pub const MARGIN: f32 = 0.1;
+/// … and only those within this much of the best one (after the size correction below). The
+/// result no longer changes once this is 0.2 (a copy of the library) or 0.35 (a later one, whose
+/// best session scored higher); 0.5 sits well on that plateau and still drops the hopeless.
+pub const MARGIN: f32 = 0.5;
+/// Longer sessions have more pieces, so some piece is close to any question by chance. Over 70
+/// questions and every session the score grew by 0.034 per unit of ln(pieces) whatever was asked
+/// (P6.1-design.md §3.1); three quarters of that is taken off, not all of it, because a long
+/// session also really has more to match. Only the order is corrected, the reported score is not.
+pub const SIZE_PENALTY: f32 = 0.025;
 /// A session's score: its best piece plus this much of its second best.
 pub const SECOND_WEIGHT: f32 = 0.25;
 /// Reciprocal rank fusion: `weight / (RRF_K + rank)`.
@@ -66,15 +73,17 @@ impl SemanticInput {
     }
 }
 
-/// Per session: best piece + a quarter of the second best; best sessions
-/// first, at most [`TOP_SESSIONS`], none further than [`MARGIN`] from the top.
+/// Per session: best piece + a quarter of the second best, less [`SIZE_PENALTY`] × ln(pieces the
+/// session has) for the order; best sessions first, at most [`TOP_SESSIONS`], none further than
+/// [`MARGIN`] from the top.
 pub fn aggregate(matrix: &Matrix, scores: &[f32]) -> Vec<VecSession> {
-    let mut best: HashMap<(&str, &str), (f32, f32, usize)> = HashMap::new();
+    let mut best: HashMap<(&str, &str), (f32, f32, usize, u32)> = HashMap::new();
     for (i, s) in scores.iter().enumerate() {
         let (src, id, _, _) = &matrix.owner[i];
         let e = best
             .entry((src.as_str(), id.as_str()))
-            .or_insert((f32::MIN, f32::MIN, i));
+            .or_insert((f32::MIN, f32::MIN, i, 0));
+        e.3 += 1;
         if *s > e.0 {
             e.1 = e.0;
             e.0 = *s;
@@ -83,28 +92,32 @@ pub fn aggregate(matrix: &Matrix, scores: &[f32]) -> Vec<VecSession> {
             e.1 = *s;
         }
     }
-    let mut v: Vec<VecSession> = best
+    // (session, the score the order and the margin use)
+    let mut v: Vec<(VecSession, f32)> = best
         .into_iter()
-        .map(|((src, id), (b, second, at))| VecSession {
-            source: src.to_string(),
-            session_id: id.to_string(),
-            score: b + if second > f32::MIN {
+        .map(|((src, id), (b, second, at, pieces))| {
+            let score = b + if second > f32::MIN {
                 SECOND_WEIGHT * second
             } else {
                 0.0
-            },
-            best: (matrix.owner[at].2.clone(), matrix.owner[at].3.clone()),
+            };
+            let session = VecSession {
+                source: src.to_string(),
+                session_id: id.to_string(),
+                score,
+                best: (matrix.owner[at].2.clone(), matrix.owner[at].3.clone()),
+            };
+            (session, score - SIZE_PENALTY * (pieces as f32).ln())
         })
         .collect();
     v.sort_by(|a, b| {
-        b.score
-            .total_cmp(&a.score)
-            .then_with(|| a.session_id.cmp(&b.session_id))
+        b.1.total_cmp(&a.1)
+            .then_with(|| a.0.session_id.cmp(&b.0.session_id))
     });
-    let top = v.first().map_or(0.0, |s| s.score);
-    v.retain(|s| s.score >= top - MARGIN);
+    let top = v.first().map_or(0.0, |s| s.1);
+    v.retain(|s| s.1 >= top - MARGIN);
     v.truncate(TOP_SESSIONS);
-    v
+    v.into_iter().map(|(session, _)| session).collect()
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -315,7 +328,7 @@ mod tests {
 
     #[test]
     fn far_behind_sessions_are_not_candidates() {
-        let (m, s) = matrix(&[("c", "a", "t", 0.8), ("c", "b", "t", 0.5)]);
+        let (m, s) = matrix(&[("c", "a", "t", 0.9), ("c", "b", "t", 0.3)]);
         let v = aggregate(&m, &s);
         assert_eq!(v.len(), 1);
         let rows: Vec<(&str, &str, &str, f32)> = (0..30)
@@ -330,6 +343,41 @@ mod tests {
             .collect();
         let (m, s) = matrix(&rows);
         assert_eq!(aggregate(&m, &s).len(), TOP_SESSIONS);
+    }
+
+    #[test]
+    fn a_session_with_many_pieces_does_not_win_on_size_alone() {
+        // 'big' has 200 pieces, the best of them a little closer than the only piece of 'small'
+        let mut rows: Vec<(&str, &str, &str, f32)> = vec![("c", "big", "m:0:0", 0.78)];
+        let keys: Vec<String> = (1..200).map(|i| format!("m:{i}:0")).collect();
+        for key in &keys {
+            rows.push(("c", "big", key.as_str(), 0.4));
+        }
+        rows.push(("c", "small", "m:1:0", 0.76));
+        let (m, s) = matrix(&rows);
+        let v = aggregate(&m, &s);
+        assert_eq!(
+            v.iter().map(|x| x.session_id.as_str()).collect::<Vec<_>>(),
+            ["small", "big"],
+            "ln(200) * 0.025 = 0.13 is taken off big"
+        );
+        let big = v.iter().find(|x| x.session_id == "big").unwrap();
+        assert!(
+            (big.score - (0.78 + 0.25 * 0.4)).abs() < 1e-6,
+            "the reported score is the plain one"
+        );
+    }
+
+    #[test]
+    fn the_margin_is_measured_after_the_correction() {
+        let (m, s) = matrix(&[("c", "a", "t", 0.9), ("c", "b", "t", 0.41)]);
+        assert_eq!(
+            aggregate(&m, &s).len(),
+            2,
+            "0.49 behind is still a candidate"
+        );
+        let (m, s) = matrix(&[("c", "a", "t", 0.9), ("c", "b", "t", 0.39)]);
+        assert_eq!(aggregate(&m, &s).len(), 1, "0.51 behind is not");
     }
 
     fn k(id: &str) -> (String, String) {

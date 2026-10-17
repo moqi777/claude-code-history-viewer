@@ -287,6 +287,10 @@ pub struct SessionHit {
     #[serde(skip_serializing_if = "is_zero")]
     pub subagent_hits: usize,
     pub hits: Vec<Hit>,
+    /// At least one matching message has a word that is not a common word (see
+    /// [`common_word_gate`]); true whenever there is nothing to gate. Not in the output.
+    #[serde(skip)]
+    pub(crate) content_match: bool,
 }
 
 #[allow(clippy::trivially_copy_pass_by_ref)] // the signature serde's skip_serializing_if needs
@@ -1161,6 +1165,7 @@ fn promote_note_sessions(
             semantic_score: None,
             subagent_hits: 0,
             hits: Vec::new(),
+            content_match: true,
         });
         added += 1;
     }
@@ -1261,6 +1266,56 @@ fn message_hit(
 /// Merge the sessions the vectors found into `results` (keyword result, best
 /// first) with reciprocal rank fusion. Returns how many sessions only the
 /// vectors found were added.
+/// A word in at least this share of the sessions says nothing about which one is meant.
+const COMMON_SHARE: (i64, i64) = (3, 10);
+/// A query of fewer words is a keyword query and is left alone.
+const GATE_MIN_WORDS: usize = 4;
+/// Below this many sessions nearly every word is in 30% of them.
+const GATE_MIN_SESSIONS: i64 = 50;
+
+/// Whether the keyword side may only count a session whose matching messages hold a word of the
+/// question that is *not* common (P6.1-design.md §3.3). Returns the words that are not common
+/// (lower-cased tokens), or `None` when the question is short, the library small, or every word
+/// is common - then nothing is gated.
+fn common_word_gate(
+    index: &Index,
+    groups: &[QueryGroup],
+) -> Result<Option<Vec<String>>, SearchError> {
+    if groups.len() < GATE_MIN_WORDS {
+        return Ok(None);
+    }
+    let sessions: i64 =
+        index
+            .conn
+            .query_row("SELECT COUNT(DISTINCT file_id) FROM messages", [], |r| {
+                r.get(0)
+            })?;
+    if sessions < GATE_MIN_SESSIONS {
+        return Ok(None);
+    }
+    let mut stmt = index.conn.prepare(
+        "SELECT COUNT(DISTINCT m.file_id) FROM messages_fts \
+         JOIN messages m ON m.id = messages_fts.rowid WHERE messages_fts MATCH ?1",
+    )?;
+    let mut content: Vec<String> = Vec::new();
+    for group in groups {
+        let tokens = group.all_tokens();
+        let Some(first) = tokens.first() else {
+            continue;
+        };
+        let having: i64 = stmt.query_row([quoted(first)], |r| r.get(0))?;
+        if having * COMMON_SHARE.1 < sessions * COMMON_SHARE.0 {
+            content.extend(tokens.iter().map(|t| t.to_lowercase()));
+        }
+    }
+    Ok((!content.is_empty()).then_some(content))
+}
+
+fn has_any(text: &str, words: &[String]) -> bool {
+    let lower = text.to_lowercase();
+    words.iter().any(|w| lower.contains(w.as_str()))
+}
+
 fn merge_semantic(
     index: &Index,
     params: &SearchParams,
@@ -1317,7 +1372,13 @@ fn merge_semantic(
         .iter()
         .map(|h| (h.row.info.source.clone(), h.row.info.session_id.clone()))
         .collect();
-    let fused = rank::fuse(&kw_keys, keyword_all, &vec_keys);
+    // a session found only through common words is not a keyword hit for the merge
+    let counted: Vec<(String, String)> = results
+        .iter()
+        .filter(|r| r.content_match)
+        .map(key_of)
+        .collect();
+    let fused = rank::fuse(&counted, keyword_all, &vec_keys);
 
     let mut old: Vec<Option<SessionHit>> = std::mem::take(results).into_iter().map(Some).collect();
     let mut out: Vec<SessionHit> = Vec::with_capacity(old.len() + vec_hits.len());
@@ -1335,7 +1396,11 @@ fn merge_semantic(
         match (existing, vec_hit) {
             (Some(mut hit), v) => {
                 hit.score = score;
-                hit.match_kind = Some(if f.in_vector { "both" } else { "keyword" });
+                hit.match_kind = Some(match (f.in_keyword, f.in_vector) {
+                    (true, true) => "both",
+                    (false, true) => "semantic",
+                    _ => "keyword",
+                });
                 hit.semantic_score =
                     v.map(|i| (f64::from(vec_hits[i].score) * 1000.0).round() / 1000.0);
                 out.push(hit);
@@ -1366,6 +1431,7 @@ fn merge_semantic(
                     semantic_score: Some((f64::from(h.score) * 1000.0).round() / 1000.0),
                     subagent_hits: 0,
                     hits,
+                    content_match: true,
                 });
                 added += 1;
             }
@@ -1472,6 +1538,11 @@ pub fn search_with(
         by_group.entry(group).or_default().push(c);
     }
     let matched_sessions = by_group.len();
+    let content_words = if semantic.sessions.is_empty() {
+        None
+    } else {
+        common_word_gate(index, &groups)?
+    };
     let exe = current_exe_string();
     let mut results: Vec<SessionHit> = Vec::new();
     for (group, mut messages) in by_group {
@@ -1492,6 +1563,9 @@ pub fn search_with(
         }
         score *= recency_factor(row.info.last_activity_at.as_deref());
         score *= title_factor(row.info.title.as_deref(), &groups);
+        let content_match = content_words.as_ref().map_or(true, |words| {
+            messages.iter().any(|m| has_any(&m.text, words))
+        });
         let hit_messages = messages.iter().filter(|m| m.file_id == group).count();
         let subagent_hits = messages.len() - hit_messages;
         let hits = messages
@@ -1541,6 +1615,7 @@ pub fn search_with(
             semantic_score: None,
             subagent_hits,
             hits,
+            content_match,
         });
     }
     results.sort_by(|a, b| b.score.total_cmp(&a.score));
