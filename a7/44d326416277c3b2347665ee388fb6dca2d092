@@ -1,0 +1,19 @@
+docs/agent-kb/P6.2-acceptance.md
+  s_d58d4b162ae7dc::t_fa3a4bf83128bd 1-26
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.11",
+  "base_commit_sha": "a744d326416277c3b2347665ee388fb6dca2d092",
+  "prompts": {},
+  "sessions": {
+    "s_d58d4b162ae7dc": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "c4c081c6-aaf3-412b-8f62-de2a98c156fc",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "moqing <moqing@tsign.cn>"
+    }
+  }
+}
