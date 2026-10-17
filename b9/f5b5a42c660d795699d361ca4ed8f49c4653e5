@@ -1,0 +1,19 @@
+docs/agent-kb/P8a-acceptance.md
+  s_d58d4b162ae7dc::t_bcd030fbb156a2 1-22
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.11",
+  "base_commit_sha": "b9f5b5a42c660d795699d361ca4ed8f49c4653e5",
+  "prompts": {},
+  "sessions": {
+    "s_d58d4b162ae7dc": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "c4c081c6-aaf3-412b-8f62-de2a98c156fc",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "moqing <moqing@tsign.cn>"
+    }
+  }
+}
