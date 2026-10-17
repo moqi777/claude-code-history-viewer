@@ -1,0 +1,9 @@
+docs/agent-kb/P8a-acceptance.md
+  ai_agent 27
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.11",
+  "base_commit_sha": "8b6e43915cf7d6aa16dc04b0eddb7fe63221c7e9",
+  "prompts": {}
+}
