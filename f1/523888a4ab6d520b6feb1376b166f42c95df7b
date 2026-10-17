@@ -1,0 +1,21 @@
+src-tauri/src/kb/mod.rs
+  s_cca7c29607588b::t_1199aa326f4699 44
+docs/agent-kb/P6.1-report.md
+  ai_agent 3,78-81
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.11",
+  "base_commit_sha": "f1523888a4ab6d520b6feb1376b166f42c95df7b",
+  "prompts": {},
+  "sessions": {
+    "s_cca7c29607588b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ef228e77-8d37-45df-ab42-2d4c28a0387d",
+        "model": "claude-sonnet-5-5"
+      },
+      "human_author": "moqing <moqing@tsign.cn>"
+    }
+  }
+}
