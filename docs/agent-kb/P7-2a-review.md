@@ -23,3 +23,10 @@
 ## 3. 下一步
 
 改完第 1 节，在 Windows 上重跑 7 项，追加到 `P7-2a-report.md`，推送到 `origin/agent-kb-win` 后停下。leader 复核后合并，然后开始 2b。
+
+## 4. 复审（`8a5a692`）：通过，已合并
+
+- 第 1 节 3 处都按要求改了：`sync_file` 删掉，`copy_compressed` 用可写句柄；`is_absolute` 恢复严格；`.info` 旁路文件只在 Windows 上写和读，跳过列表改成确切文件名并加了测试；`safe_join` 的 junction 测试也补了
+- 合并到 `agent-kb`（`391aa77`），leader 在 Mac 上重跑 7 项全部通过：vitest 1575，cargo test 库 1485 通过 0 失败 6 忽略，clippy、fmt 通过
+- Mac 上唯一的行为变化：换数据目录时不再拷贝 `kb.lock` 等锁文件，无影响，不重新打包安装
+- 下一步：步骤 2b，连同第 2 节的 3 条
