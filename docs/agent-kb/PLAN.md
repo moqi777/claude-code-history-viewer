@@ -60,7 +60,8 @@
 | 3 | 全文搜索（中文分词）+ `--kb-search` 命令 + skill 一键安装到 Claude 和 Codex | ✅ 已验收，见 `P3-acceptance.md`、`P3.1-acceptance.md` |
 | 4 | 每日整理成笔记 + 完结标识 + 补跑 + 手动总结按钮 | ✅ 已验收，见 `P4-acceptance.md`、`P4.1-acceptance.md` |
 | 5 | 一键导出 / 导入迁移 | ✅ 已验收，见 `P5-acceptance.md` |
-| 6 | 语义搜索（本地向量） | ✅ 已验收，见 `P6-acceptance.md`（用户真机确认进行中） |
+| 6 | 语义搜索（本地向量） | ✅ 已验收，见 `P6-acceptance.md` |
+| **6.1** | **口语长句的排序小修** | 见 `P6.1-colloquial-queries.md` |
 | 7 | Windows 版 | 见下方"第 7 期约定" |
 | 8 | 旧备份压缩存放 | 见下方"第 8 期约定" |
 
