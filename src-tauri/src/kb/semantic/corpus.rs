@@ -117,5 +117,10 @@ pub fn desired(conn: &Connection) -> Result<Vec<Chunk>, String> {
             out.extend(chunk::message_chunks(source, session, seq, kind, &text));
         }
     }
+    // Two files can carry the same session id (a session that was moved or
+    // copied): one key must mean one piece, or it would be computed again by
+    // every run. The first one is the most recently active session's.
+    let mut seen: HashSet<(String, String, String)> = HashSet::with_capacity(out.len());
+    out.retain(|c| seen.insert((c.source.clone(), c.session_id.clone(), c.key.clone())));
     Ok(out)
 }

@@ -107,7 +107,8 @@ impl Store {
         let store = Self { conn };
         match store.meta() {
             Ok(m) if m == Self::expected_meta(model_sha) => Ok(Some(store)),
-            _ => Ok(None),
+            Ok(_) => Ok(None),
+            Err(e) => Err(format!("the vector file is damaged ({e})")),
         }
     }
 
@@ -353,6 +354,20 @@ mod tests {
         assert!(Store::open_ro(&dir.path().join("none"), "x")
             .unwrap()
             .is_none());
+    }
+
+    #[test]
+    fn a_file_that_is_not_a_database_is_reported_as_damaged() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("v.sqlite3");
+        std::fs::write(
+            &p,
+            b"this is not a sqlite file at all, just some text of a decent length...",
+        )
+        .unwrap();
+        let err = Store::open_ro(&p, "x").err().unwrap();
+        assert!(err.contains("damaged"), "{err}");
+        assert!(Store::open(&p, "x").is_err());
     }
 
     #[test]

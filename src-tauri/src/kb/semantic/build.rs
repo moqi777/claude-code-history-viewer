@@ -175,7 +175,20 @@ pub fn run(env: &Env<'_>, opts: &Options, cancel: &AtomicBool) -> Result<Outcome
     let conn = corpus::open_ro(&db)?;
     let desired = corpus::desired(&conn)?;
     drop(conn);
-    let mut vectors = Store::open(&store::path(data), model::model_sha())?;
+    let vectors_path = store::path(data);
+    let mut vectors = match Store::open(&vectors_path, model::model_sha()) {
+        Ok(v) => v,
+        Err(e) => {
+            // Derived data: a damaged file is thrown away and made again.
+            log.line(&format!(
+                "embed: the vector file cannot be used ({e}); starting it again"
+            ));
+            for suffix in ["", "-wal", "-shm"] {
+                let _ = std::fs::remove_file(format!("{}{suffix}", vectors_path.display()));
+            }
+            Store::open(&vectors_path, model::model_sha())?
+        }
+    };
     let stored = vectors.keys()?;
     let (todo, d) = diff(&desired, &stored);
     log.line(&format!(
@@ -460,6 +473,37 @@ mod tests {
     }
 
     #[test]
+    fn two_files_with_the_same_session_id_do_not_make_every_run_compute_again() {
+        let (_t, data) = setup();
+        let conn = Connection::open(data.db()).unwrap();
+        conn.execute_batch(
+            "INSERT INTO sessions VALUES (4,'claude','s1','电池掉电快问题排查','2026-09-01',0);
+             INSERT INTO messages VALUES (4,1,'user','同一个会话号的另一份文件里，第一条消息说的是完全不同的内容');",
+        )
+        .unwrap();
+        drop(conn);
+        let cancel = AtomicBool::new(false);
+        run(&env(&data, &plenty, &fake), &Options::automatic(), &cancel).unwrap();
+        let out = run(&env(&data, &plenty, &fake), &Options::automatic(), &cancel).unwrap();
+        assert_eq!(out, Outcome::UpToDate, "the second run has nothing left");
+    }
+
+    #[test]
+    fn a_damaged_vector_file_is_thrown_away_and_built_again() {
+        let (_t, data) = setup();
+        std::fs::create_dir_all(store::dir(&data)).unwrap();
+        std::fs::write(
+            store::path(&data),
+            b"this is not a sqlite file at all, just some text of a decent length...",
+        )
+        .unwrap();
+        let cancel = AtomicBool::new(false);
+        let out = run(&env(&data, &plenty, &fake), &Options::automatic(), &cancel).unwrap();
+        assert_eq!(out, Outcome::Ran);
+        assert_eq!(count(&data), 6);
+    }
+
+    #[test]
     fn second_run_computes_nothing() {
         let (_t, data) = setup();
         let cancel = AtomicBool::new(false);
@@ -615,7 +659,15 @@ pub fn run_real(
     cancel: &std::sync::Arc<AtomicBool>,
 ) -> Result<Outcome, String> {
     crate::kb::digest::stop_on_sigterm(cancel);
-    let available = || sys::available_memory();
+    // `AGENTKB_EMBED_AVAILABLE_MB` pretends the machine has that much memory to
+    // spare: for trying the "short of memory" path, not for everyday use.
+    let available = || {
+        std::env::var("AGENTKB_EMBED_AVAILABLE_MB")
+            .ok()
+            .and_then(|v| v.parse::<u64>().ok())
+            .map(|mb| mb * 1_048_576)
+            .or_else(sys::available_memory)
+    };
     let make = |threads: usize| -> Result<Box<dyn Embedder>, String> {
         let dir = model::dir(data);
         super::embed::OrtEmbedder::load(&dir, threads).map(|e| Box::new(e) as Box<dyn Embedder>)

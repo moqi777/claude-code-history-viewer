@@ -136,3 +136,27 @@ pub mod fake {
         }
     }
 }
+
+#[cfg(test)]
+mod real_model {
+    use super::*;
+
+    /// Needs the real files: `AGENTKB_TEST_MODEL_DIR=<folder with model.onnx and tokenizer.json> cargo test -- --ignored real_model`.
+    #[test]
+    #[ignore = "needs the 570 MB model"]
+    fn related_sentences_are_closer_than_unrelated_ones() {
+        let dir = std::env::var("AGENTKB_TEST_MODEL_DIR").expect("AGENTKB_TEST_MODEL_DIR");
+        let mut e = OrtEmbedder::load(std::path::Path::new(&dir), 2).unwrap();
+        let v = e
+            .embed_passages(&[
+                "续航变短，电池掉电很快".to_string(),
+                "笔记本合上盖子一晚上掉了三成电".to_string(),
+                "今天晚饭吃什么".to_string(),
+            ])
+            .unwrap();
+        let dot = |a: &[f32], b: &[f32]| a.iter().zip(b).map(|(x, y)| x * y).sum::<f32>();
+        assert_eq!(v[0].len(), DIM);
+        assert!((dot(&v[0], &v[0]) - 1.0).abs() < 1e-3);
+        assert!(dot(&v[0], &v[1]) > dot(&v[0], &v[2]) + 0.1);
+    }
+}
