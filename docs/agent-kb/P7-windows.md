@@ -10,13 +10,13 @@ Mac 版现有的功能，在 Windows 10/11（x64）上全部能用：后台定�
 
 ## 2. 和 Mac 那边同时开发的规则（避免冲突）
 
-Mac 上的执行 AI 正在做第 6.1 期（搜索排序小修）。两边同时干活，按下面的规矩来：
+第 6.1、6.2 期已经结束（0.6.3）。之后 Mac 那边如果再有小修，仍可能和你同时改代码，所以按下面的规矩来：
 
 | 规则 | 内容 |
 |---|---|
 | 分支 | 你在 **`agent-kb-win`** 上开发：从 `origin/agent-kb` 最新的提交拉出，推送到 `origin/agent-kb-win`。**不要推送到 `agent-kb`**，合并回 `agent-kb` 由 leader 在检查点通过后做 |
 | 跟上 Mac | 每个检查点之前，以及开始一个新步骤之前，先 `git merge origin/agent-kb`，冲突自己解决并在报告里写明 |
-| 不碰的文件 | 6.1 期验收之前，**不要改 `src-tauri/src/kb/search.rs` 和 `src-tauri/src/kb/semantic/rank.rs`**。真要改，先停下来提问 |
+| 不碰的文件 | 搜索排序（`kb/search.rs`、`kb/semantic/rank.rs`）和搜索框（`src/kb/KbSearch.tsx`、`KbNotes.tsx`）刚调好，**没有平台原因不要改**；要改先停下来提问 |
 | 平台代码放哪 | 和系统有关的写法尽量集中到新文件，例如 `kb/platform/windows.rs`、`kb/platform/macos.rs`，原来的调用处只做最小改动，用 `#[cfg(target_os = ...)]` 分开。共用的逻辑不要复制一份 |
 | Mac 不能坏 | 你没法在 Mac 上跑测试，所以每个改动都要确认 macOS 那一侧的代码没有被改变行为。leader 会在合并前在 Mac 上跑全部检查并重新打包 |
 
