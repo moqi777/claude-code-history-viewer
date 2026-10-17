@@ -1,0 +1,66 @@
+src-tauri/src/kb/sync.rs
+  s_cca7c29607588b::t_70d889c2a62f4b 124-127,273-279,283-285
+  s_cca7c29607588b::t_9aa2a4d90db9bb 1197-1204,1219-1323,1414-1417,1422-1423
+  s_cca7c29607588b::t_f47f4223568f14 280-282,894,1324-1327
+src/kb/fixtures.ts
+  s_cca7c29607588b::t_9aa2a4d90db9bb 23
+  s_cca7c29607588b::t_ed3db1247a917b 19
+src/i18n/locales/zh-TW/kb.json
+  s_cca7c29607588b::t_ed3db1247a917b 64
+src-tauri/src/kb/commands.rs
+  s_cca7c29607588b::t_ed3db1247a917b 139-141
+src/kb/KbHome.test.tsx
+  s_cca7c29607588b::t_9aa2a4d90db9bb 75
+  s_cca7c29607588b::t_2b39d2c1365159 263-277
+src/kb/api.ts
+  s_cca7c29607588b::t_ed3db1247a917b 58
+src/kb/KbHome.tsx
+  s_cca7c29607588b::t_ed3db1247a917b 444-461
+src-tauri/src/kb/mod.rs
+  s_cca7c29607588b::t_70d889c2a62f4b 14
+  s_cca7c29607588b::t_9aa2a4d90db9bb 45
+src/i18n/locales/zh-CN/kb.json
+  s_cca7c29607588b::t_ed3db1247a917b 20
+src-tauri/src/kb/dedupe.rs
+  s_cca7c29607588b::t_a2658167e1b578 1-47,49-89,93-117,122-145,149-237,242,247-248,253-276,300-303,312-313
+  s_cca7c29607588b::t_a563bfe90cefac 48
+  s_cca7c29607588b::t_f47f4223568f14 90-92,118-121,146-148,238-241,243-246,249-252,277-299,304-311
+src-tauri/src/kb/status.rs
+  s_cca7c29607588b::t_70d889c2a62f4b 41-42,58-63,91,163-165
+src/kb/types.ts
+  s_cca7c29607588b::t_ed3db1247a917b 95-99,112
+src/i18n/locales/ko/kb.json
+  s_cca7c29607588b::t_ed3db1247a917b 64
+src/i18n/types.generated.ts
+  ai_agent 8
+src/i18n/locales/en/kb.json
+  s_cca7c29607588b::t_ed3db1247a917b 64
+src/kb/useKbStore.ts
+  s_cca7c29607588b::t_ed3db1247a917b 76,330-332
+src/kb/branding.ts
+  s_cca7c29607588b::t_9aa2a4d90db9bb 5
+src-tauri/src/kb/backup.rs
+  s_cca7c29607588b::t_70d889c2a62f4b 56-59,349-356,360-361
+  s_cca7c29607588b::t_f47f4223568f14 357-359
+  s_cca7c29607588b::t_7dc1b3e6f4b970 631-677
+src/i18n/locales/ja/kb.json
+  s_cca7c29607588b::t_ed3db1247a917b 64
+docs/agent-kb/P8a-report.md
+  ai_agent 1-65
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.11",
+  "base_commit_sha": "ba85285cf8de1e4800783b6091b1e0ad227d4e56",
+  "prompts": {},
+  "sessions": {
+    "s_cca7c29607588b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ef228e77-8d37-45df-ab42-2d4c28a0387d",
+        "model": "claude-sonnet-5-5"
+      },
+      "human_author": "moqing <moqing@tsign.cn>"
+    }
+  }
+}
