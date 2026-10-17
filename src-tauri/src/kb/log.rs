@@ -10,6 +10,8 @@ const RETENTION_DAYS: u64 = 14;
 const FILE_PREFIX: &str = "sync-";
 /// The digest keeps its own file next to the sync log.
 const DIGEST_PREFIX: &str = "digest-";
+/// … and so does the vector builder.
+const EMBED_PREFIX: &str = "embed-";
 const FILE_SUFFIX: &str = ".log";
 
 pub struct SyncLog {
@@ -24,6 +26,11 @@ impl SyncLog {
     /// `<logs>/digest-YYYY-MM-DD.log`.
     pub fn open_digest(logs_dir: &Path) -> Self {
         Self::open_prefixed(logs_dir, DIGEST_PREFIX)
+    }
+
+    /// `<logs>/embed-YYYY-MM-DD.log`.
+    pub fn open_embed(logs_dir: &Path) -> Self {
+        Self::open_prefixed(logs_dir, EMBED_PREFIX)
     }
 
     fn open_prefixed(logs_dir: &Path, prefix: &str) -> Self {
@@ -64,7 +71,9 @@ fn prune_older_than(logs_dir: &Path, max_age: Duration) -> usize {
     for entry in entries.flatten() {
         let name = entry.file_name();
         let Some(name) = name.to_str() else { continue };
-        if !((name.starts_with(FILE_PREFIX) || name.starts_with(DIGEST_PREFIX))
+        if !((name.starts_with(FILE_PREFIX)
+            || name.starts_with(DIGEST_PREFIX)
+            || name.starts_with(EMBED_PREFIX))
             && name.ends_with(FILE_SUFFIX))
         {
             continue;

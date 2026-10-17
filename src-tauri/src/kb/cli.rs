@@ -16,6 +16,7 @@ const USAGE: &str = "usage: --kb-sync | --kb-reindex | --kb-backup | --kb-move-d
 | --kb-schedule install|uninstall|status|ensure | --kb-search \"<words>\" [options] \
 | --kb-show <source:session-id> [--around <seq>] [options] | --kb-skill-print claude|codex \
 | --kb-digest --auto|--all|--session <source:session-id>|--test \
+| --kb-embed --auto|--all|--status|--test \
 | --kb-export <file.agentkb> [--overwrite] \
 | --kb-import <file.agentkb> [--inspect|--plan] [--no-sync] [--no-settings] [--adopt-settings]";
 
@@ -34,6 +35,7 @@ pub fn try_run(args: &[String]) -> Option<i32> {
         "--kb-show" => run_show_command(&args[2..]),
         "--kb-skill-print" => run_skill_print_command(args.get(2).map(String::as_str)),
         "--kb-digest" => run_digest_command(&args[2..]),
+        "--kb-embed" => run_embed_command(&args[2..]),
         "--kb-backup" => run_backup_command(),
         "--kb-export" => run_export_command(&args[2..]),
         "--kb-import" => run_import_command(&args[2..]),
@@ -72,6 +74,7 @@ fn run_sync_command() -> i32 {
             print_json(&summary);
             if trigger != "cli" && matches!(summary.status.as_str(), "ok" | "partial") {
                 start_digest_if_due(&config);
+                start_embed_if_enabled(&config);
             }
             // A held lock is a normal outcome, not a failure launchd should log.
             i32::from(summary.status == "error" || summary.status == "partial")
@@ -83,6 +86,26 @@ fn run_sync_command() -> i32 {
             );
             1
         }
+    }
+}
+
+/// After a collection: when semantic search is on, let the vector builder
+/// catch up (a separate process; it exits at once when there is nothing to do).
+fn start_embed_if_enabled(config: &KbConfig) {
+    if !config.semantic.enabled {
+        return;
+    }
+    let data = super::paths::DataPaths::new(config.data_dir.clone());
+    if super::semantic::build::is_running(&data) {
+        return;
+    }
+    if let Err(e) = std::env::current_exe()
+        .map_err(|e| e.to_string())
+        .and_then(|exe| {
+            super::semantic::build::spawn_background(&exe, &data, &["--kb-embed", "--auto"])
+        })
+    {
+        eprintln!("vector builder not started: {e}");
     }
 }
 
@@ -110,6 +133,62 @@ fn start_digest_if_due(config: &KbConfig) {
             }
         }
         Err(e) => eprintln!("digest check failed: {e}"),
+    }
+}
+
+/// `--kb-embed --auto | --all | --status | --test`: the vector builder.
+fn run_embed_command(args: &[String]) -> i32 {
+    use super::semantic::{build, state};
+    let flags = match parse_flags(args, &[], &["auto", "all", "status", "test"]) {
+        Ok(flags) => flags,
+        Err(e) => return usage_error(&e),
+    };
+    let config = match load_config() {
+        Ok(config) => config,
+        Err(code) => return code,
+    };
+    let data = super::paths::DataPaths::new(config.data_dir.clone());
+    if flags.switches.contains("status") {
+        let mut st = state::read(&data);
+        if st.status == "running" && !build::is_running(&data) {
+            st.status = "idle".into();
+        }
+        print_json(&st);
+        return 0;
+    }
+    if flags.switches.contains("test") {
+        let report = build::test_model(&data);
+        print_json(&report);
+        return i32::from(!report.ok);
+    }
+    let opts = if flags.switches.contains("all") {
+        build::Options::everything()
+    } else if flags.switches.contains("auto") {
+        if !config.semantic.enabled {
+            return 0;
+        }
+        build::Options::automatic()
+    } else {
+        return usage_error("--kb-embed needs --auto, --all, --status or --test");
+    };
+    let cancel = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    match build::run_real(&data, &opts, &cancel) {
+        Ok(outcome) => {
+            print_json(
+                &serde_json::json!({"outcome": format!("{outcome:?}"), "state": state::read(&data)}),
+            );
+            0
+        }
+        Err(e) => {
+            eprintln!("{e}");
+            let mut st = state::read(&data);
+            st.status = "error".into();
+            st.message.clone_from(&e);
+            st.pid = None;
+            state::write(&data, &st);
+            print_json(&serde_json::json!({"outcome": "error", "message": e}));
+            1
+        }
     }
 }
 

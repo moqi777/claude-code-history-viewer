@@ -154,6 +154,34 @@ impl DigestConfig {
     }
 }
 
+/// Semantic search (phase 6). Off until the user has downloaded the model,
+/// tested it and switched it on.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct SemanticConfig {
+    pub enabled: bool,
+    /// Where "download model" fetches from: `modelscope` or `huggingface`.
+    pub source: String,
+}
+
+impl Default for SemanticConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            source: "modelscope".into(),
+        }
+    }
+}
+
+impl SemanticConfig {
+    fn validate(&self) -> Result<(), String> {
+        if !matches!(self.source.as_str(), "modelscope" | "huggingface") {
+            return Err("semantic.source must be modelscope or huggingface".into());
+        }
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
 pub struct KbConfig {
@@ -173,6 +201,7 @@ pub struct KbConfig {
     pub exclude_cwd_prefixes: Vec<String>,
     pub mirror: MirrorConfig,
     pub digest: DigestConfig,
+    pub semantic: SemanticConfig,
     /// Keys this version does not know, kept so a newer/older sibling program
     /// does not lose them when we save.
     #[serde(flatten)]
@@ -191,6 +220,7 @@ impl Default for KbConfig {
             exclude_cwd_prefixes: Vec::new(),
             mirror: MirrorConfig::default(),
             digest: DigestConfig::default(),
+            semantic: SemanticConfig::default(),
             extra: Map::new(),
         }
     }
@@ -401,6 +431,7 @@ impl KbConfig {
             }
         }
         self.digest.validate()?;
+        self.semantic.validate()?;
         let roots = SourceRoots::resolve(self);
         for root in [&roots.claude, &roots.codex].into_iter().flatten() {
             if self.data_dir.starts_with(root) || root.starts_with(&self.data_dir) {

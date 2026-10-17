@@ -1517,6 +1517,166 @@ mod tests {
         );
     }
 
+    // ----- semantic merge ------------------------------------------------
+
+    fn vector_input(
+        state: crate::kb::semantic::UseState,
+        sessions: &[(&str, &str, f32, &str)],
+    ) -> crate::kb::semantic::rank::SemanticInput {
+        crate::kb::semantic::rank::SemanticInput {
+            info: crate::kb::semantic::SemanticInfo {
+                state,
+                indexed: sessions.len(),
+                total: sessions.len(),
+                note: String::new(),
+            },
+            sessions: sessions
+                .iter()
+                .map(
+                    |(src, id, score, key)| crate::kb::semantic::rank::VecSession {
+                        source: (*src).to_string(),
+                        session_id: (*id).to_string(),
+                        score: *score,
+                        best: ("user".into(), (*key).to_string()),
+                    },
+                )
+                .collect(),
+        }
+    }
+
+    fn two_session_sandbox() -> Sandbox {
+        let sb = Sandbox::new();
+        write(
+            &sb.claude_file(),
+            &(user_line("2026-01-01T00:00:01Z", "线程池里出现死锁怎么办")
+                + &assistant_line(
+                    "2026-01-01T00:00:02Z",
+                    serde_json::json!([{"type":"text","text":"按固定顺序加锁就能避免死锁"}]),
+                )),
+        );
+        write(&sb.codex_file(), &codex_text());
+        let s = sb.sync();
+        assert_eq!(s.status, "ok", "{:?}", s.errors);
+        sb
+    }
+
+    fn params(query: &str) -> crate::kb::search::SearchParams {
+        crate::kb::search::SearchParams {
+            query: query.to_string(),
+            limit: Some(20),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn without_vectors_the_result_is_the_keyword_result_with_a_reason() {
+        use crate::kb::semantic::{rank::SemanticInput, UseState};
+        let sb = two_session_sandbox();
+        let index = crate::kb::search::Index::open(&sb.env.data).unwrap();
+        let input = SemanticInput::unused(UseState::ModelMissing, "the model is not downloaded");
+        let response = crate::kb::search::search_with(&index, &params("死锁"), input).unwrap();
+        assert_eq!(response.mode_used, "all");
+        assert_eq!(response.results.len(), 1);
+        let json = crate::kb::search::agent_json(&response, false);
+        assert_eq!(json["semantic"]["state"], "model_missing");
+        assert!(
+            json["results"][0].get("match").is_none(),
+            "no new key unless the vectors were used"
+        );
+        for key in [
+            "agentkb_marker",
+            "query",
+            "mode_used",
+            "notes",
+            "results",
+            "returned",
+        ] {
+            assert!(json.get(key).is_some(), "{key} must stay");
+        }
+        for key in ["rank", "score", "session", "resume", "has_note", "hits"] {
+            assert!(
+                json["results"][0].get(key).is_some() || key == "has_note",
+                "{key} must stay"
+            );
+        }
+    }
+
+    #[test]
+    fn vectors_add_a_session_the_words_missed_and_mark_where_each_came_from() {
+        use crate::kb::semantic::UseState;
+        let sb = two_session_sandbox();
+        let index = crate::kb::search::Index::open(&sb.env.data).unwrap();
+        // the keywords find the Claude session only; the vectors find both
+        let input = vector_input(
+            UseState::Used,
+            &[
+                ("codex", CODEX_ID, 0.7, "m:1:0"),
+                ("claude", CLAUDE_ID, 0.65, "m:1:0"),
+            ],
+        );
+        let response = crate::kb::search::search_with(&index, &params("死锁"), input).unwrap();
+        assert_eq!(response.mode_used, "hybrid");
+        let got: Vec<(&str, Option<&str>)> = response
+            .results
+            .iter()
+            .map(|r| (r.session.session_id.as_str(), r.match_kind))
+            .collect();
+        assert_eq!(
+            got,
+            vec![(CLAUDE_ID, Some("both")), (CODEX_ID, Some("semantic"))]
+        );
+        assert_eq!(response.matched_sessions, 2);
+        let only_vector = &response.results[1];
+        assert_eq!(only_vector.semantic_score, Some(0.7));
+        assert_eq!(only_vector.hit_messages, 0);
+        assert_eq!(
+            only_vector.hits.len(),
+            1,
+            "the best piece is shown as the hit"
+        );
+        assert!(only_vector.hits[0].snippet.contains("add a retry"));
+        assert!(only_vector.hits[0].show.contains("--kb-show codex:"));
+        assert_eq!(response.semantic.state, UseState::Used);
+        let ranks: Vec<usize> = response.results.iter().map(|r| r.rank).collect();
+        assert_eq!(ranks, vec![1, 2]);
+    }
+
+    #[test]
+    fn vector_only_sessions_respect_the_filters_and_the_limit() {
+        use crate::kb::semantic::UseState;
+        let sb = two_session_sandbox();
+        let index = crate::kb::search::Index::open(&sb.env.data).unwrap();
+        let input = || vector_input(UseState::Used, &[("codex", CODEX_ID, 0.7, "m:1:0")]);
+        let mut p = params("死锁");
+        p.source = Some("claude".into());
+        let r = crate::kb::search::search_with(&index, &p, input()).unwrap();
+        assert!(
+            r.results.iter().all(|x| x.session.source == "claude"),
+            "filter: source"
+        );
+        let mut p = params("死锁");
+        p.project = Some("no-such-project".into());
+        let r = crate::kb::search::search_with(&index, &p, input()).unwrap();
+        assert!(r.results.is_empty(), "filter: project");
+        let mut p = params("死锁");
+        p.limit = Some(1);
+        let r = crate::kb::search::search_with(&index, &p, input()).unwrap();
+        assert_eq!(r.results.len(), 1);
+    }
+
+    #[test]
+    fn nothing_for_the_words_but_something_for_the_meaning() {
+        use crate::kb::semantic::UseState;
+        let sb = two_session_sandbox();
+        let index = crate::kb::search::Index::open(&sb.env.data).unwrap();
+        let input = vector_input(UseState::Used, &[("claude", CLAUDE_ID, 0.7, "m:1:0")]);
+        let response =
+            crate::kb::search::search_with(&index, &params("zzqq不存在的词"), input).unwrap();
+        assert_eq!(response.results.len(), 1);
+        assert_eq!(response.results[0].match_kind, Some("semantic"));
+        assert!(response.hint.is_none());
+    }
+
     // ----- message index -------------------------------------------------
 
     fn user_line(ts: &str, text: &str) -> String {

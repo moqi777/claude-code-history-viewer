@@ -31,6 +31,7 @@ pub mod progress;
 pub mod redact;
 pub mod schedule;
 pub mod search;
+pub mod semantic;
 pub mod skill;
 pub mod status;
 pub mod sync;

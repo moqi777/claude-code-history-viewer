@@ -277,6 +277,12 @@ pub struct SessionHit {
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub has_note: bool,
     pub hit_messages: usize,
+    /// With semantic search on: `keyword`, `semantic` or `both`.
+    #[serde(rename = "match", skip_serializing_if = "Option::is_none")]
+    pub match_kind: Option<&'static str>,
+    /// Cosine similarity of the best piece, for `semantic` and `both`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub semantic_score: Option<f64>,
     /// Matching messages from sub-agent sessions folded into this entry.
     #[serde(skip_serializing_if = "is_zero")]
     pub subagent_hits: usize,
@@ -343,6 +349,8 @@ pub struct SearchResponse {
     pub notes: Vec<NoteHit>,
     pub results: Vec<SessionHit>,
     pub hint: Option<String>,
+    /// Whether the vectors were used, and if not, why.
+    pub semantic: super::semantic::SemanticInfo,
 }
 
 struct Candidate {
@@ -1149,6 +1157,8 @@ fn promote_note_sessions(
             has_note: true,
             session: info,
             hit_messages: 0,
+            match_kind: None,
+            semantic_score: None,
             subagent_hits: 0,
             hits: Vec::new(),
         });
@@ -1159,7 +1169,248 @@ fn promote_note_sessions(
     Ok(added)
 }
 
+/// Any session of this source with this id, sub-agent or not.
+fn file_of_any_session(
+    index: &Index,
+    source: &str,
+    session_id: &str,
+) -> Result<Option<i64>, SearchError> {
+    Ok(index
+        .conn
+        .query_row(
+            "SELECT file_id FROM sessions WHERE source=?1 AND session_id=?2 LIMIT 1",
+            rusqlite::params![source, session_id],
+            |r| r.get(0),
+        )
+        .optional()?)
+}
+
+/// The same session filters the keyword query applies in SQL, for a session
+/// only the vectors found.
+fn passes_filters(params: &SearchParams, info: &SessionInfo) -> bool {
+    let eq =
+        |want: &Option<String>, have: Option<&str>| match want.as_deref().filter(|w| !w.is_empty())
+        {
+            None => true,
+            Some(w) => have == Some(w),
+        };
+    if !eq(&params.source, Some(info.source.as_str()))
+        || !eq(&params.client, info.client.as_deref())
+    {
+        return false;
+    }
+    if let Some(project) = params.project.as_deref().filter(|p| !p.is_empty()) {
+        let hay = format!(
+            "{} {}",
+            info.project.as_deref().unwrap_or_default(),
+            info.cwd.as_deref().unwrap_or_default()
+        )
+        .to_lowercase();
+        if !hay.contains(&project.to_lowercase()) {
+            return false;
+        }
+    }
+    let when = info.last_activity_at.as_deref();
+    if let (Some(since), Some(when)) = (params.since.as_deref().filter(|s| !s.is_empty()), when) {
+        if when < since {
+            return false;
+        }
+    }
+    if let (Some(until), Some(when)) = (params.until.as_deref().filter(|s| !s.is_empty()), when) {
+        if when > until {
+            return false;
+        }
+    }
+    !(params.include_subagents == Some(false) && info.is_subagent)
+}
+
+/// The message a vector piece came from (`m:<seq>:<n>`), as a hit.
+fn message_hit(
+    index: &Index,
+    file_id: i64,
+    info: &SessionInfo,
+    key: &str,
+    exe: &str,
+) -> Option<Hit> {
+    let seq: i64 = key.strip_prefix("m:")?.split(':').next()?.parse().ok()?;
+    let (kind, ts, msg_key, text): (String, Option<String>, Option<String>, String) = index
+        .conn
+        .query_row(
+            "SELECT kind, ts, msg_key, text FROM messages WHERE file_id=?1 AND seq=?2",
+            rusqlite::params![file_id, seq],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+        )
+        .optional()
+        .ok()??;
+    let (excerpt, _) = cut_chars(&redact(&text), 300);
+    Some(Hit {
+        seq: u64::try_from(seq).unwrap_or(0),
+        kind,
+        at: ts,
+        msg_key,
+        snippet: excerpt,
+        subagent_session_id: None,
+        highlights: Vec::new(),
+        show: format!(
+            "{exe} --kb-show {}:{} --around {seq}",
+            info.source, info.session_id
+        ),
+    })
+}
+
+/// Merge the sessions the vectors found into `results` (keyword result, best
+/// first) with reciprocal rank fusion. Returns how many sessions only the
+/// vectors found were added.
+fn merge_semantic(
+    index: &Index,
+    params: &SearchParams,
+    results: &mut Vec<SessionHit>,
+    semantic: &super::semantic::rank::SemanticInput,
+    keyword_all: bool,
+    exe: &str,
+) -> Result<usize, SearchError> {
+    use super::semantic::rank;
+    struct VecHit {
+        file_id: i64,
+        row: SessionRow,
+        score: f32,
+        best: (String, String),
+    }
+    let expand = params.expand_subagents == Some(true);
+    let mut vec_hits: Vec<VecHit> = Vec::new();
+    for vs in &semantic.sessions {
+        let Some(mut file_id) = file_of_any_session(index, &vs.source, &vs.session_id)? else {
+            continue;
+        };
+        let Some(mut row) = session_row(index, file_id)? else {
+            continue;
+        };
+        if !passes_filters(params, &row.info) {
+            continue;
+        }
+        // like the keyword result, a sub-agent's hit belongs to the session that started it
+        if !expand && row.info.is_subagent {
+            if let Some(parent) = row.info.parent_session_id.clone() {
+                if let Some(pf) = file_of_session(index, &row.info.source, &parent)? {
+                    if let Some(prow) = session_row(index, pf)? {
+                        file_id = pf;
+                        row = prow;
+                    }
+                }
+            }
+        }
+        if vec_hits.iter().any(|h| {
+            h.row.info.source == row.info.source && h.row.info.session_id == row.info.session_id
+        }) {
+            continue;
+        }
+        vec_hits.push(VecHit {
+            file_id,
+            row,
+            score: vs.score,
+            best: vs.best.clone(),
+        });
+    }
+    let key_of = |r: &SessionHit| (r.session.source.clone(), r.session.session_id.clone());
+    let kw_keys: Vec<(String, String)> = results.iter().map(key_of).collect();
+    let vec_keys: Vec<(String, String)> = vec_hits
+        .iter()
+        .map(|h| (h.row.info.source.clone(), h.row.info.session_id.clone()))
+        .collect();
+    let fused = rank::fuse(&kw_keys, keyword_all, &vec_keys);
+
+    let mut old: Vec<Option<SessionHit>> = std::mem::take(results).into_iter().map(Some).collect();
+    let mut out: Vec<SessionHit> = Vec::with_capacity(old.len() + vec_hits.len());
+    let mut added = 0;
+    for f in &fused {
+        let key = (f.source.clone(), f.session_id.clone());
+        let vec_hit = vec_hits
+            .iter()
+            .position(|h| (h.row.info.source.clone(), h.row.info.session_id.clone()) == key);
+        let existing = kw_keys
+            .iter()
+            .position(|k| *k == key)
+            .and_then(|i| old[i].take());
+        let score = (f.score * 1000.0).round() / 10.0;
+        match (existing, vec_hit) {
+            (Some(mut hit), v) => {
+                hit.score = score;
+                hit.match_kind = Some(if f.in_vector { "both" } else { "keyword" });
+                hit.semantic_score =
+                    v.map(|i| (f64::from(vec_hits[i].score) * 1000.0).round() / 1000.0);
+                out.push(hit);
+            }
+            (None, Some(i)) => {
+                let h = &vec_hits[i];
+                let mut info = h.row.info.clone();
+                info.title = info.title.map(|t| redact(&t).into_owned());
+                let mirror = index.data.mirror_path(&h.row.mirror_rel).map_or_else(
+                    |_| h.row.mirror_rel.clone(),
+                    |p| p.to_string_lossy().into_owned(),
+                );
+                let hits: Vec<Hit> = message_hit(index, h.file_id, &info, &h.best.1, exe)
+                    .into_iter()
+                    .collect();
+                out.push(SessionHit {
+                    rank: 0,
+                    score,
+                    resume: resume_for(&info, exe),
+                    paths: Paths {
+                        mirror,
+                        original: h.row.source_path.clone(),
+                    },
+                    has_note: session_has_note(index, &info.source, &info.session_id),
+                    session: info,
+                    hit_messages: 0,
+                    match_kind: Some("semantic"),
+                    semantic_score: Some((f64::from(h.score) * 1000.0).round() / 1000.0),
+                    subagent_hits: 0,
+                    hits,
+                });
+                added += 1;
+            }
+            (None, None) => {}
+        }
+    }
+    // keyword results beyond the merge depth keep their order after the merged ones
+    out.extend(old.into_iter().flatten().map(|mut r| {
+        r.match_kind = Some("keyword");
+        r
+    }));
+    *results = out;
+    Ok(added)
+}
+
 pub fn search(index: &Index, params: &SearchParams) -> Result<SearchResponse, SearchError> {
+    let input = semantic_input(index, params);
+    search_with(index, params, input)
+}
+
+/// What the vector side contributes to this query. Never fails: anything
+/// missing is a reason in the response and the keyword result stands alone.
+fn semantic_input(index: &Index, params: &SearchParams) -> super::semantic::rank::SemanticInput {
+    use super::semantic::rank;
+    // A test that never sandboxed HOME must not read the real settings.
+    #[cfg(test)]
+    if std::env::var_os("CCHV_TEST_HOME").is_none() {
+        return rank::SemanticInput::off();
+    }
+    let Ok(config) = super::config::KbConfig::load() else {
+        return rank::SemanticInput::off();
+    };
+    rank::prepare(
+        &index.data,
+        config.semantic.enabled,
+        params.kinds.as_ref().is_some_and(|k| !k.is_empty()),
+        &params.query,
+    )
+}
+
+pub fn search_with(
+    index: &Index,
+    params: &SearchParams,
+    semantic: super::semantic::rank::SemanticInput,
+) -> Result<SearchResponse, SearchError> {
     let groups = tokenize::query_groups(&params.query);
     if groups.is_empty() {
         return Err(SearchError::Other(
@@ -1286,11 +1537,28 @@ pub fn search(index: &Index, params: &SearchParams) -> Result<SearchResponse, Se
             has_note: session_has_note(index, &info.source, &info.session_id),
             session: info,
             hit_messages,
+            match_kind: None,
+            semantic_score: None,
             subagent_hits,
             hits,
         });
     }
     results.sort_by(|a, b| b.score.total_cmp(&a.score));
+    let keyword_mode = mode_used;
+    let mut mode_used = mode_used;
+    let mut matched_sessions = matched_sessions;
+    if !semantic.sessions.is_empty() {
+        let added = merge_semantic(
+            index,
+            params,
+            &mut results,
+            &semantic,
+            keyword_mode == "all",
+            &exe,
+        )?;
+        matched_sessions += added;
+        mode_used = "hybrid";
+    }
     let notes_limit = params.notes.unwrap_or(DEFAULT_NOTES).min(MAX_NOTES);
     let (notes, notes_are_loose) = search_notes(index, &groups, params, notes_limit, &exe)?;
     // Only a note that has every word of the query says "this session is about
@@ -1330,6 +1598,7 @@ pub fn search(index: &Index, params: &SearchParams) -> Result<SearchResponse, Se
         notes,
         results,
         hint,
+        semantic: semantic.info,
     })
 }
 
