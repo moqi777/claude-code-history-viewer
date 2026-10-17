@@ -1,0 +1,44 @@
+docs/agent-kb/p6-evidence/eval-final.txt
+  s_cca7c29607588b::t_d5fcb8468261c0 1-18
+docs/agent-kb/p6-evidence/fallbacks.sh
+  s_cca7c29607588b::t_0dfae905787446 1-41
+docs/agent-kb/p6-evidence/incremental.sh
+  s_cca7c29607588b::t_e9c5777155e1ad 23
+  s_cca7c29607588b::t_ee86c7a6e5880b 1-22,24-45
+docs/agent-kb/p6-evidence/offline.sh
+  s_cca7c29607588b::t_80b72b4c068f1c 1-18
+src-tauri/src/kb/semantic/build.rs
+  s_cca7c29607588b::t_380b398a68029d 183-185
+  s_cca7c29607588b::t_2fc602800ac718 476-488,504-505
+  s_cca7c29607588b::t_cf3380e923df65 662-670
+  s_cca7c29607588b::t_c1d79525f6564f 178-182,186-191,489-503
+src-tauri/src/kb/semantic/store.rs
+  s_cca7c29607588b::t_c1d79525f6564f 110-111,359-362,368-370
+  s_cca7c29607588b::t_380b398a68029d 363-367
+src-tauri/src/kb/semantic/corpus.rs
+  s_cca7c29607588b::t_2fc602800ac718 120-124
+docs/agent-kb/p6-evidence/rank_eval_p6.py
+  s_cca7c29607588b::t_de230261739fb2 1-51
+src-tauri/src/kb/semantic/embed.rs
+  s_cca7c29607588b::t_3f91bb6b21ae3c 139-162
+docs/agent-kb/p6-evidence/transfer_vectors.sh
+  s_cca7c29607588b::t_112bd452c996ca 1-43
+docs/agent-kb/p6-evidence/snapshot_src.sh
+  s_cca7c29607588b::t_0f13d19b992580 1-12
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.11",
+  "base_commit_sha": "a96d4cc7805fd7f345787cee3c1acff4e593cf4e",
+  "prompts": {},
+  "sessions": {
+    "s_cca7c29607588b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ef228e77-8d37-45df-ab42-2d4c28a0387d",
+        "model": "claude-sonnet-5-5"
+      },
+      "human_author": "moqing <moqing@tsign.cn>"
+    }
+  }
+}
