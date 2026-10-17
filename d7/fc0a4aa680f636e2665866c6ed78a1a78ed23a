@@ -1,0 +1,9 @@
+docs/agent-kb/PLAN.md
+  ai_agent 63,65,88-94
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.11",
+  "base_commit_sha": "d7fc0a4aa680f636e2665866c6ed78a1a78ed23a",
+  "prompts": {}
+}
