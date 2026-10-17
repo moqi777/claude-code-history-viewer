@@ -55,7 +55,7 @@ export const kbApi = {
     api<KbSkillStatus[]>("kb_skill_uninstall", { target }),
   skillTest: () => api<KbSkillTest>("kb_skill_test"),
   getFacets: () => api<KbFacets>("kb_session_facets"),
-  dismissNotice: (key: "schedule_repaired") => api<void>("kb_dismiss_notice", { key }),
+  dismissNotice: (key: "schedule_repaired" | "duplicates_cleaned") => api<void>("kb_dismiss_notice", { key }),
   installSchedule: () => api<KbScheduleStatus>("kb_schedule_install"),
   uninstallSchedule: () => api<KbScheduleStatus>("kb_schedule_uninstall"),
 

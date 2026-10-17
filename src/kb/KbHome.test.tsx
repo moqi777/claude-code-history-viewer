@@ -72,7 +72,7 @@ describe("KbHome", () => {
     const badges = screen.getAllByText("kb.sessions.deletedBadge");
     expect(badges).toHaveLength(1);
     expect(badges[0]?.closest("button")?.textContent).toContain("Gone from disk");
-    expect(screen.getByText(/kb\.version/).textContent).toContain("0.6.3");
+    expect(screen.getByText(/kb\.version/).textContent).toContain("0.6.4");
   });
 
   it("opens a session through the viewer integration", async () => {
@@ -258,6 +258,21 @@ describe("KbHome", () => {
     fireEvent.click(screen.getByRole("button", { name: "kb.notice.dismiss" }));
     await waitFor(() => expect(mocks.api.dismissNotice).toHaveBeenCalledWith("schedule_repaired"));
     await waitFor(() => expect(screen.queryByText(/kb\.notice\.scheduleRepaired/)).toBeNull());
+  });
+
+  it("tells the user once how many duplicate backups were cleaned, and stays quiet after dismissal", async () => {
+    mocks.api.getStatus.mockResolvedValue(
+      overviewFixture({ duplicates_notice: { files: 214, bytes: 2_142_669_252 } }),
+    );
+    mocks.api.dismissNotice.mockResolvedValue(undefined);
+    await show();
+    const text = screen.getByText(/kb\.notice\.duplicatesCleaned/).textContent ?? "";
+    expect(text).toContain('"count":214');
+    expect(text).toContain("GB");
+    mocks.api.getStatus.mockResolvedValue(overviewFixture());
+    fireEvent.click(screen.getByRole("button", { name: "kb.notice.dismiss" }));
+    await waitFor(() => expect(mocks.api.dismissNotice).toHaveBeenCalledWith("duplicates_cleaned"));
+    await waitFor(() => expect(screen.queryByText(/kb\.notice\.duplicatesCleaned/)).toBeNull());
   });
 
   // ---- config states ----

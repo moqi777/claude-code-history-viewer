@@ -1,0 +1,45 @@
+use std::io::{BufRead, BufReader, Read, Write};
+use std::time::Instant;
+use sha2::{Digest, Sha256};
+fn main() {
+    let a: Vec<String> = std::env::args().collect();
+    let (cmd, path) = (a[1].as_str(), a[2].as_str());
+    match cmd {
+        // pack <plain> <out.zst> <level>: temp-free here; verify by streaming decode + hash
+        "pack" => {
+            let level: i32 = a[4].parse().unwrap();
+            let t = Instant::now();
+            let mut src = std::fs::File::open(path).unwrap();
+            let out = std::fs::File::create(&a[3]).unwrap();
+            let mut enc = zstd::stream::Encoder::new(out, level).unwrap();
+            std::io::copy(&mut src, &mut enc).unwrap();
+            let f = enc.finish().unwrap(); f.sync_all().unwrap();
+            let tp = t.elapsed();
+            let t = Instant::now();
+            let mut h1 = Sha256::new(); let mut h2 = Sha256::new();
+            let mut r = std::fs::File::open(path).unwrap(); let mut b = vec![0u8; 1<<20];
+            loop { let n = r.read(&mut b).unwrap(); if n == 0 {break;} h1.update(&b[..n]); }
+            let mut d = zstd::stream::Decoder::new(std::fs::File::open(&a[3]).unwrap()).unwrap();
+            loop { let n = d.read(&mut b).unwrap(); if n == 0 {break;} h2.update(&b[..n]); }
+            println!("pack L{level}: {} -> {} bytes, {:?}; verify {:?} equal={}", std::fs::metadata(path).unwrap().len(), std::fs::metadata(&a[3]).unwrap().len(), tp, t.elapsed(), h1.finalize() == h2.finalize());
+        }
+        // line <zst> <offset>: what search.rs::read_line_at does
+        "line" => {
+            let off: u64 = a[3].parse().unwrap();
+            let t = Instant::now();
+            let d = zstd::stream::Decoder::new(std::fs::File::open(path).unwrap()).unwrap();
+            let mut r = BufReader::new(d);
+            std::io::copy(&mut r.by_ref().take(off), &mut std::io::sink()).unwrap();
+            let mut line = Vec::new(); r.read_until(b'\n', &mut line).unwrap();
+            println!("read_line_at offset {off}: {} bytes in {:?}", line.len(), t.elapsed());
+        }
+        // all <zst>: decode_all like providers/codex.rs
+        "all" => {
+            let t = Instant::now();
+            let v = zstd::decode_all(BufReader::new(std::fs::File::open(path).unwrap())).unwrap();
+            println!("decode_all: {} bytes in {:?}", v.len(), t.elapsed());
+            std::io::stdout().flush().unwrap();
+        }
+        _ => {}
+    }
+}

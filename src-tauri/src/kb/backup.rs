@@ -53,6 +53,10 @@ pub struct BackupSummary {
     /// Older backup copies moved to `*.conflict-<ts>` because the main
     /// directory rewrote the file.
     pub set_aside_files: u64,
+    /// Plain copies removed from the disk because the `.zst` next to them
+    /// holds all of their content, and the bytes that freed.
+    pub duplicates_removed: u64,
+    pub duplicate_bytes_freed: u64,
     pub snapshot_taken: bool,
     pub errors: Vec<SyncError>,
     pub duration_ms: u64,
@@ -342,6 +346,19 @@ fn copy_all(
     }
     meter.tick(true);
     copy_notes(env, log, target_dir, mount, summary);
+    // Only when every file went over: a twin that failed to copy proves nothing.
+    if summary.errors.is_empty() {
+        let removed = super::dedupe::clean_disk(&env.data, &dst_root, log, |path| {
+            ensure_on_disk(path, mount)
+        });
+        summary.duplicates_removed += removed.files;
+        summary.duplicate_bytes_freed += removed.bytes;
+        if let Err(message) = super::dedupe::record(conn, removed) {
+            log.line(&format!(
+                "duplicate backups: cannot record the count: {message}"
+            ));
+        }
+    }
     Ok(())
 }
 
@@ -609,6 +626,53 @@ mod tests {
             fs::read(rig.target.join("raw").join(REL)).unwrap(),
             b"aaa\nbbb\n"
         );
+    }
+
+    const PLAIN: &str = "codex/sessions/2026/05/29/r.jsonl";
+    const PACKED: &str = "codex/sessions/2026/05/29/r.jsonl.zst";
+    const BODY: &[u8] = b"line one\nline two\nline three\n";
+
+    /// The state Codex's compression leaves: a plain copy on the disk from
+    /// before, and now the `.zst` in the main directory.
+    fn compressed_in_main(rig: &Rig) {
+        let plain = put(rig, PLAIN, BODY);
+        pass(rig);
+        fs::remove_file(plain).unwrap();
+        put(rig, PACKED, &zstd::encode_all(BODY, 3).unwrap());
+    }
+
+    #[test]
+    fn the_disk_loses_a_plain_copy_only_when_the_compressed_one_next_to_it_holds_it_all() {
+        let rig = rig();
+        compressed_in_main(&rig);
+        let disk_plain = rig.target.join("raw").join(PLAIN);
+        let disk_packed = rig.target.join("raw").join(PACKED);
+        let after = pass(&rig);
+        assert_eq!(after.status, "ok", "{after:?}");
+        assert!(disk_packed.is_file());
+        assert!(!disk_plain.exists(), "identical content: removed");
+        assert_eq!(
+            (after.duplicates_removed, after.duplicate_bytes_freed),
+            (1, BODY.len() as u64)
+        );
+        assert_eq!(pass(&rig).duplicates_removed, 0);
+    }
+
+    #[test]
+    fn a_plain_copy_on_the_disk_that_differs_or_is_still_in_the_main_directory_stays() {
+        let rig = rig();
+        compressed_in_main(&rig);
+        let disk_plain = rig.target.join("raw").join(PLAIN);
+        fs::write(&disk_plain, b"line one\nline TWO\n").unwrap();
+        assert_eq!(pass(&rig).duplicates_removed, 0);
+        assert!(disk_plain.is_file(), "different content: both stay");
+
+        // The main directory has the plain file again: the disk's copy is not a
+        // duplicate of anything that is gone.
+        fs::write(&disk_plain, BODY).unwrap();
+        put(&rig, PLAIN, BODY);
+        assert_eq!(pass(&rig).duplicates_removed, 0);
+        assert!(disk_plain.is_file());
     }
 
     #[test]

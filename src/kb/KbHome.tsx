@@ -441,6 +441,24 @@ const Banners = () => {
           </button>
         </div>
       )}
+      {overview?.duplicates_notice != null && (
+        <div role="status" className="flex items-center gap-3 rounded-md border border-accent/40 p-3 text-sm">
+          <span className="min-w-0 flex-1">
+            {t("kb.notice.duplicatesCleaned", {
+              count: overview.duplicates_notice.files,
+              size: formatBytes(overview.duplicates_notice.bytes),
+            })}
+          </span>
+          <button
+            type="button"
+            aria-label={t("kb.notice.dismiss")}
+            onClick={() => void useKbStore.getState().dismissDuplicatesNotice()}
+            className="rounded p-1 hover:bg-muted"
+          >
+            <X className="h-4 w-4" aria-hidden="true" />
+          </button>
+        </div>
+      )}
       {overview != null &&
         overview.exe_stability !== "stable" &&
         overview.exe_stability !== "not_in_app" && (

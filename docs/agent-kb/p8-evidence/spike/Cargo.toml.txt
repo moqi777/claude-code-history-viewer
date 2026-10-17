@@ -1,0 +1,9 @@
+[package]
+name = "p8spike"
+version = "0.0.0"
+edition = "2021"
+[dependencies]
+zstd = "0.13"
+sha2 = "0.10"
+[profile.release]
+opt-level = 3

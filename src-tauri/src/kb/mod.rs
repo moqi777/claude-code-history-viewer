@@ -11,6 +11,7 @@ pub mod cli;
 pub mod commands;
 pub mod config;
 pub mod db;
+pub mod dedupe;
 pub mod digest;
 pub mod discover;
 pub mod export;
@@ -41,7 +42,7 @@ pub mod volume;
 
 /// `AgentKB`'s own version, independent of the base viewer's `package.json`
 /// version (which stays in step with upstream). Phase N ships `0.N.0`.
-pub const AGENTKB_VERSION: &str = "0.6.3";
+pub const AGENTKB_VERSION: &str = "0.6.4";
 
 /// Where a session file came from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]

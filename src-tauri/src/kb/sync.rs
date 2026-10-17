@@ -121,6 +121,10 @@ pub struct Summary {
     /// Sessions that older versions stored twice (plain and compressed).
     pub joined_twins: u64,
     pub rewritten_files: u64,
+    /// Plain backups removed because the `.zst` that replaced them holds all of
+    /// their content (see `dedupe`), and the bytes that freed.
+    pub duplicates_removed: u64,
+    pub duplicate_bytes_freed: u64,
     pub errors: Vec<SyncError>,
     pub unknown_types: BTreeMap<String, u64>,
     pub bad_lines: u64,
@@ -264,6 +268,21 @@ fn collect(
                 message,
             });
         }
+    }
+
+    // After the files were mirrored: the replacement of a plain backup has to
+    // exist before the plain one can be shown to be redundant.
+    match super::dedupe::clean_raw(conn, &env.data, log) {
+        Ok(removed) => {
+            summary.duplicates_removed += removed.files;
+            summary.duplicate_bytes_freed += removed.bytes;
+            if let Err(message) = super::dedupe::record(conn, removed) {
+                log.line(&format!(
+                    "duplicate backups: cannot record the count: {message}"
+                ));
+            }
+        }
+        Err(message) => log.line(&format!("duplicate backups: {message}")),
     }
 
     if summary.longest_line_bytes >= HUGE_LINE_BYTES {
@@ -872,6 +891,7 @@ fn refresh_codex_titles(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::kb::{dedupe, fsutil};
     use std::fs;
     use std::io::Write;
     use std::path::PathBuf;
@@ -1174,7 +1194,14 @@ mod tests {
         assert_eq!((path.as_str(), compressed), (&*zst.to_string_lossy(), 1));
         assert_eq!(message_count_of(&conn, "retry"), 1, "indexed once");
         assert_eq!(found(&sb, "retry"), 1, "found once");
-        assert!(plain_mirror.is_file(), "the plain mirror is kept");
+        assert!(
+            !plain_mirror.exists(),
+            "the plain mirror holds nothing the .zst does not: removed"
+        );
+        assert_eq!(
+            (s.duplicates_removed, s.duplicate_bytes_freed),
+            (1, codex_text().len() as u64)
+        );
         assert!(sb
             .mirror_of(&format!(
                 "codex/sessions/2026/05/29/rollout-2026-05-29T11-14-48-{CODEX_ID}.jsonl.zst"
@@ -1186,6 +1213,117 @@ mod tests {
         assert_eq!(
             (again.changed_files, again.moved_sources, again.new_sessions),
             (0, 0, 0)
+        );
+    }
+
+    #[test]
+    fn once_the_compressed_backup_exists_only_it_is_left_and_nothing_is_searchable_twice() {
+        let sb = Sandbox::new();
+        write(&sb.codex_file(), &codex_text());
+        sb.sync();
+        compress_in_place(&sb.codex_file(), &codex_text());
+        sb.sync();
+        let raw: Vec<String> = fsutil::walk_files(&sb.env.data.raw())
+            .into_iter()
+            .map(|(rel, _)| rel)
+            .collect();
+        assert_eq!(raw.len(), 1, "{raw:?}");
+        assert!(raw[0].ends_with(".jsonl.zst"));
+        assert_eq!(found(&sb, "retry"), 1);
+        // The count is kept for the notice, and it is shown until dismissed.
+        let conn = sb.db();
+        let seen = dedupe::unseen(&conn).expect("a notice is waiting");
+        assert_eq!(seen.files, 1);
+        dedupe::dismiss(&conn).unwrap();
+        assert_eq!(dedupe::unseen(&conn), None);
+        // A further pass has nothing to remove.
+        assert_eq!(sb.sync().duplicates_removed, 0);
+    }
+
+    #[test]
+    fn a_plain_backup_that_is_not_contained_in_the_compressed_one_stays_with_it() {
+        let sb = Sandbox::new();
+        write(&sb.codex_file(), &codex_text());
+        sb.sync();
+        let plain = sb.mirror_of(&format!(
+            "codex/sessions/2026/05/29/rollout-2026-05-29T11-14-48-{CODEX_ID}.jsonl"
+        ));
+        compress_in_place(&sb.codex_file(), &codex_text());
+        // The kept plain copy now differs from what the .zst holds (damaged
+        // after the fact): no proof, no removal.
+        let mut damaged = fs::read(&plain).unwrap();
+        damaged[10] ^= 0x01;
+        fs::write(&plain, &damaged).unwrap();
+        let s = sb.sync();
+        assert_eq!(s.duplicates_removed, 0, "{:?}", s.errors);
+        assert_eq!(fs::read(&plain).unwrap(), damaged);
+        let again = sb.sync();
+        assert_eq!(again.duplicates_removed, 0);
+        assert!(plain.is_file());
+    }
+
+    #[test]
+    fn plain_backups_older_versions_left_behind_are_cleaned_once_and_only_when_proven() {
+        let sb = Sandbox::new();
+        write(&sb.codex_file(), &codex_text());
+        let zst = compress_in_place(&sb.codex_file(), &codex_text());
+        sb.sync();
+        assert!(zst.is_file());
+        let raw = sb.env.data.raw();
+        let twin_rel = "codex/sessions/2026/05/29/rollout-2026-05-29T11-14-48-".to_string()
+            + CODEX_ID
+            + ".jsonl";
+        // 1. a left-over that is the start of the session
+        let left = raw.join(&twin_rel);
+        fs::write(&left, &codex_text().as_bytes()[..60]).unwrap();
+        // 2. a left-over with no .zst twin anywhere
+        let alone = raw.join("claude/projects/p/x.jsonl");
+        fs::create_dir_all(alone.parent().unwrap()).unwrap();
+        fs::write(&alone, b"only copy\n").unwrap();
+        // 3. rotated-aside content is never touched
+        let prev = raw.join(format!("{twin_rel}.prev-20260101T000000Z"));
+        fs::write(&prev, b"older content\n").unwrap();
+
+        let s = sb.sync();
+        assert_eq!(s.duplicates_removed, 1, "{:?}", s.errors);
+        assert_eq!(s.duplicate_bytes_freed, 60);
+        assert!(!left.exists());
+        assert!(alone.is_file(), "no twin, no removal");
+        assert!(prev.is_file(), "rotated files are kept");
+        assert!(zst.exists() && raw.join(format!("{twin_rel}.zst")).is_file());
+    }
+
+    #[test]
+    fn a_pass_killed_before_the_compressed_backup_exists_loses_nothing() {
+        let sb = Sandbox::new();
+        write(&sb.codex_file(), &codex_text());
+        sb.sync();
+        let plain = sb.mirror_of(&format!(
+            "codex/sessions/2026/05/29/rollout-2026-05-29T11-14-48-{CODEX_ID}.jsonl"
+        ));
+        // The row already points to the new name (reconcile committed) but the
+        // .zst mirror has not been written: the plain file is all there is.
+        let twin = format!("{}.zst", plain.display());
+        sb.db()
+            .execute(
+                "UPDATE files SET mirror_rel = mirror_rel || '.zst', is_compressed = 1",
+                [],
+            )
+            .unwrap();
+        let conn = sb.db();
+        let log = SyncLog::open(&sb.env.data.logs());
+        let removed = dedupe::clean_raw(&conn, &sb.env.data, &log).unwrap();
+        assert_eq!(removed, dedupe::Removed::default());
+        assert!(plain.is_file(), "no twin yet: kept");
+        // Now a cut-off twin (what a copy killed midway would be, were it not
+        // renamed into place atomically): still no removal of the longer file.
+        let whole = zstd::encode_all(codex_text().as_bytes(), 3).unwrap();
+        fs::write(&twin, &whole[..whole.len() / 2]).unwrap();
+        let removed = dedupe::clean_raw(&conn, &sb.env.data, &log).unwrap_or_default();
+        assert_eq!(removed, dedupe::Removed::default());
+        assert!(
+            plain.is_file(),
+            "a cut-off twin does not vouch for the file"
         );
     }
 
@@ -1273,13 +1411,16 @@ mod tests {
             .query_row("SELECT COUNT(*) FROM files", [], |r| r.get(0))
             .unwrap();
         assert_eq!(files, 1);
-        for name in ["jsonl", "jsonl.zst"] {
-            assert!(
+        // The row that was dropped left its plain mirror with nothing pointing
+        // to it; it is the start of the kept `.zst`, so it is removed too.
+        for (name, kept) in [("jsonl", false), ("jsonl.zst", true)] {
+            assert_eq!(
                 sb.mirror_of(&format!(
                     "codex/sessions/2026/05/29/rollout-2026-05-29T11-14-48-{CODEX_ID}.{name}"
                 ))
                 .is_file(),
-                "{name} mirror stays"
+                kept,
+                "{name} mirror"
             );
         }
         let copies: Vec<_> = fs::read_dir(sb.env.data.db().parent().unwrap())
