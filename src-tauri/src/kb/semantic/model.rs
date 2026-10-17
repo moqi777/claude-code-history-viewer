@@ -668,4 +668,44 @@ mod tests {
             .url(&SPEC, f)
             .contains("modelscope.cn/api/v1/models/onnx-community/bge-m3-ONNX/repo"));
     }
+
+    /// The pinned addresses answer, and say the file has the pinned size.
+    /// `cargo test --lib real_urls -- --ignored` (needs the network).
+    #[test]
+    #[ignore = "needs the network"]
+    fn real_urls_answer_with_the_pinned_size() {
+        for source in [Source::Modelscope, Source::Huggingface] {
+            for f in SPEC.files {
+                let resp = agent()
+                    .get(&source.url(&SPEC, f))
+                    .set("Range", "bytes=0-99")
+                    .call()
+                    .unwrap_or_else(|e| panic!("{source:?} {}: {e}", f.name));
+                assert_eq!(resp.status(), 206, "{source:?} {}", f.name);
+                let range = resp.header("Content-Range").unwrap_or_default().to_string();
+                assert!(
+                    range.ends_with(&format!("/{}", f.size)),
+                    "{source:?} {}: {range}",
+                    f.name
+                );
+            }
+        }
+    }
+
+    /// The whole download from `ModelScope` into a temp folder, checked by the same code
+    /// the settings page uses (about 570 MB). `cargo test --lib real_download -- --ignored`.
+    #[test]
+    #[ignore = "downloads 570 MB"]
+    fn real_download_from_modelscope() {
+        let tmp = tempfile::tempdir().unwrap();
+        let data = DataPaths::new(tmp.path());
+        let cancel = AtomicBool::new(false);
+        let mut last = 0u64;
+        download(&data, &SPEC, Source::Modelscope, &cancel, &mut |p| {
+            last = p.done_bytes;
+        })
+        .unwrap();
+        assert_eq!(last, SPEC.files.iter().map(|f| f.size).sum::<u64>());
+        assert_eq!(check(&data, &SPEC), ModelStatus::Ready);
+    }
 }

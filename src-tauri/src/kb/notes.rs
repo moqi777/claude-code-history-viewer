@@ -26,8 +26,14 @@ use super::paths::DataPaths;
 pub const NOTES_SCHEMA: u32 = 1;
 /// Bump when the way notes are indexed changes; the notes (only) are then
 /// re-indexed from the files on the next run.
-pub const NOTES_INDEX_VERSION: &str = "1";
+/// "2": the full-text table is made again after notes are replaced (see [`refresh_fts`]);
+/// a library whose index grew the old way is rebuilt once, from the note files.
+pub const NOTES_INDEX_VERSION: &str = "2";
 const NOTES_INDEX_VERSION_KEY: &str = "notes_index_version";
+
+/// The full-text table alone, for [`refresh_fts`]. Must equal the one inside [`NOTES_DDL`]
+/// (a test checks it).
+const FTS_DDL: &str = "CREATE VIRTUAL TABLE notes_fts USING fts5(head, kw, body, content='', contentless_delete=1, tokenize='unicode61 remove_diacritics 0');";
 
 const NOTES_DDL: &str = "
     CREATE TABLE notes (
@@ -230,7 +236,7 @@ pub fn index_file(conn: &Connection, file: &NotesFile, hash: &str) -> Result<(),
     let tx = conn
         .unchecked_transaction()
         .map_err(|e| db_err("begin notes index", e))?;
-    delete_rows(&tx, &file.source, &file.session_id)?;
+    let replaced = delete_rows(&tx, &file.source, &file.session_id)?;
     for entry in &file.entries {
         let keywords = serde_json::to_string(&entry.keywords).map_err(|e| e.to_string())?;
         tx.execute(
@@ -260,12 +266,14 @@ pub fn index_file(conn: &Connection, file: &NotesFile, hash: &str) -> Result<(),
         )
         .map_err(|e| db_err("insert note", e))?;
         let id = tx.last_insert_rowid();
-        let head = tokenize::index_text(&format!("{} {}", entry.title, entry.conclusion));
-        let kw = tokenize::index_text(&entry.keywords.join(" "));
-        let body = tokenize::index_text(&format!(
-            "{} {} {}",
-            entry.problem, entry.cause, entry.solution
-        ));
+        let (head, kw, body) = fts_columns(
+            &entry.title,
+            &entry.conclusion,
+            &entry.keywords,
+            &entry.problem,
+            &entry.cause,
+            &entry.solution,
+        );
         tx.execute(
             "INSERT INTO notes_fts (rowid, head, kw, body) VALUES (?1,?2,?3,?4)",
             params![id, head, kw, body],
@@ -288,26 +296,85 @@ pub fn index_file(conn: &Connection, file: &NotesFile, hash: &str) -> Result<(),
         ],
     )
     .map_err(|e| db_err("record digest state", e))?;
-    tx.commit().map_err(|e| db_err("commit notes index", e))
+    tx.commit().map_err(|e| db_err("commit notes index", e))?;
+    if replaced > 0 {
+        refresh_fts(conn)?;
+    }
+    Ok(())
 }
 
-fn delete_rows(conn: &Connection, source: &str, session_id: &str) -> Result<(), String> {
+/// How many notes were removed: the full-text index must be made again after any.
+fn delete_rows(conn: &Connection, source: &str, session_id: &str) -> Result<usize, String> {
     conn.execute(
         "DELETE FROM notes_fts WHERE rowid IN (SELECT id FROM notes WHERE source=?1 AND session_id=?2)",
         params![source, session_id],
     )
     .map_err(|e| db_err("unindex notes", e))?;
-    conn.execute(
-        "DELETE FROM notes WHERE source=?1 AND session_id=?2",
-        params![source, session_id],
-    )
-    .map_err(|e| db_err("delete notes", e))?;
+    let removed = conn
+        .execute(
+            "DELETE FROM notes WHERE source=?1 AND session_id=?2",
+            params![source, session_id],
+        )
+        .map_err(|e| db_err("delete notes", e))?;
     conn.execute(
         "DELETE FROM digest_sessions WHERE source=?1 AND session_id=?2",
         params![source, session_id],
     )
     .map_err(|e| db_err("delete digest state", e))?;
-    Ok(())
+    Ok(removed)
+}
+
+/// The words of a note as the three columns of the full-text index.
+fn fts_columns(
+    title: &str,
+    conclusion: &str,
+    keywords: &[String],
+    problem: &str,
+    cause: &str,
+    solution: &str,
+) -> (String, String, String) {
+    (
+        tokenize::index_text(&format!("{title} {conclusion}")),
+        tokenize::index_text(&keywords.join(" ")),
+        tokenize::index_text(&format!("{problem} {cause} {solution}")),
+    )
+}
+
+/// Make `notes_fts` again from the `notes` table.
+///
+/// FTS5 keeps the number of documents and their total length for `bm25`, and a
+/// contentless-delete table does not take deleted documents out of them. After
+/// notes were replaced the index then scored the same words differently from one
+/// built from scratch (measured on the real library: about 20 % off, in either
+/// direction), so every replacement ends with this: a note table is a few hundred
+/// rows, a few milliseconds.
+pub fn refresh_fts(conn: &Connection) -> Result<(), String> {
+    let tx = conn
+        .unchecked_transaction()
+        .map_err(|e| db_err("begin notes refresh", e))?;
+    tx.execute_batch(&format!("DROP TABLE IF EXISTS notes_fts; {FTS_DDL}"))
+        .map_err(|e| db_err("recreate notes_fts", e))?;
+    {
+        let mut read = tx
+            .prepare(
+                "SELECT id, title, conclusion, keywords, problem, cause, solution FROM notes ORDER BY id",
+            )
+            .map_err(|e| db_err("read notes", e))?;
+        let mut put = tx
+            .prepare("INSERT INTO notes_fts (rowid, head, kw, body) VALUES (?1,?2,?3,?4)")
+            .map_err(|e| db_err("index notes", e))?;
+        let mut rows = read.query([]).map_err(|e| db_err("read notes", e))?;
+        while let Some(r) = rows.next().map_err(|e| db_err("read notes", e))? {
+            let id: i64 = r.get(0).map_err(|e| db_err("read notes", e))?;
+            let get = |i: usize| r.get::<_, String>(i).map_err(|e| db_err("read notes", e));
+            let keywords: Vec<String> = serde_json::from_str(&get(3)?).unwrap_or_default();
+            let (head, kw, body) =
+                fts_columns(&get(1)?, &get(2)?, &keywords, &get(4)?, &get(5)?, &get(6)?);
+            put.execute(params![id, head, kw, body])
+                .map_err(|e| db_err("index note", e))?;
+        }
+    }
+    tx.commit().map_err(|e| db_err("commit notes refresh", e))
 }
 
 #[derive(Debug, Default, Clone, PartialEq, Eq, Serialize)]
@@ -423,8 +490,12 @@ pub fn reconcile(conn: &Connection, data: &DataPaths) -> Result<Rebuilt, String>
         }
     }
     // What is left had a database row but no file any more.
+    let mut removed = 0;
     for (source, id) in known.into_keys() {
-        delete_rows(conn, &source, &id)?;
+        removed += delete_rows(conn, &source, &id)?;
+    }
+    if removed > 0 {
+        refresh_fts(conn)?;
     }
     Ok(report)
 }
@@ -523,6 +594,124 @@ mod tests {
         file.schema = 99;
         write(&data, &file).unwrap();
         assert!(read(&data, "claude", "abc-1").is_err());
+    }
+
+    /// bm25 of every note for one word, keyed by (session, entry).
+    fn scores(conn: &Connection) -> std::collections::BTreeMap<(String, String), String> {
+        let mut stmt = conn
+            .prepare(
+                "SELECT n.session_id, n.entry_id, bm25(notes_fts, 3.0, 4.0, 1.0) FROM notes_fts \
+                 JOIN notes n ON n.id = notes_fts.rowid WHERE notes_fts MATCH ?1",
+            )
+            .unwrap();
+        stmt.query_map(["熔断"], |r| {
+            Ok((
+                (r.get::<_, String>(0)?, r.get::<_, String>(1)?),
+                format!("{:.6}", r.get::<_, f64>(2)?),
+            ))
+        })
+        .unwrap()
+        .map(Result::unwrap)
+        .collect()
+    }
+
+    /// P5 left this open: the same notes scored differently in an index that grew note by note
+    /// (and had sessions digested again) and in one rebuilt from the files. This pins what
+    /// the scores must be: the same.
+    #[test]
+    fn scores_do_not_depend_on_how_the_index_was_built() {
+        let (_dir, data, conn) = setup();
+        // only some notes mention the rare word, so that it has a real weight
+        let with_word = |source: &str, id: &str, n: usize, word: bool| {
+            let mut f = sample(source, id, n);
+            for e in &mut f.entries {
+                if word {
+                    e.solution = format!("{}，并给下游调用加上熔断", e.solution);
+                }
+                e.problem = "线程池里出现死锁，排查了很久才找到原因，".repeat(2);
+            }
+            f
+        };
+        // digested one round at a time; the first session again later, with more notes
+        for file in [
+            with_word("claude", "s-a", 1, true),
+            with_word("codex", "s-b", 3, false),
+            with_word("claude", "s-long", 2, true),
+            with_word("codex", "s-c", 2, false),
+            with_word("claude", "s-a", 3, true),
+        ] {
+            let hash = write(&data, &file).unwrap();
+            index_file(&conn, &file, &hash).unwrap();
+        }
+        let incremental = scores(&conn);
+        assert_eq!(incremental.len(), 3 + 2);
+        rebuild_all(&conn, &data).unwrap();
+        assert_eq!(
+            scores(&conn),
+            incremental,
+            "an index built from scratch must score the same"
+        );
+    }
+
+    /// The real-library version of the test above (manual): `AGENTKB_NOTES_CLONE=<a COPY of a data
+    /// folder with kb.db and notes/>`.
+    #[test]
+    #[ignore = "needs a copy of a real library"]
+    fn real_library_scores_before_and_after_a_rebuild() {
+        let dir = std::env::var("AGENTKB_NOTES_CLONE").expect("AGENTKB_NOTES_CLONE");
+        let data = DataPaths::new(dir);
+        let conn = super::super::db::open(&data.db()).unwrap();
+        let table = |conn: &Connection| -> Vec<String> {
+            let mut out = Vec::new();
+            for word in ["电池", "耗电", "windowserver", "内存", "mac"] {
+                let mut stmt = conn
+                    .prepare(
+                        "SELECT n.session_id, n.entry_id, bm25(notes_fts, 3.0, 4.0, 1.0) FROM notes_fts \
+                         JOIN notes n ON n.id = notes_fts.rowid WHERE notes_fts MATCH ?1 ORDER BY 3, 1, 2",
+                    )
+                    .unwrap();
+                let rows: Vec<String> = stmt
+                    .query_map([word], |r| {
+                        Ok(format!(
+                            "{word} {} {} {:.4}",
+                            r.get::<_, String>(0)?,
+                            r.get::<_, String>(1)?,
+                            r.get::<_, f64>(2)?
+                        ))
+                    })
+                    .unwrap()
+                    .map(Result::unwrap)
+                    .collect();
+                out.extend(rows);
+            }
+            out
+        };
+        let before = table(&conn);
+        rebuild_all(&conn, &data).unwrap();
+        let after = table(&conn);
+        let differing = before.iter().zip(&after).filter(|(a, b)| a != b).count();
+        eprintln!(
+            "rows {} / {}, differing {differing}",
+            before.len(),
+            after.len()
+        );
+        for (a, b) in before.iter().zip(&after).filter(|(a, b)| a != b).take(5) {
+            eprintln!("  before {a}\n  after  {b}");
+        }
+    }
+
+    #[test]
+    fn the_two_definitions_of_the_full_text_table_agree() {
+        let squash = |t: &str| t.split_whitespace().collect::<Vec<_>>().join(" ");
+        let ddl = squash(NOTES_DDL);
+        let fts = squash(FTS_DDL).replace("fts5(head,", "fts5( head,");
+        let fts = fts.replace("( head,", "(head,");
+        assert!(
+            ddl.replace("( ", "(")
+                .replace(" )", ")")
+                .contains(&fts.replace("( ", "(").replace(" )", ")")),
+            "{ddl}\n{fts}"
+        );
     }
 
     #[test]
