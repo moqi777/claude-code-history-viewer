@@ -1,0 +1,45 @@
+docs/agent-kb/p6-evidence/p61/diag61.rs.txt
+  s_cca7c29607588b::t_f3e44a17b445ae 1-622
+docs/agent-kb/p6-evidence/p61/trim_experiment.py
+  s_cca7c29607588b::t_1632eb7a70fc29 1-27
+docs/agent-kb/p6-evidence/p61/trim_experiment.out
+  s_cca7c29607588b::t_1632eb7a70fc29 1-5
+docs/agent-kb/p6-evidence/p61/slope.txt
+  s_cca7c29607588b::t_f3e44a17b445ae 1-70
+docs/agent-kb/p6-evidence/p61/vecall.jsonl
+  s_cca7c29607588b::t_f3e44a17b445ae 1-70
+docs/agent-kb/p6-evidence/p61/sim61.out
+  s_cca7c29607588b::t_12af80a7d4da54 1-39
+docs/agent-kb/p6-evidence/p61/gate.jsonl
+  s_cca7c29607588b::t_f3e44a17b445ae 1-70
+docs/agent-kb/p6-evidence/p61/rank61.py
+  s_cca7c29607588b::t_f3e44a17b445ae 1-5,7-24
+  s_cca7c29607588b::t_12af80a7d4da54 6
+docs/agent-kb/p6-evidence/p61/ranks61-before.txt
+  ai_agent 1-138
+docs/agent-kb/p6-evidence/p61/qall.json
+  s_cca7c29607588b::t_f3e44a17b445ae 1
+docs/agent-kb/p6-evidence/p61/sim61.py
+  s_cca7c29607588b::t_12af80a7d4da54 1-68
+docs/agent-kb/P6.1-design.md
+  s_cca7c29607588b::t_87b4e90f1780df 1-28,30-39,41-74,76-84,86-124
+  s_cca7c29607588b::t_2f56cede1739cf 29,40,75,85
+docs/agent-kb/p6-evidence/README.md
+  s_cca7c29607588b::t_2f56cede1739cf 20-26
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.11",
+  "base_commit_sha": "89e0c201e9c3ac4166ecc381eb6d3175a6fe62a4",
+  "prompts": {},
+  "sessions": {
+    "s_cca7c29607588b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ef228e77-8d37-45df-ab42-2d4c28a0387d",
+        "model": "claude-sonnet-5-5"
+      },
+      "human_author": "moqing <moqing@tsign.cn>"
+    }
+  }
+}
