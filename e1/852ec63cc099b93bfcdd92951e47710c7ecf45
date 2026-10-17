@@ -1,0 +1,32 @@
+src-tauri/src/kb/semantic/model.rs
+  s_cca7c29607588b::t_fd2d28526cee94 686-690,704,706-707
+  s_cca7c29607588b::t_87357fd62913c4 671-685,691-694,696-703,708-710
+docs/agent-kb/p6-evidence/shot-p6.mjs
+  s_cca7c29607588b::t_6bf0071014c723 107,139
+  s_cca7c29607588b::t_e33d65d00d978b 1-106,108-112,115-128,130-138,141-161,163-167
+  s_cca7c29607588b::t_83637d1024caf2 113-114,129,162
+  s_cca7c29607588b::t_ae027294925abd 140
+src-tauri/src/kb/notes.rs
+  s_cca7c29607588b::t_fd2d28526cee94 29-31,371-372,608-611,649-653,675-680,693-697,710-712
+  s_cca7c29607588b::t_0c24817f8f9c38 34-37,493,495-498,701-709,713-714
+  s_cca7c29607588b::t_85b8332bba25c0 599-606,612-623,627,632-634,643-646,648,654-655
+  s_cca7c29607588b::t_075231abf515f6 607,624-626,628-631,635-642,647
+  s_cca7c29607588b::t_91faec2bf803cf 656-674,681-692,698-700,715-716
+  s_cca7c29607588b::t_22c20a8d52caa8 239,269-276,299-303,306-307,313-318,324-370,373-377
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.11",
+  "base_commit_sha": "e1852ec63cc099b93bfcdd92951e47710c7ecf45",
+  "prompts": {},
+  "sessions": {
+    "s_cca7c29607588b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ef228e77-8d37-45df-ab42-2d4c28a0387d",
+        "model": "claude-sonnet-5-5"
+      },
+      "human_author": "moqing <moqing@tsign.cn>"
+    }
+  }
+}
