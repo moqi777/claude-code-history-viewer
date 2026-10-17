@@ -136,7 +136,7 @@ pub fn candidates(conn: &Connection, rules: &Rules<'_>) -> Result<Vec<Candidate>
         let (digested_seq, partial) = digested
             .get(&(info.source.clone(), info.session_id.clone()))
             .copied()
-            .map_or((0, false), |(seq, partial)| (seq, partial));
+            .unwrap_or((0, false));
         let has_notes = digested.contains_key(&(info.source.clone(), info.session_id.clone()));
         if rules.recent_only && activity < recent_from && !partial {
             continue;

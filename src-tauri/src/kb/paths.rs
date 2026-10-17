@@ -2,6 +2,10 @@
 
 use std::path::{Component, Path, PathBuf};
 
+pub fn is_absolute(path: &Path) -> bool {
+    path.is_absolute()
+}
+
 /// `~/AgentKB/` (or wherever the config points). Pure path arithmetic.
 #[derive(Debug, Clone)]
 pub struct DataPaths {
@@ -80,11 +84,36 @@ pub fn safe_join(base: &Path, rel: &str) -> Result<PathBuf, String> {
     for part in rel.split('/') {
         let mut components = Path::new(part).components();
         match (components.next(), components.next()) {
-            (Some(Component::Normal(name)), None) if !part.contains('\\') => out.push(name),
+            (Some(Component::Normal(name)), None) if !part.contains('\\') => {
+                out.push(name);
+                if out.exists() && is_link_or_junction(&out) {
+                    return Err(format!("path component is a symlink or junction: {rel}"));
+                }
+            }
             _ => return Err(format!("unsafe relative path: {rel}")),
         }
     }
     Ok(out)
+}
+
+/// Windows junctions are reparse points but are not always reported through
+/// `FileType::is_symlink`. Treat every directory/file reparse link like a
+/// symlink so a path cannot escape the trusted root.
+pub fn is_link_or_junction(path: &Path) -> bool {
+    let Ok(meta) = std::fs::symlink_metadata(path) else {
+        return false;
+    };
+    let kind = meta.file_type();
+    if kind.is_symlink() {
+        return true;
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::FileTypeExt;
+        kind.is_symlink_dir() || kind.is_symlink_file()
+    }
+    #[cfg(not(windows))]
+    false
 }
 
 /// The two mirror roots Codex sessions are served from, canonicalised, for the
@@ -158,6 +187,28 @@ mod tests {
         }
     }
 
+    #[cfg(windows)]
+    #[test]
+    fn safe_join_rejects_junction_components() {
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path().join("base");
+        let target = tmp.path().join("target");
+        std::fs::create_dir_all(&base).unwrap();
+        std::fs::create_dir_all(&target).unwrap();
+        let junction = base.join("linked");
+        let status = std::process::Command::new("cmd")
+            .args(["/C", "mklink", "/J"])
+            .arg(&junction)
+            .arg(&target)
+            .status()
+            .unwrap();
+        if !status.success() {
+            println!("skipping safe_join junction test: mklink /J unavailable");
+            return;
+        }
+        assert!(safe_join(&base, "linked/file.jsonl").is_err());
+    }
+
     #[test]
     fn note_paths_refuse_ids_that_could_escape() {
         let data = DataPaths::new("/d");
@@ -206,7 +257,7 @@ mod tests {
 
         for path in [live, archived] {
             let messages = crate::providers::codex::load_messages(path.to_str().unwrap()).unwrap();
-            assert!(!messages.is_empty(), "{}", path.display());
+            assert_ne!(messages.len(), 0, "{}", path.display());
         }
     }
 
@@ -226,7 +277,7 @@ mod tests {
     #[test]
     fn mirror_roots_that_do_not_exist_yet_are_skipped() {
         let _home = kb_home();
-        assert!(codex_mirror_roots_canonical().is_empty());
+        assert_eq!(codex_mirror_roots_canonical().len(), 0);
     }
 
     #[test]

@@ -331,7 +331,9 @@ fn copy_compressed(
     tmp_name.push(format!(".tmp-{}", std::process::id()));
     let tmp = mirror.with_file_name(tmp_name);
     let copied = fs::copy(src, &tmp).map_err(|e| format!("cannot copy {}: {e}", src.display()))?;
-    File::open(&tmp)
+    OpenOptions::new()
+        .write(true)
+        .open(&tmp)
         .and_then(|f| f.sync_all())
         .map_err(|e| format!("cannot fsync {}: {e}", tmp.display()))?;
     fs::rename(&tmp, mirror)

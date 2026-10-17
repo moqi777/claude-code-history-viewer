@@ -1056,7 +1056,13 @@ mod tests {
         #[cfg(unix)]
         std::os::unix::fs::symlink(&target, &link).unwrap();
         #[cfg(windows)]
-        std::os::windows::fs::symlink_dir(&target, &link).unwrap();
+        if let Err(e) = std::os::windows::fs::symlink_dir(&target, &link) {
+            if e.raw_os_error() == Some(1314) {
+                println!("skipping symlink test: {e}");
+                return;
+            }
+            panic!("creating test symlink: {e}");
+        }
         assert!(
             chats_root_in(&bad).is_none(),
             "symlinked chats root must be rejected"

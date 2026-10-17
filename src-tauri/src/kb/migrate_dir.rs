@@ -29,6 +29,20 @@ const LOCK_WAIT: Duration = if cfg!(test) {
 };
 const SPACE_MARGIN_PERCENT: u64 = 110;
 
+fn is_runtime_lock(rel: &str) -> bool {
+    matches!(
+        rel,
+        "kb.lock"
+            | "digest.lock"
+            | "embed.lock"
+            | "vectors/embed.lock"
+            | ".kb.lock.info"
+            | ".digest.lock.info"
+            | ".embed.lock.info"
+            | "vectors/.embed.lock.info"
+    )
+}
+
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum TargetState {
@@ -73,7 +87,7 @@ pub fn check(old: &Path, new: &Path, roots: &SourceRoots) -> MigrateCheck {
     } else {
         TargetState::NotEmpty
     };
-    let problem = if !new.is_absolute() {
+    let problem = if !super::paths::is_absolute(new) {
         Some("not_absolute")
     } else if new == old || new.starts_with(old) || old.starts_with(new) {
         Some("nested")
@@ -187,6 +201,9 @@ fn copy_tree(
     let mut files = 0;
     let mut bytes = 0;
     for (rel, size) in fsutil::walk_files(from_root) {
+        if is_runtime_lock(&rel) {
+            continue;
+        }
         let dst = to_root.join(&rel);
         let have = std::fs::metadata(&dst).map(|m| m.len()).ok();
         if have != Some(size) {
@@ -204,6 +221,9 @@ fn copy_tree(
 fn verify_tree(from_root: &Path, to_root: &Path, meter: &mut Meter<'_>) -> Result<u64, String> {
     let mut checked = 0;
     for (rel, size) in fsutil::walk_files(from_root) {
+        if is_runtime_lock(&rel) {
+            continue;
+        }
         let dst = to_root.join(&rel);
         let theirs = std::fs::metadata(&dst)
             .map_err(|e| format!("{rel} is missing in the new location: {e}"))?;
@@ -412,7 +432,7 @@ mod tests {
     use std::fs;
 
     struct Rig {
-        _tmp: tempfile::TempDir,
+        tmp: tempfile::TempDir,
         old: PathBuf,
         new: PathBuf,
         config_file: PathBuf,
@@ -441,7 +461,7 @@ mod tests {
         let config_file = tmp.path().join("cfg/config.json");
         config.save_to(&config_file).unwrap();
         Rig {
-            _tmp: tmp,
+            tmp,
             old,
             new,
             config_file,
@@ -508,6 +528,48 @@ mod tests {
     }
 
     #[test]
+    fn migration_skips_only_the_runtime_lock_files() {
+        let rig = rig();
+        fs::create_dir_all(rig.old.join("vectors")).unwrap();
+        for rel in [
+            "kb.lock",
+            "digest.lock",
+            "vectors/embed.lock",
+            ".kb.lock.info",
+            ".digest.lock.info",
+            "vectors/.embed.lock.info",
+        ] {
+            fs::write(rig.old.join(rel), b"runtime").unwrap();
+        }
+        fs::write(rig.old.join("unrelated.lock.info"), b"keep").unwrap();
+
+        let mut meter = Meter {
+            sink: &ProgressSink::default(),
+            phase: "copy",
+            total_files: 0,
+            total_bytes: 0,
+            done_files: 0,
+            done_bytes: 0,
+        };
+        copy_tree(&rig.old, &rig.new, &mut meter).unwrap();
+
+        for rel in [
+            "kb.lock",
+            "digest.lock",
+            "vectors/embed.lock",
+            ".kb.lock.info",
+            ".digest.lock.info",
+            "vectors/.embed.lock.info",
+        ] {
+            assert!(!rig.new.join(rel).exists(), "runtime lock copied: {rel}");
+        }
+        assert_eq!(
+            fs::read(rig.new.join("unrelated.lock.info")).unwrap(),
+            b"keep"
+        );
+    }
+
+    #[test]
     fn the_semantic_index_and_the_model_move_along() {
         let rig = rig();
         fs::create_dir_all(rig.old.join("vectors")).unwrap();
@@ -565,7 +627,7 @@ mod tests {
             &ProgressSink::default(),
         )
         .unwrap_err();
-        assert!(!err.is_empty());
+        assert_ne!(err.len(), 0);
         assert_eq!(
             KbConfig::load_from(&rig.config_file).unwrap().data_dir,
             rig.old
@@ -653,12 +715,13 @@ mod tests {
             "their files are untouched"
         );
         // Overlapping a source folder.
+        let source = rig.tmp.path().join("src/claude");
         let roots = SourceRoots {
-            claude: Some(PathBuf::from("/src/claude")),
+            claude: Some(source.clone()),
             codex: None,
         };
         assert_eq!(
-            check(&rig.old, Path::new("/src/claude/kb"), &roots)
+            check(&rig.old, &source.join("kb"), &roots)
                 .problem
                 .as_deref(),
             Some("overlaps_source")

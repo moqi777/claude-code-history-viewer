@@ -1726,7 +1726,13 @@ mod tests {
         #[cfg(unix)]
         std::os::unix::fs::symlink(&real_base, &link).unwrap();
         #[cfg(windows)]
-        std::os::windows::fs::symlink_dir(&real_base, &link).unwrap();
+        if let Err(e) = std::os::windows::fs::symlink_dir(&real_base, &link) {
+            if e.raw_os_error() == Some(1314) {
+                println!("skipping symlink test: {e}");
+                return;
+            }
+            panic!("creating test symlink: {e}");
+        }
 
         let roots = resolve_claude_roots(&[link.to_string_lossy().to_string()]);
         // The symlinked base is rejected, so only the default ~/.claude root remains.
@@ -1759,7 +1765,9 @@ mod tests {
         let real = real_temp_root(&temp).join("real-root");
         fs::create_dir_all(&real).unwrap();
         let link = real_temp_root(&temp).join("linked-root");
-        symlink_dir(&real, &link);
+        if !symlink_dir(&real, &link) {
+            return;
+        }
 
         let mut roots = Vec::new();
         push_root(&mut roots, link.clone());
@@ -1819,12 +1827,20 @@ mod tests {
     }
 
     #[cfg(unix)]
-    fn symlink_dir(target: &Path, link: &Path) {
+    fn symlink_dir(target: &Path, link: &Path) -> bool {
         std::os::unix::fs::symlink(target, link).unwrap();
+        true
     }
     #[cfg(windows)]
-    fn symlink_dir(target: &Path, link: &Path) {
-        std::os::windows::fs::symlink_dir(target, link).unwrap();
+    fn symlink_dir(target: &Path, link: &Path) -> bool {
+        match std::os::windows::fs::symlink_dir(target, link) {
+            Ok(()) => true,
+            Err(e) if e.raw_os_error() == Some(1314) => {
+                println!("skipping symlink test: {e}");
+                false
+            }
+            Err(e) => panic!("creating test symlink: {e}"),
+        }
     }
 
     #[test]
@@ -1843,7 +1859,9 @@ mod tests {
         fs::write(&session, "{}\n").unwrap();
 
         // <root>/projects/-Shared-proj -> <temp>/shared/-Shared-proj
-        symlink_dir(&shared, &root.join("projects").join("-Shared-proj"));
+        if !symlink_dir(&shared, &root.join("projects").join("-Shared-proj")) {
+            return;
+        }
 
         let session_path = root
             .join("projects")
@@ -1872,7 +1890,9 @@ mod tests {
         fs::write(elsewhere.join("session-1.jsonl"), "{}\n").unwrap();
 
         // <root>/projects/-proj/subdir -> <temp>/elsewhere  (symlink below depth 1)
-        symlink_dir(&elsewhere, &project_dir.join("subdir"));
+        if !symlink_dir(&elsewhere, &project_dir.join("subdir")) {
+            return;
+        }
 
         let session_path = project_dir
             .join("subdir")
@@ -1901,7 +1921,13 @@ mod tests {
         #[cfg(unix)]
         std::os::unix::fs::symlink(&real_file, &link).unwrap();
         #[cfg(windows)]
-        std::os::windows::fs::symlink_file(&real_file, &link).unwrap();
+        if let Err(e) = std::os::windows::fs::symlink_file(&real_file, &link) {
+            if e.raw_os_error() == Some(1314) {
+                println!("skipping symlink test: {e}");
+                return;
+            }
+            panic!("creating test symlink: {e}");
+        }
 
         let roots = resolve_claude_roots(&[root.to_string_lossy().to_string()]);
         assert!(

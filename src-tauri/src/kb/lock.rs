@@ -18,6 +18,8 @@ const RETRY_INTERVAL: Duration = Duration::from_millis(100);
 #[derive(Debug)]
 pub struct SyncLock {
     file: File,
+    #[cfg(windows)]
+    info_path: std::path::PathBuf,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -34,11 +36,14 @@ impl SyncLock {
             std::fs::create_dir_all(parent)
                 .map_err(|e| format!("cannot create {}: {e}", parent.display()))?;
         }
-        let file = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create(true)
-            .truncate(false)
+        let mut options = OpenOptions::new();
+        options.read(true).write(true).create(true).truncate(false);
+        #[cfg(windows)]
+        {
+            use std::os::windows::fs::OpenOptionsExt;
+            options.share_mode(0x0000_0001 | 0x0000_0002 | 0x0000_0004);
+        }
+        let file = options
             .open(path)
             .map_err(|e| format!("cannot open lock file {}: {e}", path.display()))?;
 
@@ -60,7 +65,16 @@ impl SyncLock {
             }
         }
 
-        let mut lock = Self { file };
+        #[cfg(windows)]
+        let info_path = path
+            .file_name()
+            .map(|name| path.with_file_name(format!(".{}.info", name.to_string_lossy())))
+            .unwrap_or_else(|| path.with_extension("info"));
+        let mut lock = Self {
+            file,
+            #[cfg(windows)]
+            info_path,
+        };
         lock.write_info();
         Ok(Some(lock))
     }
@@ -76,6 +90,11 @@ impl SyncLock {
             let _ = self.file.seek(SeekFrom::Start(0));
             let _ = self.file.write_all(text.as_bytes());
             let _ = self.file.flush();
+            // Windows byte-range locks can prevent a second handle from
+            // opening the lock file. Keep the diagnostic in a sidecar so
+            // status reads remain possible while the lock is held.
+            #[cfg(windows)]
+            let _ = std::fs::write(&self.info_path, text);
         }
     }
 }
@@ -85,6 +104,8 @@ impl Drop for SyncLock {
         // The note is diagnostics for whoever looks while the lock is held;
         // an empty file says "nobody".
         let _ = self.file.set_len(0);
+        #[cfg(windows)]
+        let _ = std::fs::remove_file(&self.info_path);
         let _ = FileExt::unlock(&self.file);
     }
 }
@@ -109,16 +130,52 @@ fn process_alive(pid: u32) -> bool {
     rc == 0 || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
 }
 
-#[cfg(not(unix))]
+#[cfg(windows)]
+fn process_alive(pid: u32) -> bool {
+    let Ok(output) = std::process::Command::new("tasklist")
+        .args(["/FI", &format!("PID eq {pid}"), "/NH"])
+        .output()
+    else {
+        return false;
+    };
+    String::from_utf8_lossy(&output.stdout).lines().any(|line| {
+        line.split_whitespace()
+            .any(|field| field == pid.to_string())
+    })
+}
+
+#[cfg(not(any(unix, windows)))]
 fn process_alive(_pid: u32) -> bool {
-    // Without a cheap check, trust the lock file; the lock itself is still exact.
     true
 }
 
 /// Who wrote the lock file last (may be stale; never use it for ownership).
 pub fn read_info(path: &Path) -> Option<LockInfo> {
     let mut text = String::new();
-    File::open(path).ok()?.read_to_string(&mut text).ok()?;
+    #[cfg(windows)]
+    {
+        let sidecar = path
+            .file_name()
+            .map(|name| path.with_file_name(format!(".{}.info", name.to_string_lossy())))
+            .unwrap_or_else(|| path.with_extension("info"));
+        if let Ok(value) = std::fs::read_to_string(&sidecar) {
+            if let Ok(info) = serde_json::from_str(&value) {
+                return Some(info);
+            }
+        }
+    }
+    #[cfg(windows)]
+    let file = {
+        use std::os::windows::fs::OpenOptionsExt;
+        OpenOptions::new()
+            .read(true)
+            .share_mode(0x0000_0001 | 0x0000_0002 | 0x0000_0004)
+            .open(path)
+            .ok()?
+    };
+    #[cfg(not(windows))]
+    let file = File::open(path).ok()?;
+    file.take(64 * 1024).read_to_string(&mut text).ok()?;
     serde_json::from_str(&text).ok()
 }
 

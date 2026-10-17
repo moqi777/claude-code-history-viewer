@@ -62,7 +62,7 @@ pub fn is_excluded(path: &Path, exclude_prefixes: &[String]) -> bool {
     exclude_prefixes
         .iter()
         .filter(|p| !p.is_empty())
-        .any(|prefix| text.starts_with(prefix.as_str()))
+        .any(|prefix| path.starts_with(Path::new(prefix)) || text.starts_with(prefix.as_str()))
 }
 
 fn mtime_ns_of(meta: &std::fs::Metadata) -> i64 {
@@ -118,7 +118,8 @@ fn scan_claude(root: &Path, exclude: &[String], out: &mut Discovery) {
                 continue;
             }
         };
-        if !entry.file_type().is_file()
+        if super::paths::is_link_or_junction(entry.path())
+            || !entry.file_type().is_file()
             || entry.path().extension().and_then(|e| e.to_str()) != Some("jsonl")
         {
             continue;
@@ -165,7 +166,8 @@ fn scan_codex_dir(root: &Path, sub: &str, exclude: &[String], out: &mut Discover
                 continue;
             }
         };
-        if !entry.file_type().is_file()
+        if super::paths::is_link_or_junction(entry.path())
+            || !entry.file_type().is_file()
             || !codex_provider::is_discoverable_rollout(entry.path())
             || is_excluded(entry.path(), exclude)
         {
@@ -304,6 +306,39 @@ mod tests {
         );
         let rels: Vec<_> = found.files.iter().map(|f| f.mirror_rel.as_str()).collect();
         assert_eq!(rels, vec!["claude/projects/keep/a.jsonl"]);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn junctions_are_skipped_like_symlinks() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join(".claude");
+        let target = dir.path().join("outside");
+        fs::create_dir_all(target.join("nested")).unwrap();
+        touch(&target.join("nested/outside.jsonl"));
+        let junction = root.join("projects/junction");
+        fs::create_dir_all(junction.parent().unwrap()).unwrap();
+        let status = std::process::Command::new("cmd")
+            .args(["/C", "mklink", "/J"])
+            .arg(&junction)
+            .arg(&target)
+            .status()
+            .unwrap();
+        if !status.success() {
+            println!("skipping junction test: mklink /J unavailable");
+            return;
+        }
+        let found = discover(
+            &SourceRoots {
+                claude: Some(root),
+                codex: None,
+            },
+            &[],
+        );
+        assert!(
+            found.files.is_empty(),
+            "junction contents must not be collected"
+        );
     }
 
     #[test]

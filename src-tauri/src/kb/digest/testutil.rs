@@ -133,13 +133,33 @@ impl FakeAi {
     pub fn new(root: &std::path::Path) -> Self {
         let dir = root.join("fake-ai");
         std::fs::create_dir_all(&dir).unwrap();
-        let script = dir.join("fake-ai.sh");
-        std::fs::write(&script, include_str!("../../../tests/fake_ai/fake-ai.sh")).unwrap();
         #[cfg(unix)]
-        {
+        let script = {
+            let script = dir.join("fake-ai.sh");
+            std::fs::write(&script, include_str!("../../../tests/fake_ai/fake-ai.sh")).unwrap();
             use std::os::unix::fs::PermissionsExt;
             std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
-        }
+            script
+        };
+        #[cfg(windows)]
+        let script = {
+            let source = dir.join("fake-ai.rs");
+            let executable = dir.join("fake-ai.exe");
+            std::fs::write(&source, include_str!("../../../tests/fake_ai/fake-ai.rs")).unwrap();
+            let output = std::process::Command::new("rustc")
+                .args(["--edition=2021", "-C", "debuginfo=0"])
+                .arg(&source)
+                .arg("-o")
+                .arg(&executable)
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "rustc fake AI failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            executable
+        };
         std::env::set_var("FAKE_AI_DIR", &dir);
         Self { dir, script }
     }

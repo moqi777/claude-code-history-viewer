@@ -893,7 +893,7 @@ mod tests {
         .concat();
         // After the first sync the turn looks like pure Q&A…
         let after_first = run(Source::Claude, std::slice::from_ref(&first));
-        assert!(after_first.is_empty(), "{:?}", texts(&after_first));
+        assert_eq!(after_first.len(), 0, "{:?}", texts(&after_first));
         // …and the second sync, which adds real work, brings the held rows back.
         let after_second = run(Source::Claude, &[first, second]);
         assert_eq!(
@@ -962,7 +962,7 @@ mod tests {
             claude_assistant(json!([{"type":"text","text":"答"}])),
         ]
         .concat();
-        assert!(run(Source::Claude, &[chunk]).is_empty());
+        assert_eq!(run(Source::Claude, &[chunk]).len(), 0);
     }
 
     #[test]
@@ -1080,7 +1080,7 @@ mod tests {
             codex_line("t4", json!({"type":"message","role":"assistant","content":[{"type":"output_text","text":"找到"}]})),
         ]
         .concat();
-        assert!(run(Source::Codex, &[chunk]).is_empty());
+        assert_eq!(run(Source::Codex, &[chunk]).len(), 0);
     }
 
     #[test]

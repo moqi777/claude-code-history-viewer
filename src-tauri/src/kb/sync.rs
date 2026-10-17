@@ -935,19 +935,24 @@ mod tests {
 
         fn claude_file(&self) -> PathBuf {
             self.claude
-                .join(format!("projects/-Users-me-proj/{CLAUDE_ID}.jsonl"))
+                .join("projects")
+                .join("-Users-me-proj")
+                .join(format!("{CLAUDE_ID}.jsonl"))
         }
 
         fn codex_file(&self) -> PathBuf {
-            self.codex.join(format!(
-                "sessions/2026/05/29/rollout-2026-05-29T11-14-48-{CODEX_ID}.jsonl"
-            ))
+            self.codex
+                .join("sessions")
+                .join("2026")
+                .join("05")
+                .join("29")
+                .join(format!("rollout-2026-05-29T11-14-48-{CODEX_ID}.jsonl"))
         }
 
         fn codex_archived(&self) -> PathBuf {
-            self.codex.join(format!(
-                "archived_sessions/rollout-2026-05-29T11-14-48-{CODEX_ID}.jsonl"
-            ))
+            self.codex
+                .join("archived_sessions")
+                .join(format!("rollout-2026-05-29T11-14-48-{CODEX_ID}.jsonl"))
         }
 
         fn sync(&self) -> Summary {
@@ -1798,7 +1803,7 @@ mod tests {
         let mut p = params("死锁");
         p.project = Some("no-such-project".into());
         let r = crate::kb::search::search_with(&index, &p, input()).unwrap();
-        assert!(r.results.is_empty(), "filter: project");
+        assert_eq!(r.results.len(), 0, "filter: project");
         let mut p = params("死锁");
         p.limit = Some(1);
         let r = crate::kb::search::search_with(&index, &p, input()).unwrap();
@@ -2162,7 +2167,7 @@ mod tests {
         assert!(verbose["notes"][0]["evidence"].get("msg_key").is_some());
 
         let none = search_notes_with(&sb, "死锁", Some(0));
-        assert!(none.notes.is_empty());
+        assert_eq!(none.notes.len(), 0);
         assert_eq!(none.results.len(), 1);
         let one = search_notes_with(&sb, "死锁", Some(1));
         assert_eq!(one.notes.len(), 1);
@@ -2174,7 +2179,7 @@ mod tests {
         let mut sb = sb;
         sb.env.exclude_cwd_prefixes = vec!["/Users/me/proj".into()];
         sb.sync();
-        assert!(search_notes_with(&sb, "死锁", None).notes.is_empty());
+        assert_eq!(search_notes_with(&sb, "死锁", None).notes.len(), 0);
     }
 
     #[test]
@@ -2306,17 +2311,17 @@ mod tests {
 
     #[test]
     fn the_digest_work_directory_is_always_excluded_from_the_index() {
-        std::env::set_var("CCHV_TEST_HOME", "/tmp/agentkb-test-home");
+        let home = tempfile::tempdir().unwrap();
+        std::env::set_var("CCHV_TEST_HOME", home.path());
         let config = KbConfig {
-            data_dir: PathBuf::from("/data/AgentKB"),
+            data_dir: home.path().join("data/AgentKB"),
             ..KbConfig::default()
         };
         let env = KbEnv::from_config(&config);
-        assert!(env
-            .exclude_cwd_prefixes
-            .contains(&"/data/AgentKB/digest-work".to_string()));
+        let digest_work = env.data.digest_work().to_string_lossy().into_owned();
+        assert!(env.exclude_cwd_prefixes.contains(&digest_work));
         assert!(crate::kb::db::is_cwd_excluded(
-            Some("/data/AgentKB/digest-work"),
+            Some(env.data.digest_work().to_str().unwrap()),
             &env.exclude_cwd_prefixes
         ));
     }
@@ -2367,7 +2372,7 @@ mod tests {
             .collect()
         };
         let before = scores(&sb);
-        assert!(!before.is_empty());
+        assert_ne!(before.len(), 0);
 
         // A full rebuild from the mirror gives the very same rows.
         sb.env.force_reindex = true;
@@ -2665,7 +2670,7 @@ mod tests {
             "messages of one session are merged"
         );
         assert_eq!(all.results[0].hits.len(), 2);
-        assert!(!all.results[0].hits[0].highlights.is_empty());
+        assert_ne!(all.results[0].hits[0].highlights.len(), 0);
 
         // A word nobody has: strict finds nothing, relaxed falls back to the rest.
         let relaxed = search("redis nonexistentword", &|_| {});
@@ -3301,7 +3306,7 @@ mod tests {
         let summary = run_sync_with(&sb.env, "test", &system_only).unwrap();
         assert_eq!(summary.status, "ok");
         assert_eq!(summary.backup.as_ref().unwrap().status, "skipped");
-        assert!(summary.errors.is_empty());
+        assert_eq!(summary.errors.len(), 0);
         assert!(fs::read_dir(&target.target_dir).unwrap().next().is_none());
         assert!(disk.is_dir());
     }
@@ -3361,6 +3366,6 @@ mod tests {
             }) >= 1
         );
         let facets = super::super::status::facets(&sb.env).unwrap();
-        assert!(!facets.projects.is_empty());
+        assert_ne!(facets.projects.len(), 0);
     }
 }

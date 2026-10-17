@@ -260,6 +260,17 @@ pub enum ExeStability {
 
 pub fn classify_exe(exe: &Path) -> ExeStability {
     let text = exe.to_string_lossy();
+    #[cfg(windows)]
+    if text.ends_with("\\AgentKB.exe")
+        || text.ends_with("/AgentKB.exe")
+        || (cfg!(test) && text.contains("AgentKB-test-") && text.ends_with(".exe"))
+    {
+        return if exe.is_file() {
+            ExeStability::Stable
+        } else {
+            ExeStability::NotInApp
+        };
+    }
     if text.contains("/AppTranslocation/") {
         ExeStability::Translocated
     } else if text.starts_with("/Volumes/") {
@@ -516,6 +527,7 @@ mod tests {
         }
     }
 
+    #[cfg(unix)]
     #[test]
     fn plist_has_label_args_interval_runatload_and_escapes_paths() {
         let xml = plist_xml(&PlistSpec {
