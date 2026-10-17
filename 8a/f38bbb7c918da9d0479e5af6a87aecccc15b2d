@@ -1,0 +1,19 @@
+docs/agent-kb/P8-design-review.md
+  s_d58d4b162ae7dc::t_42513a63e5d5e3 1-30
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.11",
+  "base_commit_sha": "8af38bbb7c918da9d0479e5af6a87aecccc15b2d",
+  "prompts": {},
+  "sessions": {
+    "s_d58d4b162ae7dc": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "c4c081c6-aaf3-412b-8f62-de2a98c156fc",
+        "model": "unknown"
+      },
+      "human_author": "moqing <moqing@tsign.cn>"
+    }
+  }
+}
