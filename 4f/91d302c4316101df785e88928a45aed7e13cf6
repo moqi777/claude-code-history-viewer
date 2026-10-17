@@ -1,0 +1,24 @@
+docs/agent-kb/P6-report.md
+  ai_agent 141
+  s_cca7c29607588b::t_9103f5796a4ea4 1-140,142-162
+docs/agent-kb/p6-evidence/README.md
+  ai_agent 7-19
+docs/agent-kb/p6-evidence/eval-final.txt
+  s_cca7c29607588b::t_0c06c570f4e94d 4,12,16
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.11",
+  "base_commit_sha": "4f91d302c4316101df785e88928a45aed7e13cf6",
+  "prompts": {},
+  "sessions": {
+    "s_cca7c29607588b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ef228e77-8d37-45df-ab42-2d4c28a0387d",
+        "model": "claude-sonnet-5-5"
+      },
+      "human_author": "moqing <moqing@tsign.cn>"
+    }
+  }
+}
