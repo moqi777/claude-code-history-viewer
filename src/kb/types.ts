@@ -92,6 +92,11 @@ export interface KbScheduleNotice {
   reason: string;
 }
 
+export interface KbDuplicatesNotice {
+  files: number;
+  bytes: number;
+}
+
 export type KbActivity = "idle" | "collecting" | "backing_up";
 
 export interface KbOverview {
@@ -104,6 +109,7 @@ export interface KbOverview {
   activity: KbActivity;
   backup: KbBackupMeta;
   schedule_notice: KbScheduleNotice | null;
+  duplicates_notice: KbDuplicatesNotice | null;
   data_bytes: number;
   schedule: KbScheduleStatus;
   interval_secs: number;

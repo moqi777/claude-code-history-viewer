@@ -61,6 +61,7 @@
   "kb.banner.notSetUp": "AgentKB is not set up yet. The setup wizard takes a few minutes.",
   "kb.banner.startWizard": "Start setup",
   "kb.notice.scheduleRepaired": "The scheduled task now points to this app: {{to}}",
+  "kb.notice.duplicatesCleaned": "중복된 백업 {{count}}개를 정리해 {{size}}를 확보했습니다. 압축본에 내용이 모두 들어 있는 것만 지웠습니다.",
   "kb.notice.dismiss": "Dismiss",
   "kb.notice.moveToApplications": "AgentKB is running from a temporary location. Move it to /Applications so the scheduled collection keeps working.",
   "kb.status.activity.collecting": "Collecting…",

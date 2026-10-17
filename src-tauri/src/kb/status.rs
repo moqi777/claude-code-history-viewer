@@ -38,6 +38,8 @@ pub struct KbStatus {
     pub backup: BackupMeta,
     /// Set when the app re-pointed the scheduled task at itself.
     pub schedule_notice: Option<ScheduleNotice>,
+    /// Duplicate backups removed since the user last dismissed the notice.
+    pub duplicates_notice: Option<DuplicatesNotice>,
     /// Size of the whole data directory.
     pub data_bytes: u64,
 }
@@ -51,6 +53,12 @@ pub struct BackupMeta {
     pub last_bytes: Option<u64>,
     /// `bytes done / bytes total` of a running backup.
     pub progress: Option<(u64, u64)>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct DuplicatesNotice {
+    pub files: u64,
+    pub bytes: u64,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -80,6 +88,7 @@ pub fn collect(env: &KbEnv) -> Result<KbStatus, String> {
         activity: "idle",
         backup: BackupMeta::default(),
         schedule_notice: None,
+        duplicates_notice: None,
         data_bytes: super::fsutil::dir_size(env.data.root()),
     };
     let Some(conn) = db::open_readonly(&env.data.db())? else {
@@ -150,6 +159,10 @@ pub fn collect(env: &KbEnv) -> Result<KbStatus, String> {
         from: meta(&conn, schedule::META_REPAIRED_FROM),
         to: meta(&conn, schedule::META_REPAIRED_TO).unwrap_or_default(),
         reason: meta(&conn, schedule::META_REPAIRED_REASON).unwrap_or_default(),
+    });
+    status.duplicates_notice = super::dedupe::unseen(&conn).map(|r| DuplicatesNotice {
+        files: r.files,
+        bytes: r.bytes,
     });
     Ok(status)
 }

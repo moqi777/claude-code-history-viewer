@@ -17,6 +17,7 @@
   "kb.banner.notSetUp": "AgentKB 还没有设置，向导只需要几分钟。",
   "kb.banner.startWizard": "开始设置",
   "kb.notice.scheduleRepaired": "定时任务已更新到新位置：{{to}}",
+  "kb.notice.duplicatesCleaned": "已清理 {{count}} 个重复备份，省下 {{size}}。删除的都是内容已完整包含在替换它们的压缩备份里的文件。",
   "kb.notice.dismiss": "知道了",
   "kb.notice.moveToApplications": "AgentKB 正在临时位置运行。请把它移到“应用程序”文件夹，定时收集才能持续工作。",
   "kb.status.activity.collecting": "正在收集…",

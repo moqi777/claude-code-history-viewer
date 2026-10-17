@@ -73,6 +73,7 @@ export interface KbActions {
   backupNow: () => Promise<{ summary?: KbBackupSummary; error?: string }>;
   repairSchedule: () => Promise<{ error?: string }>;
   dismissScheduleNotice: () => Promise<void>;
+  dismissDuplicatesNotice: () => Promise<void>;
   restoreDefaultConfig: () => Promise<{ error?: string }>;
   setProgress: (progress: KbProgress | null) => void;
   openWizard: (mode: WizardMode) => void;
@@ -321,6 +322,14 @@ export const useKbStore = create<KbState & KbActions>((set, get) => ({
   dismissScheduleNotice: async () => {
     try {
       await kbApi.dismissNotice("schedule_repaired");
+    } finally {
+      await get().refresh();
+    }
+  },
+
+  dismissDuplicatesNotice: async () => {
+    try {
+      await kbApi.dismissNotice("duplicates_cleaned");
     } finally {
       await get().refresh();
     }

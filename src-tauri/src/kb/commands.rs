@@ -136,6 +136,9 @@ pub async fn kb_session_facets() -> Res<Facets> {
 pub async fn kb_dismiss_notice(key: String) -> Res<()> {
     blocking(move || {
         let env = env()?;
+        if key == "duplicates_cleaned" {
+            return super::dedupe::dismiss(&db::open(&env.data.db())?);
+        }
         let keys: &[&str] = match key.as_str() {
             "schedule_repaired" => &[
                 schedule::META_REPAIRED_AT,
