@@ -1,0 +1,13 @@
+docs/agent-kb/P7-windows.md
+  ai_agent 13,19
+docs/agent-kb/P6.2-acceptance.md
+  ai_agent 43-45
+docs/agent-kb/PLAN.md
+  ai_agent 65
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.11",
+  "base_commit_sha": "6b6150882a3e2bb2723d5c53d8d1f93c0a007184",
+  "prompts": {}
+}
