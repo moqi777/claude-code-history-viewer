@@ -1,0 +1,40 @@
+docs/agent-kb/p8-evidence/spike/main.rs.txt
+  s_cca7c29607588b::t_a7eaa52c38533d 1-45
+docs/agent-kb/p8-evidence/c12.tsv
+  s_cca7c29607588b::t_7c964cc3055dc5 1-315
+docs/agent-kb/p8-evidence/c19.tsv
+  s_cca7c29607588b::t_7c964cc3055dc5 1-315
+docs/agent-kb/p8-evidence/c3.tsv
+  s_cca7c29607588b::t_7c964cc3055dc5 1-315
+docs/agent-kb/p8-evidence/c9.tsv
+  s_cca7c29607588b::t_7c964cc3055dc5 1-315
+docs/agent-kb/p8-evidence/README.md
+  s_cca7c29607588b::t_7c964cc3055dc5 1-10
+docs/agent-kb/P8-design.md
+  s_cca7c29607588b::t_d7ff158ea63133 1-81,83-100,102-109,111,113-150,152-252
+  s_cca7c29607588b::t_7c964cc3055dc5 82,101,110,112,151
+docs/agent-kb/p8-evidence/thresholds.py
+  s_cca7c29607588b::t_37687bd8d4a687 1-35
+docs/agent-kb/p8-evidence/compress_bench.py
+  s_cca7c29607588b::t_1a3cbebe09e764 1-32
+docs/agent-kb/p8-evidence/orphans.py
+  s_cca7c29607588b::t_ce703465e441b2 1-39
+docs/agent-kb/p8-evidence/spike/Cargo.toml.txt
+  s_cca7c29607588b::t_a7eaa52c38533d 1-9
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.11",
+  "base_commit_sha": "6eea4c39cada89e59317348be6b34961ccd570b1",
+  "prompts": {},
+  "sessions": {
+    "s_cca7c29607588b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ef228e77-8d37-45df-ab42-2d4c28a0387d",
+        "model": "claude-sonnet-5-5"
+      },
+      "human_author": "moqing <moqing@tsign.cn>"
+    }
+  }
+}
