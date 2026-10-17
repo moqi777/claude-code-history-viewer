@@ -18,6 +18,7 @@ const RETRY_INTERVAL: Duration = Duration::from_millis(100);
 #[derive(Debug)]
 pub struct SyncLock {
     file: File,
+    #[cfg(windows)]
     info_path: std::path::PathBuf,
 }
 
@@ -64,11 +65,16 @@ impl SyncLock {
             }
         }
 
+        #[cfg(windows)]
         let info_path = path
             .file_name()
             .map(|name| path.with_file_name(format!(".{}.info", name.to_string_lossy())))
             .unwrap_or_else(|| path.with_extension("info"));
-        let mut lock = Self { file, info_path };
+        let mut lock = Self {
+            file,
+            #[cfg(windows)]
+            info_path,
+        };
         lock.write_info();
         Ok(Some(lock))
     }
@@ -87,6 +93,7 @@ impl SyncLock {
             // Windows byte-range locks can prevent a second handle from
             // opening the lock file. Keep the diagnostic in a sidecar so
             // status reads remain possible while the lock is held.
+            #[cfg(windows)]
             let _ = std::fs::write(&self.info_path, text);
         }
     }
@@ -97,6 +104,7 @@ impl Drop for SyncLock {
         // The note is diagnostics for whoever looks while the lock is held;
         // an empty file says "nobody".
         let _ = self.file.set_len(0);
+        #[cfg(windows)]
         let _ = std::fs::remove_file(&self.info_path);
         let _ = FileExt::unlock(&self.file);
     }
@@ -144,13 +152,16 @@ fn process_alive(_pid: u32) -> bool {
 /// Who wrote the lock file last (may be stale; never use it for ownership).
 pub fn read_info(path: &Path) -> Option<LockInfo> {
     let mut text = String::new();
-    let sidecar = path
-        .file_name()
-        .map(|name| path.with_file_name(format!(".{}.info", name.to_string_lossy())))
-        .unwrap_or_else(|| path.with_extension("info"));
-    if let Ok(value) = std::fs::read_to_string(&sidecar) {
-        if let Ok(info) = serde_json::from_str(&value) {
-            return Some(info);
+    #[cfg(windows)]
+    {
+        let sidecar = path
+            .file_name()
+            .map(|name| path.with_file_name(format!(".{}.info", name.to_string_lossy())))
+            .unwrap_or_else(|| path.with_extension("info"));
+        if let Ok(value) = std::fs::read_to_string(&sidecar) {
+            if let Ok(info) = serde_json::from_str(&value) {
+                return Some(info);
+            }
         }
     }
     #[cfg(windows)]

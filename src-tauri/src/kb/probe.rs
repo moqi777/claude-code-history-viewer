@@ -312,11 +312,13 @@ mod tests {
 
     #[test]
     fn data_dir_overlapping_a_source_or_relative_is_rejected() {
+        let tmp = tempfile::tempdir().unwrap();
+        let source = tmp.path().join("home/u/.claude");
         let roots = SourceRoots {
-            claude: Some(PathBuf::from("/home/u/.claude")),
+            claude: Some(source.clone()),
             codex: None,
         };
-        assert!(test_data_dir(Path::new("/home/u/.claude/kb"), &roots)
+        assert!(test_data_dir(&source.join("kb"), &roots)
             .overlaps_source
             .is_some());
         assert_eq!(

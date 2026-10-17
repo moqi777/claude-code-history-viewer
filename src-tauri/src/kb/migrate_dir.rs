@@ -30,16 +30,17 @@ const LOCK_WAIT: Duration = if cfg!(test) {
 const SPACE_MARGIN_PERCENT: u64 = 110;
 
 fn is_runtime_lock(rel: &str) -> bool {
-    rel == "kb.lock"
-        || rel == "digest.lock"
-        || rel == "embed.lock"
-        || rel == "vectors/embed.lock"
-        || rel.ends_with("/embed.lock")
-        || rel.ends_with("\\embed.lock")
-        || (Path::new(rel)
-            .extension()
-            .is_some_and(|ext| ext.eq_ignore_ascii_case("info"))
-            && rel.contains("lock"))
+    matches!(
+        rel,
+        "kb.lock"
+            | "digest.lock"
+            | "embed.lock"
+            | "vectors/embed.lock"
+            | ".kb.lock.info"
+            | ".digest.lock.info"
+            | ".embed.lock.info"
+            | "vectors/.embed.lock.info"
+    )
 }
 
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
@@ -431,7 +432,7 @@ mod tests {
     use std::fs;
 
     struct Rig {
-        _tmp: tempfile::TempDir,
+        tmp: tempfile::TempDir,
         old: PathBuf,
         new: PathBuf,
         config_file: PathBuf,
@@ -460,7 +461,7 @@ mod tests {
         let config_file = tmp.path().join("cfg/config.json");
         config.save_to(&config_file).unwrap();
         Rig {
-            _tmp: tmp,
+            tmp,
             old,
             new,
             config_file,
@@ -524,6 +525,48 @@ mod tests {
         );
         // ...and the old one is exactly as it was.
         assert_eq!(snapshot(&rig.old), old_before);
+    }
+
+    #[test]
+    fn migration_skips_only_the_runtime_lock_files() {
+        let rig = rig();
+        fs::create_dir_all(rig.old.join("vectors")).unwrap();
+        for rel in [
+            "kb.lock",
+            "digest.lock",
+            "vectors/embed.lock",
+            ".kb.lock.info",
+            ".digest.lock.info",
+            "vectors/.embed.lock.info",
+        ] {
+            fs::write(rig.old.join(rel), b"runtime").unwrap();
+        }
+        fs::write(rig.old.join("unrelated.lock.info"), b"keep").unwrap();
+
+        let mut meter = Meter {
+            sink: &ProgressSink::default(),
+            phase: "copy",
+            total_files: 0,
+            total_bytes: 0,
+            done_files: 0,
+            done_bytes: 0,
+        };
+        copy_tree(&rig.old, &rig.new, &mut meter).unwrap();
+
+        for rel in [
+            "kb.lock",
+            "digest.lock",
+            "vectors/embed.lock",
+            ".kb.lock.info",
+            ".digest.lock.info",
+            "vectors/.embed.lock.info",
+        ] {
+            assert!(!rig.new.join(rel).exists(), "runtime lock copied: {rel}");
+        }
+        assert_eq!(
+            fs::read(rig.new.join("unrelated.lock.info")).unwrap(),
+            b"keep"
+        );
     }
 
     #[test]
@@ -672,12 +715,13 @@ mod tests {
             "their files are untouched"
         );
         // Overlapping a source folder.
+        let source = rig.tmp.path().join("src/claude");
         let roots = SourceRoots {
-            claude: Some(PathBuf::from("/src/claude")),
+            claude: Some(source.clone()),
             codex: None,
         };
         assert_eq!(
-            check(&rig.old, Path::new("/src/claude/kb"), &roots)
+            check(&rig.old, &source.join("kb"), &roots)
                 .problem
                 .as_deref(),
             Some("overlaps_source")

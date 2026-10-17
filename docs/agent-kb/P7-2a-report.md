@@ -41,3 +41,30 @@ Rust 检查实际使用了 `--manifest-path src-tauri/Cargo.toml`；前端检查
 ## 待审核
 
 步骤 2a 已完成，等待审核。步骤 2b 尚未开始。
+
+## 审核意见修订后的复跑
+
+本轮先合并了 `origin/agent-kb` 的 `e703ac26`（`P7-2a-review.md`），只处理审核意见第 1 节；第 2 节全部留到步骤 2b。
+
+### 修订内容
+
+1. 删除 `fsutil::sync_file` 的 Windows `PermissionDenied` 豁免；所有需要持久化的文件恢复直接传播 `sync_all()` 错误，压缩镜像临时文件改用可写句柄后再同步。
+2. `paths::is_absolute` 恢复严格的 `Path::is_absolute()`；受影响的 Windows 测试夹具改用临时目录生成真实绝对路径。
+3. 锁旁路 `.info` 文件仅在 Windows 写入、读取和清理；迁移跳过列表改为确切的运行时锁文件名，并增加迁移覆盖测试。
+4. 增加 `safe_join` 遇到 junction 组件时返回错误的 Windows 测试；实际创建 junction 后测试通过。
+
+### 七项复跑结果
+
+| # | 命令 | 结果 |
+|---|---|---|
+| 1 | `pnpm tsc --build .` | 通过 |
+| 2 | `pnpm vitest run` | 通过：146 个测试文件，1575 个测试全部通过 |
+| 3 | `pnpm lint` | 通过 |
+| 4 | `pnpm run i18n:validate` | 通过：各语言 1990 个 key 同步、无重复；已有 provider 名称提示仍为 warning-only |
+| 5 | `cargo test -j 1 -- --test-threads=1` | 通过：库 1447 passed、0 failed、6 ignored；集成目标分别为 6、5、4（另 6 ignored）和 3 个通过 |
+| 6 | `cargo clippy -j 1 --all-targets --all-features -- -D warnings` | 通过，无 warning/error |
+| 7 | `cargo fmt --all -- --check` | 通过 |
+
+Rust 检查使用 `--manifest-path src-tauri/Cargo.toml`；`-j 1` 用于避免 Windows MSVC 并行链接时的 PDB 资源竞争。所有复跑仍使用 `%TEMP%` 下的独立测试根目录，没有读取真实 Claude Code/Codex 记录或凭据文件。复跑结束后执行了 `git diff --check`，无空白错误。
+
+本轮仍未开始步骤 2b。

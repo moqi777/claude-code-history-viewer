@@ -550,45 +550,58 @@ mod tests {
 
     #[test]
     fn missing_file_yields_defaults_and_partial_file_fills_in() {
-        let _home = sandbox_home();
+        let home = sandbox_home();
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("config.json");
         let defaults = KbConfig::load_from(&path).unwrap();
         assert_eq!(defaults.interval_secs, DEFAULT_INTERVAL_SECS);
         assert_eq!(KbConfig::state_of(&path), ConfigState::Missing);
 
-        let path = write(
-            dir.path(),
-            r#"{"interval_secs": 60, "exclude_prefixes": ["/x"]}"#,
-        );
+        let exclude = home.path().join("x");
+        let text = serde_json::json!({
+            "interval_secs": 60,
+            "exclude_prefixes": [exclude],
+        })
+        .to_string();
+        let path = write(dir.path(), &text);
         let loaded = KbConfig::load_from(&path).unwrap();
         assert_eq!(loaded.interval_secs, 60);
-        assert_eq!(loaded.exclude_prefixes, vec!["/x".to_string()]);
+        assert_eq!(loaded.exclude_prefixes, vec![exclude.to_string_lossy()]);
         assert!(loaded.schedule_enabled && loaded.sources.claude.enabled);
     }
 
     #[test]
     fn v0_files_are_upgraded_in_memory_but_not_rewritten() {
-        let _home = sandbox_home();
+        let home = sandbox_home();
         let dir = tempfile::tempdir().unwrap();
-        let text =
-            r#"{"data_dir":"/data/kb","interval_secs":300,"claude_root":"/c","codex_root":"/x"}"#;
-        let path = write(dir.path(), text);
+        let data = home.path().join("data/kb");
+        let claude = home.path().join("c");
+        let codex = home.path().join("x");
+        let text = serde_json::json!({
+            "data_dir": data,
+            "interval_secs": 300,
+            "claude_root": claude,
+            "codex_root": codex,
+        })
+        .to_string();
+        let path = write(dir.path(), &text);
         let loaded = KbConfig::load_from(&path).unwrap();
         assert_eq!(loaded.version, 1);
-        assert_eq!(loaded.sources.claude.root, Some(PathBuf::from("/c")));
-        assert_eq!(loaded.sources.codex.root, Some(PathBuf::from("/x")));
+        assert_eq!(loaded.sources.claude.root, Some(claude));
+        assert_eq!(loaded.sources.codex.root, Some(codex));
         assert!(loaded.extra.is_empty(), "old keys must not linger");
         assert_eq!(std::fs::read_to_string(&path).unwrap(), text);
     }
 
     #[test]
     fn unknown_keys_survive_a_save() {
-        let _home = sandbox_home();
+        let home = sandbox_home();
         let dir = tempfile::tempdir().unwrap();
+        let data = home.path().join("d");
         let path = write(
             dir.path(),
-            r#"{"version":1,"data_dir":"/d","future_flag":{"a":1}}"#,
+            &serde_json::json!({"version": 1, "data_dir": data, "future_flag": {"a": 1}})
+                .to_string(),
         );
         let mut loaded = KbConfig::load_from(&path).unwrap();
         loaded.interval_secs = 120;
@@ -600,10 +613,11 @@ mod tests {
 
     #[test]
     fn a_newer_file_is_refused_and_left_alone() {
-        let _home = sandbox_home();
+        let home = sandbox_home();
         let dir = tempfile::tempdir().unwrap();
-        let text = r#"{"version":99,"data_dir":"/d"}"#;
-        let path = write(dir.path(), text);
+        let text =
+            serde_json::json!({"version": 99, "data_dir": home.path().join("d")}).to_string();
+        let path = write(dir.path(), &text);
         assert!(KbConfig::load_from(&path).unwrap_err().contains("newer"));
         assert!(matches!(
             KbConfig::state_of(&path),
@@ -641,29 +655,30 @@ mod tests {
 
     #[test]
     fn data_dir_may_not_overlap_a_source_root() {
-        let _home = sandbox_home();
+        let home = sandbox_home();
         let mut config = KbConfig::default();
-        config.sources.claude.root = Some(PathBuf::from("/src/claude"));
-        config.data_dir = PathBuf::from("/src/claude/kb");
+        let source = home.path().join("src/claude");
+        config.sources.claude.root = Some(source.clone());
+        config.data_dir = source.join("kb");
         assert!(config.validate().is_err());
-        config.data_dir = PathBuf::from("/src");
+        config.data_dir = home.path().join("src");
         assert!(config.validate().is_err());
-        config.data_dir = PathBuf::from("/elsewhere/kb");
+        config.data_dir = home.path().join("elsewhere/kb");
         config.validate().unwrap();
     }
 
     #[test]
     fn mirror_needs_target_uuid_and_a_location_outside_the_data_dir() {
-        let _home = sandbox_home();
+        let home = sandbox_home();
         let mut config = KbConfig::default();
-        config.data_dir = PathBuf::from("/data/kb");
+        config.data_dir = home.path().join("data/kb");
         config.mirror.enabled = true;
         assert!(config.validate().is_err());
-        config.mirror.target_dir = Some(PathBuf::from("/Volumes/B/AgentKB-backup"));
+        config.mirror.target_dir = Some(home.path().join("Volumes/B/AgentKB-backup"));
         assert!(config.validate().is_err(), "uuid missing");
         config.mirror.volume_uuid = Some("U-1".into());
         config.validate().unwrap();
-        config.mirror.target_dir = Some(PathBuf::from("/data/kb/backup"));
+        config.mirror.target_dir = Some(home.path().join("data/kb/backup"));
         assert!(config.validate().is_err());
     }
 

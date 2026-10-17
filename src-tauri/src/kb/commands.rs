@@ -743,7 +743,7 @@ mod tests {
         assert_eq!(*sched.seen.borrow(), vec![300]);
         assert!(out.schedule.is_some());
 
-        config.exclude_prefixes = vec!["/tmp/x".into()];
+        config.exclude_prefixes = vec![rig.tmp.path().join("tmp/x").display().to_string()];
         save_config(&rig.file, config.clone(), &FakeQuery::default(), &sched).unwrap();
         assert_eq!(sched.installs.get(), 1, "unrelated change: no reinstall");
 

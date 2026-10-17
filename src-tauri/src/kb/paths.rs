@@ -2,12 +2,8 @@
 
 use std::path::{Component, Path, PathBuf};
 
-/// `Path::is_absolute` deliberately rejects drive-relative rooted Windows
-/// paths such as `\data\kb`. Configuration fixtures and paths copied from a
-/// Unix installation can contain that form; it is still rooted and cannot
-/// escape the current volume, so treat it as absolute for KB validation.
 pub fn is_absolute(path: &Path) -> bool {
-    path.is_absolute() || cfg!(windows) && path.has_root()
+    path.is_absolute()
 }
 
 /// `~/AgentKB/` (or wherever the config points). Pure path arithmetic.
@@ -189,6 +185,28 @@ mod tests {
         for bad in ["", "../x", "a/../b", "/abs", "a//b", "a\\b", "./a", "a/."] {
             assert!(safe_join(Path::new("/raw"), bad).is_err(), "{bad}");
         }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn safe_join_rejects_junction_components() {
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path().join("base");
+        let target = tmp.path().join("target");
+        std::fs::create_dir_all(&base).unwrap();
+        std::fs::create_dir_all(&target).unwrap();
+        let junction = base.join("linked");
+        let status = std::process::Command::new("cmd")
+            .args(["/C", "mklink", "/J"])
+            .arg(&junction)
+            .arg(&target)
+            .status()
+            .unwrap();
+        if !status.success() {
+            println!("skipping safe_join junction test: mklink /J unavailable");
+            return;
+        }
+        assert!(safe_join(&base, "linked/file.jsonl").is_err());
     }
 
     #[test]

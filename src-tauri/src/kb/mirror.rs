@@ -15,7 +15,6 @@ use std::path::{Path, PathBuf};
 use sha2::{Digest, Sha256};
 
 use super::db::{Cursor, FileRow};
-use super::fsutil;
 use super::index::for_each_line_chunk;
 
 /// How much of the file start is fingerprinted to notice a rewrite.
@@ -310,7 +309,7 @@ fn append_plain(
         feed(chunk)
     })?;
 
-    fsutil::sync_file(&out)
+    out.sync_all()
         .map_err(|e| format!("cannot fsync mirror {}: {e}", mirror.display()))?;
     if !existed {
         sync_parent_dir(mirror);
@@ -332,8 +331,10 @@ fn copy_compressed(
     tmp_name.push(format!(".tmp-{}", std::process::id()));
     let tmp = mirror.with_file_name(tmp_name);
     let copied = fs::copy(src, &tmp).map_err(|e| format!("cannot copy {}: {e}", src.display()))?;
-    File::open(&tmp)
-        .and_then(|f| fsutil::sync_file(&f))
+    OpenOptions::new()
+        .write(true)
+        .open(&tmp)
+        .and_then(|f| f.sync_all())
         .map_err(|e| format!("cannot fsync {}: {e}", tmp.display()))?;
     fs::rename(&tmp, mirror)
         .map_err(|e| format!("cannot move {} into place: {e}", tmp.display()))?;

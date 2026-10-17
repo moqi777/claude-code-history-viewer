@@ -2311,9 +2311,10 @@ mod tests {
 
     #[test]
     fn the_digest_work_directory_is_always_excluded_from_the_index() {
-        std::env::set_var("CCHV_TEST_HOME", "/tmp/agentkb-test-home");
+        let home = tempfile::tempdir().unwrap();
+        std::env::set_var("CCHV_TEST_HOME", home.path());
         let config = KbConfig {
-            data_dir: PathBuf::from("/data/AgentKB"),
+            data_dir: home.path().join("data/AgentKB"),
             ..KbConfig::default()
         };
         let env = KbEnv::from_config(&config);
