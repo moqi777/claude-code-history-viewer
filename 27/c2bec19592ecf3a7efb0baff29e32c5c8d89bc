@@ -1,0 +1,9 @@
+docs/agent-kb/P6.2-typing.md
+  ai_agent 14,16-24,28,33
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.11",
+  "base_commit_sha": "27c2bec19592ecf3a7efb0baff29e32c5c8d89bc",
+  "prompts": {}
+}
