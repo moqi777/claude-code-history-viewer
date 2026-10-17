@@ -1,0 +1,31 @@
+docs/agent-kb/P6.2-report.md
+  ai_agent 76-79
+src-tauri/src/kb/mod.rs
+  s_cca7c29607588b::t_20d313e092f4f8 44
+src/kb/branding.ts
+  s_cca7c29607588b::t_20d313e092f4f8 5
+src/kb/fixtures.ts
+  s_cca7c29607588b::t_20d313e092f4f8 22
+src/kb/KbHome.test.tsx
+  s_cca7c29607588b::t_20d313e092f4f8 75
+src/kb/KbNotes.test.tsx
+  s_cca7c29607588b::t_20d313e092f4f8 87-89
+src/kb/KbSearch.test.tsx
+  s_cca7c29607588b::t_20d313e092f4f8 230,233-237
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.11",
+  "base_commit_sha": "28b1ebaad42f3b64943c37cf2686dd671e42f912",
+  "prompts": {},
+  "sessions": {
+    "s_cca7c29607588b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ef228e77-8d37-45df-ab42-2d4c28a0387d",
+        "model": "unknown"
+      },
+      "human_author": "moqing <moqing@tsign.cn>"
+    }
+  }
+}
