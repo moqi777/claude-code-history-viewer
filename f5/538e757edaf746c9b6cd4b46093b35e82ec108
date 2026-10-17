@@ -1,0 +1,44 @@
+docs/agent-kb/p6-evidence/ranks-bge-small-zh.txt
+  s_cca7c29607588b::t_c6c44ebc9ab4f7 1-20
+docs/agent-kb/p6-evidence/grid2.py
+  s_cca7c29607588b::t_c6c44ebc9ab4f7 1-22
+docs/agent-kb/p6-evidence/queries.py
+  s_cca7c29607588b::t_c6c44ebc9ab4f7 1-37
+docs/agent-kb/p6-evidence/fuse_grid.py
+  s_cca7c29607588b::t_c6c44ebc9ab4f7 1-23
+docs/agent-kb/p6-evidence/final_tables.py
+  s_cca7c29607588b::t_c6c44ebc9ab4f7 1-16
+docs/agent-kb/P6-design.md
+  s_cca7c29607588b::t_3e063c509bb7c4 1-53,55-61,63-73,75,77-213
+  ai_agent 54,62,74,76
+docs/agent-kb/p6-evidence/chunker.py
+  s_cca7c29607588b::t_c6c44ebc9ab4f7 1-53
+docs/agent-kb/p6-evidence/kw.py
+  s_cca7c29607588b::t_c6c44ebc9ab4f7 1-15
+docs/agent-kb/p6-evidence/vec_eval.py
+  s_cca7c29607588b::t_c6c44ebc9ab4f7 1-55
+docs/agent-kb/p6-evidence/spike-src/main.rs
+  s_cca7c29607588b::t_c6c44ebc9ab4f7 1-206
+docs/agent-kb/p6-evidence/ranks-bge-m3.txt
+  s_cca7c29607588b::t_c6c44ebc9ab4f7 1-20
+docs/agent-kb/p6-evidence/README.md
+  ai_agent 1-6
+docs/agent-kb/p6-evidence/spike-src/Cargo.toml.txt
+  s_cca7c29607588b::t_c6c44ebc9ab4f7 1-11
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.11",
+  "base_commit_sha": "f5538e757edaf746c9b6cd4b46093b35e82ec108",
+  "prompts": {},
+  "sessions": {
+    "s_cca7c29607588b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ef228e77-8d37-45df-ab42-2d4c28a0387d",
+        "model": "claude-sonnet-5-5"
+      },
+      "human_author": "moqing <moqing@tsign.cn>"
+    }
+  }
+}
