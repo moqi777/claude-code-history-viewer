@@ -1,0 +1,115 @@
+src/kb/fixtures.ts
+  s_cca7c29607588b::t_92f8d2b42e1ad8 22
+src-tauri/src/kb/cli.rs
+  s_cca7c29607588b::t_ff0ff055277cfc 20,634,652
+src-tauri/src/kb/semantic/rank.rs
+  s_cca7c29607588b::t_7de5d5c1b31415 416-417,452-456,462-465,474-478,489-490
+  s_cca7c29607588b::t_2ea971cb9b054c 387-415,418-451,457-461,466-473,479-488,491-492
+src-tauri/src/kb/skill.rs
+  s_cca7c29607588b::t_92f8d2b42e1ad8 22,114
+  s_cca7c29607588b::t_202243f07c279a 115
+src/kb/branding.ts
+  s_cca7c29607588b::t_92f8d2b42e1ad8 5
+src/kb/KbSearch.test.tsx
+  s_cca7c29607588b::t_485255cc44ff8b 248-278
+src/i18n/locales/ko/kb.json
+  s_cca7c29607588b::t_f428ceca2107d8 430-473
+  s_cca7c29607588b::t_10bb38df9ea173 474-475
+src-tauri/src/kb/export.rs
+  s_cca7c29607588b::t_ff0ff055277cfc 132,253-273
+src-tauri/src/kb/semantic/build.rs
+  s_cca7c29607588b::t_cefc3d5d0be0c7 47-48,53-55,251-253,255,262-264
+  s_cca7c29607588b::t_5fa7349141416f 274,280-282
+  s_cca7c29607588b::t_7de5d5c1b31415 50-52
+src/kb/api.ts
+  s_cca7c29607588b::t_dedeca502b4980 31-32,78-79,104-118
+src-tauri/src/kb/migrate_dir.rs
+  s_cca7c29607588b::t_7de5d5c1b31415 243-245,455-460,517-535
+  s_cca7c29607588b::t_8945cb3b2c145e 267-269,272-276,279-283,302-310,333-339
+  s_cca7c29607588b::t_169de49790c3bd 25-29,547-549
+  s_cca7c29607588b::t_ebdd5c52082683 511-516,536-546,550-551
+  s_cca7c29607588b::t_ff0ff055277cfc 242,246-247
+src/i18n/locales/en/kb.json
+  s_cca7c29607588b::t_10bb38df9ea173 474-475
+  s_cca7c29607588b::t_f428ceca2107d8 430-473
+src-tauri/src/kb/pack.rs
+  s_cca7c29607588b::t_ff0ff055277cfc 200-201
+src/kb/types.ts
+  s_cca7c29607588b::t_dedeca502b4980 188,359-361,370,379-397,671-716
+  s_cca7c29607588b::t_10bb38df9ea173 668
+src/i18n/locales/zh-CN/kb.json
+  s_cca7c29607588b::t_f428ceca2107d8 430-473
+  s_cca7c29607588b::t_10bb38df9ea173 474-475
+src-tauri/src/kb/import_tests.rs
+  s_cca7c29607588b::t_4de966d3ab7d84 1009-1072,1079-1084,1090-1115,1120-1137,1139
+  s_cca7c29607588b::t_7de5d5c1b31415 1073-1078,1085-1089,1116-1119
+  s_cca7c29607588b::t_0213c59a6b8288 918
+  s_cca7c29607588b::t_7b8898e77b06f6 1138
+  s_cca7c29607588b::t_a08d8c90d1f1f8 113,770,864,878,890
+src/i18n/locales/zh-TW/kb.json
+  s_cca7c29607588b::t_10bb38df9ea173 474-475
+  s_cca7c29607588b::t_f428ceca2107d8 430-473
+src/kb/KbTransfer.tsx
+  s_cca7c29607588b::t_a1332a9f41f3a8 48,63,82-90
+src-tauri/src/kb/mod.rs
+  s_cca7c29607588b::t_92f8d2b42e1ad8 44
+src/kb/KbTransfer.test.tsx
+  s_cca7c29607588b::t_2f98f633633e1b 118
+docs/agent-kb/p6-evidence/build_in_runs.sh
+  s_cca7c29607588b::t_27d28832c98a3f 1-22
+src-tauri/src/kb/sync.rs
+  s_cca7c29607588b::t_3cad30846469ae 2669-2677
+src/i18n/locales/ja/kb.json
+  s_cca7c29607588b::t_f428ceca2107d8 430-473
+  s_cca7c29607588b::t_10bb38df9ea173 474-475
+src/kb/KbSemantic.test.tsx
+  s_cca7c29607588b::t_10bb38df9ea173 2-66,68-75,77,79-80,83,85,88,91,94-173
+  s_cca7c29607588b::t_ff4e00af24b324 1,67,76,78,81-82,84,86-87,89-90,92-93
+src/kb/KbSearch.tsx
+  s_cca7c29607588b::t_a1332a9f41f3a8 172,174,199-211,243-245
+  s_cca7c29607588b::t_44a810f6581030 10
+src-tauri/src/kb/commands.rs
+  s_cca7c29607588b::t_7de5d5c1b31415 764-770
+  s_cca7c29607588b::t_29cb5c57696d13 266,281-284
+  s_cca7c29607588b::t_ebdd5c52082683 753-763,771-776
+src/kb/KbSemantic.tsx
+  s_cca7c29607588b::t_0c2d65f401da7d 1-341
+src-tauri/src/kb/transfer_commands.rs
+  s_cca7c29607588b::t_ff0ff055277cfc 73,86
+docs/agent-kb/p6-evidence/setup_home.sh
+  s_cca7c29607588b::t_06646fde45e25a 1-33
+src-tauri/src/kb/semantic/sys.rs
+  s_cca7c29607588b::t_0e7be1d8990261 3-5,8,12-26,29-30,33
+src/kb/testkit.ts
+  s_cca7c29607588b::t_0c2d65f401da7d 88
+  s_cca7c29607588b::t_dedeca502b4980 33-42
+src/kb/transferErrors.ts
+  s_cca7c29607588b::t_10bb38df9ea173 14
+src/kb/KbSettings.tsx
+  s_cca7c29607588b::t_a1332a9f41f3a8 20,171
+src-tauri/src/kb/import.rs
+  s_cca7c29607588b::t_ff0ff055277cfc 581-582,652,657-677,865,867-872
+  s_cca7c29607588b::t_8945cb3b2c145e 909
+  s_cca7c29607588b::t_4de966d3ab7d84 39-44,866
+src-tauri/src/kb/semantic/model.rs
+  s_cca7c29607588b::t_7de5d5c1b31415 482-486
+  s_cca7c29607588b::t_2ea971cb9b054c 468-481,487-489
+src/kb/KbHome.test.tsx
+  s_cca7c29607588b::t_92f8d2b42e1ad8 75
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.11",
+  "base_commit_sha": "e483bcdc740b225550135a744b809b5cc1e7269f",
+  "prompts": {},
+  "sessions": {
+    "s_cca7c29607588b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ef228e77-8d37-45df-ab42-2d4c28a0387d",
+        "model": "claude-sonnet-5-5"
+      },
+      "human_author": "moqing <moqing@tsign.cn>"
+    }
+  }
+}
