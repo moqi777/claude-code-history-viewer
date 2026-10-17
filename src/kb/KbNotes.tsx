@@ -149,7 +149,6 @@ export const KbNotes = () => {
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={(e) => {
               if (isSearchEnter(e)) search();
-              if (e.key === "Escape" && !e.nativeEvent.isComposing) clear();
             }}
             placeholder={t("kb.notes.searchPlaceholder")}
             aria-label={t("kb.notes.searchPlaceholder")}

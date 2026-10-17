@@ -227,12 +227,14 @@ describe("home page search", () => {
     expect(screen.queryByText("排查 Ghostty 卡死")).toBeNull();
   });
 
-  it("Escape clears the box and the results", async () => {
+  it("Escape does nothing to the box or the results, composing or not", async () => {
     await runSearch({ state: "ok", response: response() });
     fireEvent.keyDown(box(), { key: "Escape" });
-    expect((box() as HTMLInputElement).value).toBe("");
-    expect(screen.getByText("Fix the login bug")).toBeTruthy();
-    expect(useKbStore.getState().search.status).toBe("idle");
+    fireEvent.keyDown(box(), { key: "Escape", isComposing: true });
+    fireEvent.keyDown(box(), { key: "Escape", keyCode: 229 });
+    expect((box() as HTMLInputElement).value).toBe("死锁");
+    expect(screen.getByText("排查 Ghostty 卡死")).toBeTruthy();
+    expect(useKbStore.getState().search.status).toBe("ok");
   });
 
   it("the filters narrow the search", async () => {

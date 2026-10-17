@@ -84,6 +84,9 @@ describe("KbNotes", () => {
     fireEvent.keyDown(input, { key: "Enter", isComposing: true });
     fireEvent.keyDown(input, { key: "Enter", keyCode: 229 });
     expect(mocks.api.notesList).not.toHaveBeenCalled();
+    fireEvent.keyDown(input, { key: "Escape" });
+    fireEvent.keyDown(input, { key: "Escape", isComposing: true });
+    expect((input as HTMLInputElement).value).toBe("QQ");
     fireEvent.keyDown(input, { key: "Enter" });
     await waitFor(() =>
       expect(mocks.api.notesList).toHaveBeenLastCalledWith(expect.objectContaining({ query: "QQ" })),

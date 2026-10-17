@@ -66,9 +66,6 @@ export const SearchBox = () => {
           onChange={(e) => useKbStore.getState().setSearchQuery(e.target.value)}
           onKeyDown={(e) => {
             if (isSearchEnter(e)) void useKbStore.getState().runSearch();
-            if (e.key === "Escape" && !e.nativeEvent.isComposing) {
-              useKbStore.getState().setSearchQuery("");
-            }
           }}
           placeholder={t("kb.search.placeholder")}
           aria-label={t("kb.search.placeholder")}
