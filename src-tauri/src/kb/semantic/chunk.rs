@@ -304,7 +304,7 @@ mod tests {
 
     #[test]
     fn short_messages_and_titles_give_nothing() {
-        assert!(message_chunks("codex", "s", 1, "user", "好的").is_empty());
+        assert_eq!(message_chunks("codex", "s", 1, "user", "好的").len(), 0);
         assert!(title_chunk("codex", "s", "好").is_none());
         assert!(title_chunk("codex", "s", "电池掉电快问题排查").is_some());
     }

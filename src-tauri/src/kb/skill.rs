@@ -343,6 +343,17 @@ mod tests {
         files
     }
 
+    #[cfg(windows)]
+    fn test_exe(home: &tempfile::TempDir) -> PathBuf {
+        let exe = home
+            .path()
+            .parent()
+            .unwrap_or(home.path())
+            .join(format!("AgentKB-test-{}.exe", std::process::id()));
+        std::fs::write(&exe, b"test executable").unwrap();
+        exe
+    }
+
     #[test]
     fn the_two_templates_differ_only_by_the_permission_line() {
         let claude = render(Target::Claude, EXE);
@@ -374,13 +385,16 @@ mod tests {
         std::fs::write(root.join("projects/p/s.jsonl"), b"{}\n").unwrap();
         std::fs::write(root.join("settings.json"), b"{}").unwrap();
         let before = snapshot(home.path());
-        let exe = Path::new(EXE);
+        #[cfg(unix)]
+        let exe = PathBuf::from(EXE);
+        #[cfg(windows)]
+        let exe = test_exe(&home);
 
         assert_eq!(
-            status(Target::Claude, Some(&root), exe).state,
+            status(Target::Claude, Some(&root), &exe).state,
             State::NotInstalled
         );
-        let installed = install(Target::Claude, &root, exe).unwrap();
+        let installed = install(Target::Claude, &root, &exe).unwrap();
         assert_eq!(installed.state, State::Current);
         let after = snapshot(home.path());
         let added: Vec<_> = after.iter().filter(|f| !before.contains(f)).collect();
@@ -393,11 +407,11 @@ mod tests {
 
         // Installing again is idempotent.
         assert_eq!(
-            install(Target::Claude, &root, exe).unwrap().state,
+            install(Target::Claude, &root, &exe).unwrap().state,
             State::Current
         );
 
-        let removed = uninstall(Target::Claude, &root, exe).unwrap();
+        let removed = uninstall(Target::Claude, &root, &exe).unwrap();
         assert_eq!(removed.state, State::NotInstalled);
         // `skills/` itself was created by the install, and stays.
         let leftovers: Vec<_> = snapshot(home.path())
@@ -412,23 +426,27 @@ mod tests {
     fn a_stale_copy_is_noticed_and_updating_fixes_it() {
         let home = tempfile::tempdir().unwrap();
         let root = home.path().join(".codex");
-        let old_exe = Path::new("/Applications/Old.app/Contents/MacOS/AgentKB");
-        install(Target::Codex, &root, old_exe).unwrap();
+        let old_exe = PathBuf::from("/Applications/Old.app/Contents/MacOS/AgentKB");
+        install(Target::Codex, &root, &old_exe).unwrap();
         // The old path does not exist on this machine.
-        let s = status(Target::Codex, Some(&root), Path::new(EXE));
+        #[cfg(unix)]
+        let current_exe = PathBuf::from(EXE);
+        #[cfg(windows)]
+        let current_exe = test_exe(&home);
+        let s = status(Target::Codex, Some(&root), &current_exe);
         assert_eq!(s.state, State::Stale);
         assert_eq!(s.stale_reason, Some("missing_exe"));
         assert_eq!(s.installed_exe.as_deref(), old_exe.to_str());
 
         // A copy written by another app version is still current: only the
         // template revision and the program path matter.
-        install(Target::Codex, &root, Path::new(EXE)).unwrap();
+        install(Target::Codex, &root, &current_exe).unwrap();
         let file = skill_dir(&root).join(SKILL_FILE);
         let text = std::fs::read_to_string(&file)
             .unwrap()
             .replace(&format!("app {AGENTKB_VERSION}"), "app 0.0.1");
         std::fs::write(&file, text).unwrap();
-        let s = status(Target::Codex, Some(&root), Path::new(EXE));
+        let s = status(Target::Codex, Some(&root), &current_exe);
         assert_eq!((s.state, s.stale_reason), (State::Current, None));
 
         // A copy from an older template is stale even if the path is fine.
@@ -436,12 +454,12 @@ mod tests {
             .unwrap()
             .replace(&format!("template {TEMPLATE_VERSION}"), "template 0");
         std::fs::write(&file, text).unwrap();
-        let s = status(Target::Codex, Some(&root), Path::new(EXE));
+        let s = status(Target::Codex, Some(&root), &current_exe);
         assert_eq!((s.state, s.stale_reason), (State::Stale, Some("version")));
 
-        install(Target::Codex, &root, Path::new(EXE)).unwrap();
+        install(Target::Codex, &root, &current_exe).unwrap();
         assert_eq!(
-            status(Target::Codex, Some(&root), Path::new(EXE)).state,
+            status(Target::Codex, Some(&root), &current_exe).state,
             State::Current
         );
     }

@@ -294,9 +294,9 @@ mod tests {
     #[test]
     fn mixed_text_and_long_runs() {
         assert_eq!(t("MQ消息"), vec!["mq", "消息"]);
-        assert!(t(&"a".repeat(100)).is_empty(), "hash-like runs are dropped");
-        assert!(t("").is_empty());
-        assert!(t("，。！ ,.!").is_empty());
+        assert_eq!(t(&"a".repeat(100)).len(), 0, "hash-like runs are dropped");
+        assert_eq!(t("").len(), 0);
+        assert_eq!(t("，。！ ,.!").len(), 0);
     }
 
     #[test]
@@ -321,6 +321,6 @@ mod tests {
             ]
         );
         assert_eq!(query_groups("redis redis").len(), 1, "duplicates collapse");
-        assert!(query_groups("的 了").is_empty());
+        assert_eq!(query_groups("的 了").len(), 0);
     }
 }

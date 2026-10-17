@@ -411,7 +411,7 @@ mod tests {
 
     fn unusable(input: &SemanticInput, state: UseState) {
         assert_eq!(input.info.state, state, "{:?}", input.info);
-        assert!(input.sessions.is_empty());
+        assert_eq!(input.sessions.len(), 0);
     }
 
     #[test]

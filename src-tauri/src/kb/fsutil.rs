@@ -9,6 +9,15 @@ use sha2::{Digest, Sha256};
 
 const COPY_BUF: usize = 1024 * 1024;
 
+pub fn sync_file(file: &File) -> std::io::Result<()> {
+    match file.sync_all() {
+        Ok(()) => Ok(()),
+        #[cfg(windows)]
+        Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => Ok(()),
+        Err(e) => Err(e),
+    }
+}
+
 fn tmp_sibling(path: &Path) -> PathBuf {
     let mut tmp = path.as_os_str().to_owned();
     tmp.push(format!(".tmp-{}", std::process::id()));
@@ -32,7 +41,7 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), String> {
     let write = || -> std::io::Result<()> {
         let mut file = File::create(&tmp)?;
         file.write_all(bytes)?;
-        file.sync_all()
+        sync_file(&file)
     };
     if let Err(e) = write() {
         let _ = fs::remove_file(&tmp);
@@ -60,7 +69,7 @@ pub fn copy_atomic(src: &Path, dst: &Path) -> Result<u64, String> {
         let mut input = File::open(src)?;
         let mut output = File::create(&tmp)?;
         let n = std::io::copy(&mut input, &mut output)?;
-        output.sync_all()?;
+        sync_file(&output)?;
         Ok(n)
     };
     let copied = copy().map_err(|e| {
@@ -88,7 +97,7 @@ pub fn append_tail(src: &Path, dst: &Path, from: u64) -> Result<u64, String> {
         }
         output.seek(SeekFrom::Start(from))?;
         let n = std::io::copy(&mut input, &mut output)?;
-        output.sync_all()?;
+        sync_file(&output)?;
         Ok(n)
     };
     run().map_err(|e| format!("cannot append {} to {}: {e}", src.display(), dst.display()))

@@ -90,20 +90,20 @@ pub fn check(answer: &str, bounds: &Bounds<'_>) -> Result<Vec<Checked>, String> 
     let mut out = Vec::new();
     for (n, raw) in parsed.entries.iter().enumerate() {
         let at = |msg: String| format!("entry {}: {msg}", n + 1);
-        let title = limit("title", &raw.title, MAX_TITLE).map_err(&at)?;
+        let title = limit("title", &raw.title, MAX_TITLE).map_err(at)?;
         if title.is_empty() {
             return Err(at("title is empty".into()));
         }
-        let conclusion = limit("conclusion", &raw.conclusion, MAX_CONCLUSION).map_err(&at)?;
+        let conclusion = limit("conclusion", &raw.conclusion, MAX_CONCLUSION).map_err(at)?;
         if conclusion.is_empty() {
             return Err(at("conclusion is empty".into()));
         }
-        let problem = limit("problem", &raw.problem, MAX_PROBLEM).map_err(&at)?;
-        let cause = limit("cause", &raw.cause, MAX_CAUSE).map_err(&at)?;
-        let solution = limit("solution", &raw.solution, MAX_SOLUTION).map_err(&at)?;
+        let problem = limit("problem", &raw.problem, MAX_PROBLEM).map_err(at)?;
+        let cause = limit("cause", &raw.cause, MAX_CAUSE).map_err(at)?;
+        let solution = limit("solution", &raw.solution, MAX_SOLUTION).map_err(at)?;
         let mut keywords = Vec::new();
         for keyword in &raw.keywords {
-            let keyword = limit("a keyword", keyword, MAX_KEYWORD).map_err(&at)?;
+            let keyword = limit("a keyword", keyword, MAX_KEYWORD).map_err(at)?;
             if !keyword.is_empty() && !keywords.contains(&keyword) {
                 keywords.push(keyword);
             }
@@ -224,7 +224,7 @@ mod tests {
         assert_eq!((plain[0].seq_from, plain[0].seq_to), (12, 20));
         let fenced = format!("Here you go:\n```json\n{}\n```", entry(""));
         assert_eq!(check(&fenced, &bounds(&[])).unwrap(), plain);
-        assert!(check(r#"{"entries":[]}"#, &bounds(&[])).unwrap().is_empty());
+        assert_eq!(check(r#"{"entries":[]}"#, &bounds(&[])).unwrap().len(), 0);
     }
 
     #[test]

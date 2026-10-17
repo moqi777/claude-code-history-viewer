@@ -278,7 +278,7 @@ mod tests {
         })
         .unwrap();
         assert_eq!(tail.consumed, data.len() as u64);
-        assert!(tail.tail.is_empty());
+        assert_eq!(tail.tail.len(), 0);
         assert_eq!(tail.longest_line, (READ_BUF * 2 + 17) as u64);
         assert!(chunks >= 1);
     }

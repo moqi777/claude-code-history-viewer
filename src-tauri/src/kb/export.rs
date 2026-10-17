@@ -135,7 +135,7 @@ pub fn export(
 ) -> TResult<ExportReport> {
     let started = Instant::now();
     let data = &env.data;
-    if !dest.is_absolute() {
+    if !super::paths::is_absolute(dest) {
         return Err(TransferError::new(
             "bad_destination",
             "the destination must be an absolute path",

@@ -933,6 +933,7 @@ pub fn due_check(config: &KbConfig, now: DateTime<Utc>, tz: FixedOffset) -> Resu
     Ok(store::get_round(&conn, &round_id)?.is_none())
 }
 
+#[cfg(unix)]
 static TERMINATED: AtomicBool = AtomicBool::new(false);
 
 #[cfg(unix)]

@@ -138,7 +138,7 @@ pub fn test_data_dir(path: &Path, roots: &SourceRoots) -> DataDirReport {
         overlaps_source: None,
         error: None,
     };
-    if !path.is_absolute() {
+    if !super::paths::is_absolute(path) {
         report.error = Some("not_absolute".into());
         return report;
     }

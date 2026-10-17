@@ -79,13 +79,17 @@ impl LocalPaths {
     }
 }
 
-fn under<'a>(path: &'a str, root: &str) -> Option<&'a str> {
+fn under(path: &str, root: &str) -> Option<String> {
+    #[cfg(windows)]
+    let (path, root) = (path.replace('\\', "/"), root.replace('\\', "/"));
+    #[cfg(not(windows))]
+    let (path, root) = (path.to_string(), root.to_string());
     let root = root.trim_end_matches('/');
     if root.is_empty() {
         return None;
     }
     let rest = path.strip_prefix(root)?;
-    (rest.is_empty() || rest.starts_with('/')).then_some(rest)
+    (rest.is_empty() || rest.starts_with('/')).then_some(rest.to_string())
 }
 
 /// A path from the exporting machine, as it reads on this one: the Claude and
@@ -106,7 +110,13 @@ pub fn convert_path(path: &str, from: &SourceDevice, to: &LocalPaths) -> String 
             continue;
         };
         if let Some(rest) = under(path, old) {
-            return format!("{}{rest}", new.trim_end_matches('/'));
+            #[cfg(windows)]
+            let rest = if new.contains('\\') {
+                rest.replace('/', "\\")
+            } else {
+                rest
+            };
+            return format!("{}{}", new.trim_end_matches(['/', '\\']), rest);
         }
     }
     path.to_string()

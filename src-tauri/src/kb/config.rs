@@ -146,7 +146,7 @@ impl DigestConfig {
             return Err("digest.model is not a valid model name".into());
         }
         if let Some(path) = &self.cli_path {
-            if !path.is_absolute() {
+            if !super::paths::is_absolute(path) {
                 return Err("digest.cli_path must be an absolute path".into());
             }
         }
@@ -412,19 +412,19 @@ impl KbConfig {
                 self.interval_secs
             ));
         }
-        if self.data_dir.as_os_str().is_empty() || !self.data_dir.is_absolute() {
+        if self.data_dir.as_os_str().is_empty() || !super::paths::is_absolute(&self.data_dir) {
             return Err(format!(
                 "data_dir must be an absolute path, got {}",
                 self.data_dir.display()
             ));
         }
         for prefix in &self.exclude_prefixes {
-            if !Path::new(prefix).is_absolute() {
+            if !super::paths::is_absolute(Path::new(prefix)) {
                 return Err(format!("exclude path {prefix:?} must be absolute"));
             }
         }
         for prefix in &self.exclude_cwd_prefixes {
-            if !Path::new(prefix).is_absolute() {
+            if !super::paths::is_absolute(Path::new(prefix)) {
                 return Err(format!(
                     "excluded working directory {prefix:?} must be absolute"
                 ));
@@ -448,7 +448,7 @@ impl KbConfig {
                 .target_dir
                 .as_ref()
                 .ok_or("mirror.target_dir is required when the backup disk is enabled")?;
-            if !target.is_absolute() {
+            if !super::paths::is_absolute(target) {
                 return Err("mirror.target_dir must be an absolute path".into());
             }
             if self

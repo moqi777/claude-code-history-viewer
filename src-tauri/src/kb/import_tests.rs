@@ -30,9 +30,9 @@ impl Lib {
         let home = root.join(name);
         let claude = home.join(".claude");
         fs::create_dir_all(claude.join("projects")).unwrap();
-        fs::create_dir_all(home.join(".codex/sessions")).unwrap();
+        fs::create_dir_all(home.join(".codex").join("sessions")).unwrap();
         let lib = Self {
-            config_file: home.join(".config/agent-kb/config.json"),
+            config_file: home.join(".config").join("agent-kb").join("config.json"),
             home,
             claude,
         };
@@ -60,7 +60,9 @@ impl Lib {
 
     fn session_file(&self, id: &str) -> PathBuf {
         self.claude
-            .join(format!("projects/-Users-me-proj/{id}.jsonl"))
+            .join("projects")
+            .join("-Users-me-proj")
+            .join(format!("{id}.jsonl"))
     }
 
     fn text(id: &str, pairs: usize, tag: &str) -> String {
@@ -244,7 +246,7 @@ fn an_exported_library_imports_into_an_empty_one_with_the_same_numbers() {
 
     // the search answers the same
     assert_eq!(ids(&b, "deadlock"), before);
-    assert!(!before.is_empty());
+    assert_ne!(before.len(), 0);
 
     // sessions from elsewhere are not "deleted", and cannot be resumed
     let kind: String = b
@@ -290,7 +292,7 @@ fn a_codex_title_given_by_the_other_computer_survives_the_collection_here() {
     .unwrap();
     // the title Codex itself gave the thread
     fs::write(
-        a.home.join(".codex/session_index.jsonl"),
+        a.home.join(".codex").join("session_index.jsonl"),
         format!(r#"{{"id":"{CODEX}","thread_name":"Retry for the uploader","updated_at":"2026-05-29T12:00:00Z"}}"#),
     )
     .unwrap();
@@ -789,14 +791,14 @@ fn settings_travel_but_the_machine_specific_ones_do_not() {
     // exclusions follow the user to the new home
     assert_eq!(
         saved.exclude_prefixes,
-        vec![format!("{}/old", b.claude.display())]
+        vec![b.claude.join("old").to_string_lossy().into_owned()]
     );
     // as written (matches the sessions that came with the file) and for this home
     assert_eq!(
         saved.exclude_cwd_prefixes,
         vec![
             format!("{}/secret", a.home.display()),
-            format!("{}/secret", b.home.display())
+            b.home.join("secret").to_string_lossy().into_owned()
         ]
     );
 
