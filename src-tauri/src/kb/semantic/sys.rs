@@ -27,7 +27,12 @@ pub fn lower_priority() {
         }
     }
     #[cfg(not(unix))]
-    let _ = mode;
+    {
+        #[cfg(windows)]
+        super::super::platform::lower_priority(&mode);
+        #[cfg(not(windows))]
+        let _ = mode;
+    }
 }
 
 const DEFAULT_PRIORITY: &str = "nice";
@@ -55,6 +60,8 @@ pub fn available_memory() -> Option<u64> {
             .ok()?;
         return Some(kb * 1024);
     }
+    #[cfg(windows)]
+    return super::super::platform::available_memory();
     #[allow(unreachable_code)]
     None
 }

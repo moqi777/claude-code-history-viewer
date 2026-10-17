@@ -228,6 +228,144 @@ impl Scheduler<'_> {
     }
 }
 
+#[cfg(windows)]
+fn windows_task_name() -> &'static str {
+    LAUNCHD_LABEL
+}
+
+#[cfg(windows)]
+fn run_schtasks(args: &[&str]) -> Result<std::process::Output, String> {
+    let mut command = std::process::Command::new("schtasks.exe");
+    command.args(args);
+    super::platform::no_window(&mut command);
+    command
+        .output()
+        .map_err(|e| format!("cannot run schtasks.exe: {e}"))
+}
+
+#[cfg(windows)]
+fn windows_task_xml(exe: &Path, interval_secs: u64) -> String {
+    let esc = |s: &str| {
+        s.replace('&', "&amp;")
+            .replace('<', "&lt;")
+            .replace('>', "&gt;")
+            .replace('"', "&quot;")
+    };
+    let work_dir = exe
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .display()
+        .to_string();
+    let exe = esc(&exe.display().to_string());
+    let work = esc(&work_dir);
+    let interval = interval_secs.max(60);
+    format!(
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<Task version="1.4" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+  <RegistrationInfo><URI>\{}</URI></RegistrationInfo>
+  <Triggers>
+    <LogonTrigger><Enabled>true</Enabled></LogonTrigger>
+    <CalendarTrigger><StartBoundary>2000-01-01T00:00:00</StartBoundary><Enabled>true</Enabled>
+      <ScheduleByDay><DaysInterval>1</DaysInterval></ScheduleByDay>
+      <Repetition><Interval>PT{}S</Interval><StopAtDurationEnd>false</StopAtDurationEnd></Repetition>
+    </CalendarTrigger>
+  </Triggers>
+  <Principals><Principal id="Author"><LogonType>InteractiveToken</LogonType><RunLevel>LeastPrivilege</RunLevel></Principal></Principals>
+  <Settings><MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy><DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries><StopIfGoingOnBatteries>false</StopIfGoingOnBatteries><StartWhenAvailable>true</StartWhenAvailable><ExecutionTimeLimit>PT0S</ExecutionTimeLimit></Settings>
+  <Actions Context="Author"><Exec><Command>{}</Command><Arguments>--kb-sync --scheduled</Arguments><WorkingDirectory>{}</WorkingDirectory></Exec></Actions>
+</Task>
+"#,
+        windows_task_name(),
+        interval,
+        exe,
+        work
+    )
+}
+
+#[cfg(windows)]
+fn windows_status() -> Result<ScheduleStatus, String> {
+    let output = run_schtasks(&["/Query", "/TN", windows_task_name(), "/FO", "LIST"])?;
+    let installed = output.status.success();
+    Ok(ScheduleStatus {
+        supported: true,
+        label: LAUNCHD_LABEL.into(),
+        plist_path: windows_task_name().into(),
+        installed,
+        loaded: installed,
+        state: installed.then_some("ready".into()),
+        program: None,
+        plist_program: None,
+        program_exists: None,
+        interval_secs: None,
+        last_exit_code: None,
+        runs: None,
+    })
+}
+
+#[cfg(windows)]
+fn windows_install(config: &KbConfig) -> Result<ScheduleStatus, String> {
+    let exe = std::env::current_exe().map_err(|e| format!("cannot locate AgentKB.exe: {e}"))?;
+    if classify_exe(&exe) != ExeStability::Stable {
+        return Err(format!(
+            "AgentKB must run from %LOCALAPPDATA%\\Programs\\AgentKB: {}",
+            exe.display()
+        ));
+    }
+    let temp = tempfile::Builder::new()
+        .prefix("agentkb-task-")
+        .suffix(".xml")
+        .tempfile()
+        .map_err(|e| format!("cannot create task definition: {e}"))?;
+    std::fs::write(
+        temp.path(),
+        windows_task_xml(&exe, config.interval_secs).as_bytes(),
+    )
+    .map_err(|e| format!("cannot write task definition: {e}"))?;
+    let output = run_schtasks(&[
+        "/Create",
+        "/TN",
+        windows_task_name(),
+        "/XML",
+        &temp.path().to_string_lossy(),
+        "/F",
+    ])?;
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
+    }
+    windows_status()
+}
+
+#[cfg(windows)]
+fn windows_uninstall() -> Result<ScheduleStatus, String> {
+    let output = run_schtasks(&["/Delete", "/TN", windows_task_name(), "/F"])?;
+    if !output.status.success() && !String::from_utf8_lossy(&output.stderr).contains("cannot find")
+    {
+        return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
+    }
+    windows_status()
+}
+
+#[cfg(windows)]
+fn windows_ensure(config: &KbConfig) -> Result<Repair, String> {
+    if !config.schedule_enabled {
+        return Ok(Repair::NotNeeded);
+    }
+    let status = windows_status()?;
+    if status.installed {
+        Ok(Repair::NotNeeded)
+    } else {
+        windows_install(config)?;
+        Ok(Repair::Repaired {
+            from: None,
+            to: std::env::current_exe()
+                .map_err(|e| e.to_string())?
+                .display()
+                .to_string(),
+            reason: "the task was not installed".into(),
+        })
+    }
+}
+
 /// `\tkey = value` lines from `launchctl print`.
 fn print_field<'a>(text: &'a str, key: &str) -> Option<&'a str> {
     text.lines().find_map(|line| {
@@ -258,27 +396,35 @@ pub enum ExeStability {
     DiskImage,
 }
 
+#[allow(clippy::needless_return)]
 pub fn classify_exe(exe: &Path) -> ExeStability {
-    let text = exe.to_string_lossy();
     #[cfg(windows)]
-    if text.ends_with("\\AgentKB.exe")
-        || text.ends_with("/AgentKB.exe")
-        || (cfg!(test) && text.contains("AgentKB-test-") && text.ends_with(".exe"))
     {
-        return if exe.is_file() {
+        let Some(local) = std::env::var_os("LOCALAPPDATA") else {
+            return ExeStability::NotInApp;
+        };
+        let expected = PathBuf::from(local)
+            .join("Programs")
+            .join("AgentKB")
+            .join("AgentKB.exe");
+        if same_file(exe, &expected) && exe.is_file() {
             ExeStability::Stable
         } else {
             ExeStability::NotInApp
-        };
+        }
     }
-    if text.contains("/AppTranslocation/") {
-        ExeStability::Translocated
-    } else if text.starts_with("/Volumes/") {
-        ExeStability::DiskImage
-    } else if !text.contains(".app/Contents/MacOS/") {
-        ExeStability::NotInApp
-    } else {
-        ExeStability::Stable
+    #[cfg(not(windows))]
+    {
+        let text = exe.to_string_lossy();
+        if text.contains("/AppTranslocation/") {
+            ExeStability::Translocated
+        } else if text.starts_with("/Volumes/") {
+            ExeStability::DiskImage
+        } else if !text.contains(".app/Contents/MacOS/") {
+            ExeStability::NotInApp
+        } else {
+            ExeStability::Stable
+        }
     }
 }
 
@@ -385,6 +531,9 @@ pub fn ensure_current_now() -> Result<Repair, String> {
         return Ok(Repair::NotNeeded);
     }
     let config = KbConfig::load()?;
+    #[cfg(windows)]
+    let repair = windows_ensure(&config)?;
+    #[cfg(not(windows))]
     let repair = with_system_scheduler(|s| s.ensure_current(&config), || Repair::NotNeeded)?;
     let data = super::paths::DataPaths::new(config.data_dir.clone());
     let log = super::log::SyncLog::open(&data.logs());
@@ -453,15 +602,24 @@ pub fn with_system_scheduler<T>(
 // the higher-ranked `FnOnce(&Scheduler<'_>)` bound does not let a path name.
 #[allow(clippy::redundant_closure_for_method_calls)]
 pub fn status_now() -> Result<ScheduleStatus, String> {
+    #[cfg(windows)]
+    return windows_status();
+    #[cfg(not(windows))]
     with_system_scheduler(|s| s.status(), unsupported_status)
 }
 
 #[allow(clippy::redundant_closure_for_method_calls)]
 pub fn uninstall_now() -> Result<ScheduleStatus, String> {
+    #[cfg(windows)]
+    return windows_uninstall();
+    #[cfg(not(windows))]
     with_system_scheduler(|s| s.uninstall(), unsupported_status)
 }
 
 pub fn install_now(config: &KbConfig) -> Result<ScheduleStatus, String> {
+    #[cfg(windows)]
+    return windows_install(config);
+    #[cfg(not(windows))]
     with_system_scheduler(|s| s.install(config), unsupported_status)
 }
 
@@ -473,7 +631,7 @@ pub fn unsupported_status() -> ScheduleStatus {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(windows)))]
 mod tests {
     use super::*;
     use std::cell::RefCell;
@@ -732,5 +890,22 @@ mod tests {
             status.plist_program.as_deref(),
             Some("/gone/AgentKB.app/Contents/MacOS/AgentKB")
         );
+    }
+}
+
+#[cfg(all(test, windows))]
+mod windows_tests {
+    use super::*;
+
+    #[test]
+    fn task_definition_uses_interactive_logon_and_start_when_available() {
+        let xml = windows_task_xml(
+            Path::new(r"C:\Users\Example User\AppData\Local\Programs\AgentKB\AgentKB.exe"),
+            600,
+        );
+        assert!(xml.contains("<LogonType>InteractiveToken</LogonType>"));
+        assert!(xml.contains("<StartWhenAvailable>true</StartWhenAvailable>"));
+        assert!(xml.contains("--kb-sync --scheduled"));
+        assert!(!xml.contains("<LogonType>S4U</LogonType>"));
     }
 }

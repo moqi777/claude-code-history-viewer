@@ -218,7 +218,9 @@ pub async fn kb_semantic_delete_model() -> Res<SemanticStatus> {
 pub async fn kb_semantic_test() -> Res<build::TestReport> {
     blocking(|| {
         let exe = std::env::current_exe().map_err(|e| e.to_string())?;
-        let out = std::process::Command::new(exe)
+        let mut command = std::process::Command::new(exe);
+        crate::kb::platform::no_window(&mut command);
+        let out = command
             .arg("--kb-embed")
             .arg("--test")
             .stdin(std::process::Stdio::null())

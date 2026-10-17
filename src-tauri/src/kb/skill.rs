@@ -79,11 +79,15 @@ pub struct SkillStatus {
 
 /// Skill text for `target`, pointing at `exe`.
 pub fn render(target: Target, exe: &str) -> String {
+    #[cfg(windows)]
+    let command_exe = format!("\"{}\"", exe.replace('"', "\\\""));
+    #[cfg(not(windows))]
+    let command_exe = exe.to_string();
     let allowed = match target {
         // Pre-approves exactly the two read-only commands; a pipe, `cd` or
         // anything else falls outside the prefix and asks again.
         Target::Claude => {
-            format!("allowed-tools: Bash({exe} --kb-search:*), Bash({exe} --kb-show:*)\n")
+            format!("allowed-tools: Bash({command_exe} --kb-search:*), Bash({command_exe} --kb-show:*)\n")
         }
         Target::Codex => String::new(),
     };
@@ -97,12 +101,12 @@ description: Search the user's past Claude Code and Codex conversations (backed 
 # 查历史会话（AgentKB）\n\
 \n\
 1. 从用户的话里提 2–4 个具体关键词（报错类名、组件名、中文名词），**不要传整句话**。\n\
-2. 搜索：`{exe} --kb-search \"<关键词>\"`\n\
+2. 搜索：`{command_exe} --kb-search \"<关键词>\"`\n\
    可选：`--source claude|codex`、`--project <名>`、`--since 30d`、`--limit 5`。\n\
    结果默认是精简的：每个会话一条，它的子会话（sub-agent）命中已并进去，只给 `subagent_hits` 计数；标题最多 60 字。\n\
 3. 先看结果里的 `notes`（AgentKB 每天用 AI 整理的笔记：问题、原因、解决办法、结论，带出处）。笔记已经能回答时直接用它回答；再看每个会话的 `title`、`last_activity_at`、`hits[].snippet`。没找到或不相关：换关键词（同义词、中英文各一次）再搜，**一共最多 3 次**，仍没有就如实告诉用户没找到。\n\
 4. 对最相关的 1–2 个会话，读上下文再回答：\n\
-   `{exe} --kb-show <source>:<session_id> --around <hits[].seq>`\n\
+   `{command_exe} --kb-show <source>:<session_id> --around <hits[].seq>`\n\
    若该条 hit 带 `subagent_session_id`，上面的 `<session_id>` 要换成它（命中在子会话里）。\n\
    笔记的出处用 `notes[].show`（`--around` 指向笔记依据的第一条消息）。笔记是 AI 写的摘要，可能漏掉或理解错；要据此改代码、跑命令之前，先用 `show` 核对原文。\n\
 5. 回答：先给结论，再列出处——会话标题、日期、项目，以及结果里的 `resume.command`。`resume.available` 为 false 时说明原会话已删除，只能用 `--kb-show` 看备份内容。\n\
@@ -284,7 +288,9 @@ pub struct SkillTest {
 /// Run `exe --kb-search <word>` for real and report what came back.
 pub fn test(exe: &Path, word: &str) -> SkillTest {
     let started = Instant::now();
-    let output = std::process::Command::new(exe)
+    let mut command = std::process::Command::new(exe);
+    super::platform::no_window(&mut command);
+    let output = command
         .args(["--kb-search", word, "--limit", "3"])
         .stdin(std::process::Stdio::null())
         .output();
@@ -337,6 +343,7 @@ mod tests {
 
     const EXE: &str = "/Applications/AgentKB.app/Contents/MacOS/AgentKB";
 
+    #[cfg(not(windows))]
     fn snapshot(root: &Path) -> Vec<(String, u64)> {
         let mut files = fsutil::walk_files(root);
         files.sort();
@@ -345,11 +352,10 @@ mod tests {
 
     #[cfg(windows)]
     fn test_exe(home: &tempfile::TempDir) -> PathBuf {
-        let exe = home
-            .path()
-            .parent()
-            .unwrap_or(home.path())
-            .join(format!("AgentKB-test-{}.exe", std::process::id()));
+        let local = home.path().join("用户 with space").join("Local AppData");
+        std::env::set_var("LOCALAPPDATA", &local);
+        let exe = local.join("Programs").join("AgentKB").join("AgentKB.exe");
+        std::fs::create_dir_all(exe.parent().unwrap()).unwrap();
         std::fs::write(&exe, b"test executable").unwrap();
         exe
     }
@@ -358,13 +364,17 @@ mod tests {
     fn the_two_templates_differ_only_by_the_permission_line() {
         let claude = render(Target::Claude, EXE);
         let codex = render(Target::Codex, EXE);
+        #[cfg(windows)]
+        let command_exe = format!("\"{EXE}\"");
+        #[cfg(not(windows))]
+        let command_exe = EXE.to_string();
         assert!(claude.contains(&format!(
-            "allowed-tools: Bash({EXE} --kb-search:*), Bash({EXE} --kb-show:*)"
+            "allowed-tools: Bash({command_exe} --kb-search:*), Bash({command_exe} --kb-show:*)"
         )));
         assert!(!codex.contains("allowed-tools"));
         assert_eq!(
             claude.replace(
-                &format!("allowed-tools: Bash({EXE} --kb-search:*), Bash({EXE} --kb-show:*)\n"),
+                &format!("allowed-tools: Bash({command_exe} --kb-search:*), Bash({command_exe} --kb-show:*)\n"),
                 ""
             ),
             codex
@@ -377,10 +387,11 @@ mod tests {
         }
     }
 
+    #[cfg(not(windows))]
     #[test]
     fn install_status_update_and_uninstall_touch_only_the_skill_folder() {
         let home = tempfile::tempdir().unwrap();
-        let root = home.path().join(".claude");
+        let root = home.path().join("用户 with space").join(".claude");
         std::fs::create_dir_all(root.join("projects/p")).unwrap();
         std::fs::write(root.join("projects/p/s.jsonl"), b"{}\n").unwrap();
         std::fs::write(root.join("settings.json"), b"{}").unwrap();
@@ -422,6 +433,7 @@ mod tests {
         assert!(!skill_dir(&root).exists());
     }
 
+    #[cfg(not(windows))]
     #[test]
     fn a_stale_copy_is_noticed_and_updating_fixes_it() {
         let home = tempfile::tempdir().unwrap();
@@ -489,6 +501,7 @@ mod tests {
         assert!(dir.join("notes.txt").exists());
     }
 
+    #[cfg(not(windows))]
     #[test]
     fn uninstall_leaves_extra_files_in_the_folder_alone() {
         let home = tempfile::tempdir().unwrap();
@@ -499,6 +512,24 @@ mod tests {
         uninstall(Target::Claude, &root, Path::new(EXE)).unwrap();
         assert!(extra.exists(), "only SKILL.md is ours to remove");
         assert!(!skill_dir(&root).join(SKILL_FILE).exists());
+    }
+
+    #[cfg(windows)]
+    #[serial_test::serial]
+    #[test]
+    fn windows_skill_install_works_from_the_user_install_directory() {
+        let home = tempfile::tempdir().unwrap();
+        let root = home.path().join(".claude");
+        let exe = test_exe(&home);
+        assert_eq!(
+            install(Target::Claude, &root, &exe).unwrap().state,
+            State::Current
+        );
+        assert!(skill_dir(&root).join(SKILL_FILE).is_file());
+        assert_eq!(
+            uninstall(Target::Claude, &root, &exe).unwrap().state,
+            State::NotInstalled
+        );
     }
 
     #[cfg(unix)]

@@ -1009,6 +1009,7 @@ pub fn spawn_background(
             });
         }
     }
+    crate::kb::platform::detached(&mut command);
     command
         .spawn()
         .map(drop)

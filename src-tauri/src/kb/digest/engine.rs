@@ -289,37 +289,44 @@ pub fn resolve_cli(engine: Engine, configured: Option<&Path>) -> Result<PathBuf,
 /// by the settings page only (it runs the user's shell start-up files), with
 /// a short deadline; the result is stored as an absolute path.
 pub fn find_via_login_shell(engine: Engine) -> Option<PathBuf> {
-    let shell = std::env::var_os("SHELL")
-        .map(PathBuf::from)
-        .filter(|p| p.is_file())
-        .unwrap_or_else(|| PathBuf::from("/bin/zsh"));
-    let mut child = Command::new(shell)
-        .args(["-lic", &format!("command -v {}", engine.as_str())])
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .ok()?;
-    let mut out = child.stdout.take()?;
-    let reader = std::thread::spawn(move || read_capped(&mut out, 64 * 1024));
-    let deadline = Instant::now() + Duration::from_secs(8);
-    loop {
-        match child.try_wait() {
-            Ok(Some(_)) => break,
-            Ok(None) if Instant::now() < deadline => std::thread::sleep(POLL),
-            _ => {
-                let _ = child.kill();
-                let _ = child.wait();
-                break;
+    #[cfg(windows)]
+    {
+        candidate_paths(engine).into_iter().find(|p| p.is_file())
+    }
+    #[cfg(not(windows))]
+    {
+        let shell = std::env::var_os("SHELL")
+            .map(PathBuf::from)
+            .filter(|p| p.is_file())
+            .unwrap_or_else(|| PathBuf::from("/bin/zsh"));
+        let mut child = Command::new(shell)
+            .args(["-lic", &format!("command -v {}", engine.as_str())])
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .ok()?;
+        let mut out = child.stdout.take()?;
+        let reader = std::thread::spawn(move || read_capped(&mut out, 64 * 1024));
+        let deadline = Instant::now() + Duration::from_secs(8);
+        loop {
+            match child.try_wait() {
+                Ok(Some(_)) => break,
+                Ok(None) if Instant::now() < deadline => std::thread::sleep(POLL),
+                _ => {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    break;
+                }
             }
         }
+        let text = String::from_utf8_lossy(&reader.join().ok()?).into_owned();
+        text.lines()
+            .map(str::trim)
+            .rev()
+            .find(|l| l.starts_with('/') && Path::new(l).is_file())
+            .map(PathBuf::from)
     }
-    let text = String::from_utf8_lossy(&reader.join().ok()?).into_owned();
-    text.lines()
-        .map(str::trim)
-        .rev()
-        .find(|l| l.starts_with('/') && Path::new(l).is_file())
-        .map(PathBuf::from)
 }
 
 /// Places a CLI is usually installed, in order.
@@ -327,19 +334,53 @@ pub fn candidate_paths(engine: Engine) -> Vec<PathBuf> {
     let name = engine.as_str();
     let mut out = Vec::new();
     if let Some(home) = crate::utils::home_dir() {
-        out.push(home.join(".local/bin").join(name));
-        if engine == Engine::Claude {
-            out.push(home.join(".claude/local").join(name));
+        #[cfg(windows)]
+        {
+            let local = home.join(".local/bin");
+            out.push(local.join(format!("{name}.exe")));
+            out.push(local.join(format!("{name}.cmd")));
+            if engine == Engine::Claude {
+                out.push(home.join(".claude/local/claude.exe"));
+                out.push(home.join(".claude/local/claude.cmd"));
+            }
+            let npm = std::env::var_os("APPDATA")
+                .map(PathBuf::from)
+                .map(|p| p.join("npm"));
+            if let Some(npm) = npm {
+                out.push(npm.join(format!("{name}.exe")));
+                out.push(npm.join(format!("{name}.cmd")));
+            }
         }
-        out.push(home.join(".npm-global/bin").join(name));
+        #[cfg(not(windows))]
+        {
+            out.push(home.join(".local/bin").join(name));
+            if engine == Engine::Claude {
+                out.push(home.join(".claude/local").join(name));
+            }
+            out.push(home.join(".npm-global/bin").join(name));
+        }
     }
-    for dir in ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin"] {
-        out.push(Path::new(dir).join(name));
+    #[cfg(windows)]
+    {
+        if let Some(path) = std::env::var_os("PATH") {
+            for dir in std::env::split_paths(&path) {
+                out.push(dir.join(format!("{name}.exe")));
+                out.push(dir.join(format!("{name}.cmd")));
+                out.push(dir.join(name));
+            }
+        }
+        out
     }
-    if let Some(path) = std::env::var_os("PATH") {
-        out.extend(std::env::split_paths(&path).map(|d| d.join(name)));
+    #[cfg(not(windows))]
+    {
+        for dir in ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin"] {
+            out.push(Path::new(dir).join(name));
+        }
+        if let Some(path) = std::env::var_os("PATH") {
+            out.extend(std::env::split_paths(&path).map(|d| d.join(name)));
+        }
+        out
     }
-    out
 }
 
 // ---------------------------------------------------------------------------
@@ -467,6 +508,7 @@ fn spawn_and_wait(
     // helper processes down with it and nothing is left running.
     #[cfg(unix)]
     std::os::unix::process::CommandExt::process_group(&mut command, 0);
+    crate::kb::platform::no_window(&mut command);
     let mut child = command
         .spawn()
         .map_err(|e| Failure::Config(format!("cannot start {}: {e}", call.cli.display())))?;

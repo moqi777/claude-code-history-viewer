@@ -29,7 +29,7 @@ pub fn try_run(args: &[String]) -> Option<i32> {
         return None;
     }
     Some(match command.as_str() {
-        "--kb-sync" => run_sync_command(),
+        "--kb-sync" => run_sync_command(&args[2..]),
         "--kb-reindex" => run_reindex_command(),
         "--kb-search" => run_search_command(&args[2..]),
         "--kb-show" => run_show_command(&args[2..]),
@@ -60,15 +60,19 @@ fn load_config() -> Result<KbConfig, i32> {
     })
 }
 
-fn run_sync_command() -> i32 {
+fn run_sync_command(extra: &[String]) -> i32 {
     let config = match load_config() {
         Ok(config) => config,
         Err(code) => return code,
     };
-    let trigger = std::env::var(TRIGGER_ENV)
-        .ok()
-        .filter(|t| matches!(t.as_str(), "schedule" | "gui" | "cli"))
-        .unwrap_or_else(|| "cli".to_string());
+    let trigger = if extra.iter().any(|arg| arg == "--scheduled") {
+        "schedule".to_string()
+    } else {
+        std::env::var(TRIGGER_ENV)
+            .ok()
+            .filter(|t| matches!(t.as_str(), "schedule" | "gui" | "cli"))
+            .unwrap_or_else(|| "cli".to_string())
+    };
     match sync::run_sync(&KbEnv::from_config(&config), &trigger) {
         Ok(summary) => {
             print_json(&summary);

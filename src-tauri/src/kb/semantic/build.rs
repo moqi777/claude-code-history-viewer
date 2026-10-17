@@ -353,6 +353,7 @@ pub fn spawn_background(exe: &Path, data: &DataPaths, args: &[&str]) -> Result<(
             });
         }
     }
+    crate::kb::platform::detached(&mut command);
     command
         .spawn()
         .map(drop)

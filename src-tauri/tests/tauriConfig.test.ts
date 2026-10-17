@@ -238,7 +238,7 @@ describe('Tauri Configuration Tests', () => {
   describe('Bundle Configuration Validation', () => {
     it('should have bundle configuration enabled', () => {
       expect(config.bundle.active).toBe(true);
-      expect(config.bundle.targets).toEqual(['app']);
+      expect(config.bundle.targets).toEqual(['nsis']);
       expect(config.bundle.createUpdaterArtifacts).toBe(false);
     });
 

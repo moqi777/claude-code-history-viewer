@@ -132,16 +132,7 @@ fn process_alive(pid: u32) -> bool {
 
 #[cfg(windows)]
 fn process_alive(pid: u32) -> bool {
-    let Ok(output) = std::process::Command::new("tasklist")
-        .args(["/FI", &format!("PID eq {pid}"), "/NH"])
-        .output()
-    else {
-        return false;
-    };
-    String::from_utf8_lossy(&output.stdout).lines().any(|line| {
-        line.split_whitespace()
-            .any(|field| field == pid.to_string())
-    })
+    super::platform::process_alive(pid)
 }
 
 #[cfg(not(any(unix, windows)))]

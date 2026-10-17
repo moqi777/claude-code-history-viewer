@@ -196,8 +196,16 @@ fn process_alive(pid: u32) -> bool {
 }
 
 #[cfg(not(unix))]
-fn process_alive(_pid: u32) -> bool {
-    true
+fn process_alive(pid: u32) -> bool {
+    #[cfg(windows)]
+    {
+        super::platform::process_alive(pid)
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = pid;
+        true
+    }
 }
 
 /// A collected session shaped like the base project's `ClaudeSession`, so the

@@ -178,8 +178,17 @@ pub struct ScheduleEnvReport {
 pub fn test_schedule_env() -> ScheduleEnvReport {
     let exe = std::env::current_exe().unwrap_or_default();
     let stability = schedule::classify_exe(&exe);
+    #[cfg(windows)]
+    let supported = true;
+    #[cfg(not(windows))]
     let supported = cfg!(target_os = "macos");
+    #[cfg(windows)]
+    let launchctl_available = Path::new("C:\\Windows\\System32\\schtasks.exe").exists();
+    #[cfg(not(windows))]
     let launchctl_available = supported && Path::new("/bin/launchctl").exists();
+    #[cfg(windows)]
+    let launch_agents_writable = true;
+    #[cfg(not(windows))]
     let launch_agents_writable = crate::utils::home_dir()
         .map(|h| h.join("Library").join("LaunchAgents"))
         .is_some_and(|dir| writable(&dir).is_ok());

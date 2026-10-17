@@ -70,7 +70,7 @@ tokio-stream = { version = "0.1", optional = true, features = ["sync"] }
 rust-embed = { version = "8", optional = true }
 mime_guess = { version = "2", optional = true }
 comrak = { version = "0.49.0", default-features = false }
-ort = "=2.0.0-rc.10"
+ort = { version = "=2.0.0-rc.10", default-features = false, features = ["std", "ndarray", "download-binaries"] }
 tokenizers = { version = "0.23.2", default-features = false, features = ["onig"] }
 ureq = { version = "2", default-features = false, features = ["tls"] }
 

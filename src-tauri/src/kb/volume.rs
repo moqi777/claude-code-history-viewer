@@ -10,12 +10,14 @@
 //! with fakes; [`MacQuery`] shells out to `df` and `diskutil`.
 
 use std::path::{Path, PathBuf};
+#[cfg(not(windows))]
 use std::time::Duration;
 
 use serde::Serialize;
 
 use super::fsutil;
 
+#[cfg(not(windows))]
 const QUERY_TIMEOUT: Duration = Duration::from_secs(10);
 const NETWORK_FS: [&str; 6] = ["smbfs", "nfs", "afpfs", "webdav", "cifs", "ftp"];
 
@@ -156,43 +158,76 @@ pub fn same_device(path: &Path, mount: &Path) -> bool {
     }
 }
 
-#[cfg(not(unix))]
+#[cfg(windows)]
+pub fn same_device(path: &Path, mount: &Path) -> bool {
+    super::platform::same_volume(path, mount)
+}
+
+#[cfg(not(any(unix, windows)))]
 pub fn same_device(_path: &Path, _mount: &Path) -> bool {
     true
 }
 
 /// External volumes currently mounted under `/Volumes`.
 pub fn list_external(query: &dyn SystemQuery) -> Vec<VolumeInfo> {
-    let Ok(entries) = std::fs::read_dir("/Volumes") else {
-        return Vec::new();
-    };
-    let mut out: Vec<VolumeInfo> = Vec::new();
-    for entry in entries.flatten() {
-        // `/Volumes/Macintosh HD` is a symlink to `/`.
-        if entry.file_type().is_ok_and(|t| t.is_symlink()) {
-            continue;
-        }
-        let path = entry.path();
-        if let Probe::External { volume } = probe(&path, query) {
-            // Only volumes mounted exactly here, not a folder on another disk.
-            if volume.mount_point == path
-                && volume.writable
-                && !out.iter().any(|v| v.uuid == volume.uuid)
-            {
-                out.push(volume);
+    #[cfg(windows)]
+    {
+        let _ = query;
+        super::platform::list_external()
+    }
+    #[cfg(not(windows))]
+    {
+        let Ok(entries) = std::fs::read_dir("/Volumes") else {
+            return Vec::new();
+        };
+        let mut out: Vec<VolumeInfo> = Vec::new();
+        for entry in entries.flatten() {
+            // `/Volumes/Macintosh HD` is a symlink to `/`.
+            if entry.file_type().is_ok_and(|t| t.is_symlink()) {
+                continue;
+            }
+            let path = entry.path();
+            if let Probe::External { volume } = probe(&path, query) {
+                // Only volumes mounted exactly here, not a folder on another disk.
+                if volume.mount_point == path
+                    && volume.writable
+                    && !out.iter().any(|v| v.uuid == volume.uuid)
+                {
+                    out.push(volume);
+                }
             }
         }
+        out.sort_by(|a, b| a.name.cmp(&b.name));
+        out
     }
-    out.sort_by(|a, b| a.name.cmp(&b.name));
-    out
 }
 
 // ---------------------------------------------------------------------------
 // The real thing
 // ---------------------------------------------------------------------------
 
+#[cfg(not(windows))]
 pub struct MacQuery;
 
+#[cfg(windows)]
+pub type MacQuery = super::platform::WindowsQuery;
+
+#[cfg(windows)]
+#[allow(non_upper_case_globals)]
+pub const MacQuery: super::platform::WindowsQuery = super::platform::WindowsQuery;
+
+#[cfg(windows)]
+impl SystemQuery for super::platform::WindowsQuery {
+    fn mount_point(&self, path: &Path) -> Result<PathBuf, String> {
+        super::platform::volume_info(path).map(|v| v.mount_point)
+    }
+
+    fn info(&self, mount: &Path) -> Result<VolumeInfo, String> {
+        super::platform::volume_info(mount)
+    }
+}
+
+#[cfg(not(windows))]
 fn run(program: &str, args: &[&str]) -> Result<Vec<u8>, String> {
     let mut child = std::process::Command::new(program)
         .args(args)
@@ -278,6 +313,7 @@ pub fn parse_diskutil_info(mount: &Path, plist_bytes: &[u8]) -> Result<VolumeInf
     })
 }
 
+#[cfg(not(windows))]
 impl SystemQuery for MacQuery {
     fn mount_point(&self, path: &Path) -> Result<PathBuf, String> {
         let out = run("df", &["-P", &path.to_string_lossy()])?;
