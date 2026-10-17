@@ -17,3 +17,10 @@
 - `snapshot_src.sh`：`~/.claude`、`~/.codex` 前后对比。
 - `search-speed.log`：10 次搜索耗时。
 - `shot-p6.mjs`（截图，输出在 `../p6-shots/`，模拟 IPC，无真实数据）。
+
+## 第 6.1 期（`p61/`）
+
+- `queries61.py`（上一级目录）：8 道口语题；`p61/rank61.py`：用真实 `--kb-search` 量名次，`ranks61-before.txt` 是 0.6.0 的结果（关键词 / 混合）。
+- `p61/diag61.rs.txt`：`semantic/rank.rs` 末尾的临时测试（**没有进源码树**），在真实库副本上导出每题的向量会话分、会话段数和每个词的会话占比。
+- `p61/vecall.jsonl`、`gate.jsonl`、`slope.txt`、`qall.json`：上面导出的数据（只有会话 id、分数、问题文字，没有会话内容）。
+- `p61/sim61.py`（输出 `sim61.out`）：不需要模型和库，重放 RRF，算 §5 的各个表；`p61/trim_experiment.py`（`trim_experiment.out`）：没有采用的"删常见词再搜"。

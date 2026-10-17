@@ -1,0 +1,39 @@
+slope of the session score against ln(chunks), all sessions, 70 queries: mean 0.0336  min 0.0251  max 0.0419
+
+== 1. now (P6 values)
+alpha 0, margin 0.1                    C 3/8  Ns 14/15  Nk 10/15  Ok 15/16  Os 15/16   C ranks [0, 9, 0, 0, 4, 2, 11, 4]
+
+== 2. size correction alone: score - alpha*ln(chunks)
+alpha 0.01, margin 0.1                 C 5/8  Ns 15/15  Nk 11/15  Ok 15/16  Os 15/16   C ranks [0, 2, 0, 0, 2, 2, 3, 2]
+alpha 0.02, margin 0.1                 C 5/8  Ns 14/15  Nk 11/15  Ok 15/16  Os 15/16   C ranks [0, 1, 0, 0, 2, 2, 1, 1]
+alpha 0.025, margin 0.1                C 5/8  Ns 14/15  Nk 11/15  Ok 15/16  Os 15/16   C ranks [0, 1, 0, 0, 2, 2, 1, 1]
+alpha 0.03, margin 0.1                 C 5/8  Ns 13/15  Nk 11/15  Ok 15/16  Os 15/16   C ranks [0, 1, 0, 0, 2, 2, 1, 1]
+alpha 0.035, margin 0.1                C 5/8  Ns 13/15  Nk 11/15  Ok 15/16  Os 15/16   C ranks [0, 1, 0, 0, 2, 2, 1, 1]
+alpha 0.05, margin 0.1                 C 5/8  Ns 13/15  Nk 10/15  Ok 15/16  Os 15/16   C ranks [0, 1, 0, 0, 2, 2, 1, 1]
+alpha 0.08, margin 0.1                 C 4/8  Ns 12/15  Nk 8/15  Ok 14/16  Os 15/16   C ranks [0, 1, 0, 0, 2, 2, 6, 4]
+
+== 3. margin (alpha 0.025 / 0.03)
+alpha 0.025, margin 0.1                C 5/8  Ns 14/15  Nk 11/15  Ok 15/16  Os 15/16   C ranks [0, 1, 0, 0, 2, 2, 1, 1]
+alpha 0.025, margin 0.15               C 6/8  Ns 15/15  Nk 11/15  Ok 15/16  Os 15/16   C ranks [0, 1, 3, 7, 2, 2, 1, 1]
+alpha 0.025, margin 0.2                C 7/8  Ns 15/15  Nk 11/15  Ok 15/16  Os 15/16   C ranks [5, 1, 4, 7, 2, 2, 1, 1]
+alpha 0.025, margin 0.25               C 7/8  Ns 15/15  Nk 11/15  Ok 15/16  Os 15/16   C ranks [5, 1, 4, 7, 2, 2, 1, 1]
+alpha 0.025, margin 0.3                C 7/8  Ns 15/15  Nk 11/15  Ok 15/16  Os 15/16   C ranks [5, 1, 4, 7, 2, 2, 1, 1]
+alpha 0.025, margin 9                  C 7/8  Ns 15/15  Nk 11/15  Ok 15/16  Os 15/16   C ranks [5, 1, 4, 7, 2, 2, 1, 1]
+alpha 0.03, margin 0.1                 C 5/8  Ns 13/15  Nk 11/15  Ok 15/16  Os 15/16   C ranks [0, 1, 0, 0, 2, 2, 1, 1]
+alpha 0.03, margin 0.15                C 6/8  Ns 14/15  Nk 11/15  Ok 15/16  Os 15/16   C ranks [0, 1, 3, 8, 2, 2, 1, 1]
+alpha 0.03, margin 0.2                 C 7/8  Ns 14/15  Nk 11/15  Ok 15/16  Os 15/16   C ranks [4, 1, 4, 8, 2, 2, 1, 1]
+alpha 0.03, margin 0.25                C 7/8  Ns 14/15  Nk 11/15  Ok 15/16  Os 15/16   C ranks [5, 1, 4, 8, 2, 2, 1, 1]
+alpha 0.03, margin 0.3                 C 7/8  Ns 14/15  Nk 11/15  Ok 15/16  Os 15/16   C ranks [5, 1, 4, 8, 2, 2, 1, 1]
+alpha 0.03, margin 9                   C 7/8  Ns 14/15  Nk 11/15  Ok 15/16  Os 15/16   C ranks [5, 1, 4, 8, 2, 2, 1, 1]
+
+== 4. common-word gate on the keyword list (theta = % of sessions that have the word)
+alpha 0.0, margin 0.1, gate None       C 3/8  Ns 14/15  Nk 10/15  Ok 15/16  Os 15/16   C ranks [0, 9, 0, 0, 4, 2, 11, 4]
+alpha 0.0, margin 0.1, gate 15         C 3/8  Ns 13/15  Nk 10/15  Ok 14/16  Os 15/16   C ranks [0, 9, 0, 0, 4, 2, 11, 3]
+alpha 0.0, margin 0.1, gate 20         C 3/8  Ns 13/15  Nk 10/15  Ok 14/16  Os 15/16   C ranks [0, 9, 0, 0, 4, 2, 11, 3]
+alpha 0.0, margin 0.1, gate 30         C 3/8  Ns 14/15  Nk 10/15  Ok 15/16  Os 15/16   C ranks [0, 9, 0, 0, 4, 2, 11, 4]
+alpha 0.0, margin 0.1, gate 40         C 3/8  Ns 14/15  Nk 10/15  Ok 15/16  Os 15/16   C ranks [0, 9, 0, 0, 4, 2, 11, 4]
+alpha 0.025, margin 0.25, gate None    C 7/8  Ns 15/15  Nk 11/15  Ok 15/16  Os 15/16   C ranks [5, 1, 4, 7, 2, 2, 1, 1]
+alpha 0.025, margin 0.25, gate 15      C 7/8  Ns 14/15  Nk 10/15  Ok 14/16  Os 15/16   C ranks [5, 1, 4, 7, 2, 2, 1, 1]
+alpha 0.025, margin 0.25, gate 20      C 7/8  Ns 14/15  Nk 10/15  Ok 14/16  Os 15/16   C ranks [5, 1, 4, 7, 3, 2, 1, 1]
+alpha 0.025, margin 0.25, gate 30      C 7/8  Ns 15/15  Nk 11/15  Ok 15/16  Os 15/16   C ranks [5, 1, 4, 7, 3, 2, 1, 1]
+alpha 0.025, margin 0.25, gate 40      C 7/8  Ns 15/15  Nk 11/15  Ok 15/16  Os 15/16   C ranks [5, 1, 4, 7, 3, 2, 1, 1]
