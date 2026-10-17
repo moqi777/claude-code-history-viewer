@@ -47,7 +47,7 @@ export const KbHome = () => {
   const isBackingUp = useKbStore((s) => s.isBackingUp);
   const isRepairing = useKbStore((s) => s.isRepairing);
   const loadError = useKbStore((s) => s.loadError);
-  const searching = useKbStore((s) => s.search.query.trim() !== "");
+  const searching = useKbStore((s) => s.search.status !== "idle");
   const homeTab = useKbStore((s) => s.homeTab);
   const digestRunning = useKbStore((s) => s.digest?.running != null);
 

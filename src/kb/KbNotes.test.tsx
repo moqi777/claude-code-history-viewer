@@ -76,7 +76,15 @@ describe("KbNotes", () => {
   it("searches only the notes, and filters by source", async () => {
     render(<KbNotes />);
     await screen.findByText("WindowServer 内存膨胀至 28GB 的根因是 QQ");
-    fireEvent.change(screen.getByLabelText("kb.notes.searchPlaceholder"), { target: { value: "QQ" } });
+    const input = screen.getByLabelText("kb.notes.searchPlaceholder");
+    mocks.api.notesList.mockClear();
+    fireEvent.change(input, { target: { value: "QQ" } });
+    await new Promise((r) => setTimeout(r, 400));
+    expect(mocks.api.notesList).not.toHaveBeenCalled(); // typing alone does not search
+    fireEvent.keyDown(input, { key: "Enter", isComposing: true });
+    fireEvent.keyDown(input, { key: "Enter", keyCode: 229 });
+    expect(mocks.api.notesList).not.toHaveBeenCalled();
+    fireEvent.keyDown(input, { key: "Enter" });
     await waitFor(() =>
       expect(mocks.api.notesList).toHaveBeenLastCalledWith(expect.objectContaining({ query: "QQ" })),
     );
@@ -93,6 +101,7 @@ describe("KbNotes", () => {
     render(<KbNotes />);
     expect(await screen.findByText("kb.notes.empty")).toBeTruthy();
     fireEvent.change(screen.getByLabelText("kb.notes.searchPlaceholder"), { target: { value: "zzz" } });
+    fireEvent.click(screen.getByRole("button", { name: "kb.search.button" }));
     expect(await screen.findByText("kb.notes.noMatch")).toBeTruthy();
   });
 

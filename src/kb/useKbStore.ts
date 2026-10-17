@@ -216,7 +216,7 @@ export const useKbStore = create<KbState & KbActions>((set, get) => ({
 
   setFilters: async (patch) => {
     set({ filters: { ...get().filters, ...patch } });
-    await Promise.all([get().refresh(), get().search.query.trim() !== "" ? get().runSearch() : undefined]);
+    await Promise.all([get().refresh(), get().search.status !== "idle" ? get().runSearch() : undefined]);
   },
 
   setSearchQuery: (query) => {
@@ -237,14 +237,16 @@ export const useKbStore = create<KbState & KbActions>((set, get) => ({
       const outcome = await kbApi.search(searchParamsFor(query, get().filters));
       // A newer search (or an emptied box) supersedes this answer.
       if (epoch !== searchEpoch) return;
+      // Keep what is in the box now: the user may have kept typing meanwhile.
+      const typed = get().search.query;
       if (outcome.state === "ok") {
-        set({ search: { query, status: "ok", response: outcome.response, message: null } });
+        set({ search: { query: typed, status: "ok", response: outcome.response, message: null } });
       } else {
-        set({ search: { query, status: outcome.state, response: null, message: outcome.message } });
+        set({ search: { query: typed, status: outcome.state, response: null, message: outcome.message } });
       }
     } catch (e) {
       if (epoch !== searchEpoch) return;
-      set({ search: { query, status: "error", response: null, message: errorMessage(e) } });
+      set({ search: { query: get().search.query, status: "error", response: null, message: errorMessage(e) } });
     }
   },
 

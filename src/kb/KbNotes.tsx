@@ -5,10 +5,10 @@ import { Badge, Button, Input } from "@/components/ui";
 import { formatTime } from "@/utils/time";
 import { kbApi } from "./api";
 import { openNote } from "./noteActions";
+import { isSearchEnter } from "./searchKeys";
 import type { KbNote, KbNotesPage, KbSource } from "./types";
 
 const PAGE = 50;
-const DEBOUNCE_MS = 300;
 
 const LABELS = ["problem", "cause", "solution"] as const;
 
@@ -81,7 +81,10 @@ type Loaded =
 /** The notes tab: newest first, with a search box over the notes only. */
 export const KbNotes = () => {
   const { t } = useTranslation();
+  // `query` is what is typed; `submitted` is what was last searched (Enter or the button).
   const [query, setQuery] = useState("");
+  const [submitted, setSubmitted] = useState("");
+  const [runs, setRuns] = useState(0); // searching the same text again reloads
   const [source, setSource] = useState<"all" | KbSource>("all");
   const [state, setState] = useState<Loaded>({ status: "loading" });
   const [moreBusy, setMoreBusy] = useState(false);
@@ -92,7 +95,7 @@ export const KbNotes = () => {
       const mine = ++epoch.current;
       try {
         const page = await kbApi.notesList({
-          ...(query.trim() !== "" ? { query: query.trim() } : {}),
+          ...(submitted.trim() !== "" ? { query: submitted.trim() } : {}),
           ...(source !== "all" ? { source } : {}),
           limit: PAGE,
           offset,
@@ -108,14 +111,23 @@ export const KbNotes = () => {
         setState({ status: "error", message: e instanceof Error ? e.message : String(e) });
       }
     },
-    [query, source],
+    [submitted, source],
   );
 
   useEffect(() => {
     setState({ status: "loading" });
-    const timer = window.setTimeout(() => void load(0), query === "" ? 0 : DEBOUNCE_MS);
-    return () => window.clearTimeout(timer);
-  }, [load, query]);
+    void load(0);
+  }, [load, runs]);
+
+  const clear = () => {
+    setQuery("");
+    setSubmitted("");
+  };
+  const search = () => {
+    if (query.trim() === "") return;
+    setSubmitted(query);
+    setRuns((n) => n + 1);
+  };
 
   const showMore = async () => {
     if (state.status !== "ok") return;
@@ -135,7 +147,10 @@ export const KbNotes = () => {
           <Input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            onKeyDown={(e) => e.key === "Escape" && setQuery("")}
+            onKeyDown={(e) => {
+              if (isSearchEnter(e)) search();
+              if (e.key === "Escape" && !e.nativeEvent.isComposing) clear();
+            }}
             placeholder={t("kb.notes.searchPlaceholder")}
             aria-label={t("kb.notes.searchPlaceholder")}
             className="h-9 pl-9 pr-9"
@@ -144,13 +159,28 @@ export const KbNotes = () => {
             <button
               type="button"
               aria-label={t("kb.search.clear")}
-              onClick={() => setQuery("")}
+              onClick={clear}
               className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 hover:bg-muted"
             >
               <X className="h-4 w-4" aria-hidden="true" />
             </button>
           )}
         </div>
+        <Button
+          type="button"
+          className="h-9 shrink-0"
+          disabled={query.trim() === ""}
+          onClick={search}
+        >
+          {state.status === "loading" && submitted.trim() !== "" ? (
+            <>
+              <Loader2 className="mr-1 h-4 w-4 animate-spin" aria-hidden="true" />
+              {t("kb.search.searching")}
+            </>
+          ) : (
+            t("kb.search.button")
+          )}
+        </Button>
         <label className="flex items-center gap-1 text-sm text-muted-foreground">
           {t("kb.filters.source")}
           <select
@@ -181,12 +211,12 @@ export const KbNotes = () => {
         {state.status === "ok" &&
           (state.page.notes.length === 0 ? (
             <p className="p-6 text-center text-sm text-muted-foreground">
-              {query.trim() === "" ? t("kb.notes.empty") : t("kb.notes.noMatch")}
+              {submitted.trim() === "" ? t("kb.notes.empty") : t("kb.notes.noMatch")}
             </p>
           ) : (
             <>
               <p className="border-b px-4 py-2 text-xs text-muted-foreground">
-                {query.trim() === ""
+                {submitted.trim() === ""
                   ? t("kb.notes.total", { count: state.page.total })
                   : t("kb.notes.found", { count: state.page.notes.length })}
               </p>
@@ -198,7 +228,7 @@ export const KbNotes = () => {
                   />
                 ))}
               </ul>
-              {query.trim() === "" && state.page.notes.length < state.page.total && (
+              {submitted.trim() === "" && state.page.notes.length < state.page.total && (
                 <div className="p-3 text-center">
                   <Button size="sm" variant="outline" disabled={moreBusy} onClick={() => void showMore()}>
                     {t("kb.notes.more")}

@@ -208,6 +208,7 @@
   "kb.wizard.doneBackup": "首次备份到移动硬盘会在后台继续，进度显示在主页。",
   "kb.wizard.enter": "进入知识库",
   "kb.search.placeholder": "搜索所有会话内容（中文、英文、类名、报错信息都行）",
+  "kb.search.button": "搜索",
   "kb.search.clear": "清除搜索",
   "kb.search.searching": "搜索中…",
   "kb.search.found": "找到 {{count}} 个会话 · 数据截至 {{time}}",

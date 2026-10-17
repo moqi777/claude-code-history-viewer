@@ -208,6 +208,7 @@
   "kb.wizard.doneBackup": "The first backup to the external disk continues in the background; progress shows on the home page.",
   "kb.wizard.enter": "Open the knowledge base",
   "kb.search.placeholder": "Search all conversations (Chinese, English, class names, error messages…)",
+  "kb.search.button": "Search",
   "kb.search.clear": "Clear search",
   "kb.search.searching": "Searching…",
   "kb.search.found": "Found {{count}} session(s) · data as of {{time}}",

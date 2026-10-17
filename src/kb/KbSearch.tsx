@@ -2,15 +2,14 @@ import { Fragment, useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { AlertTriangle, Loader2, Search, X } from "lucide-react";
-import { Badge, Input } from "@/components/ui";
+import { Badge, Button, Input } from "@/components/ui";
 import { formatTime } from "@/utils/time";
 import { NoteCard } from "./KbNotes";
 import { openKbSession } from "./openSession";
+import { isSearchEnter } from "./searchKeys";
 import { focusOf, sessionFromHit } from "./searchHit";
 import type { KbHit, KbSemanticUse, KbSessionHit } from "./types";
 import { useKbStore } from "./useKbStore";
-
-const DEBOUNCE_MS = 300;
 
 /** `text` with `<mark>` around the given `[start, end)` character ranges. */
 export const Highlighted = ({
@@ -43,6 +42,7 @@ export const SearchBox = () => {
   const status = useKbStore((s) => s.search.status);
   const focusPending = useKbStore((s) => s.searchFocusPending);
   const input = useRef<HTMLInputElement>(null);
+  const busy = status === "loading";
 
   // ⌘K asked for the search box: take the focus once, with the text selected.
   useEffect(() => {
@@ -52,38 +52,29 @@ export const SearchBox = () => {
     useKbStore.getState().clearSearchFocus();
   }, [focusPending]);
 
-  // Search as the user types, once they pause.
-  useEffect(() => {
-    if (query.trim() === "") return;
-    const timer = window.setTimeout(() => void useKbStore.getState().runSearch(), DEBOUNCE_MS);
-    return () => window.clearTimeout(timer);
-  }, [query]);
-
+  // Searching happens only on Enter or the button, never while typing.
   return (
-    <div className="relative">
-      <Search
-        className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground"
-        aria-hidden="true"
-      />
-      <Input
-        ref={input}
-        value={query}
-        onChange={(e) => useKbStore.getState().setSearchQuery(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter") void useKbStore.getState().runSearch();
-          if (e.key === "Escape") useKbStore.getState().setSearchQuery("");
-        }}
-        placeholder={t("kb.search.placeholder")}
-        aria-label={t("kb.search.placeholder")}
-        className="h-10 pl-9 pr-9"
-      />
-      {status === "loading" ? (
-        <Loader2
-          className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 animate-spin text-muted-foreground"
+    <div className="flex items-center gap-2">
+      <div className="relative min-w-0 flex-1">
+        <Search
+          className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground"
           aria-hidden="true"
         />
-      ) : (
-        query !== "" && (
+        <Input
+          ref={input}
+          value={query}
+          onChange={(e) => useKbStore.getState().setSearchQuery(e.target.value)}
+          onKeyDown={(e) => {
+            if (isSearchEnter(e)) void useKbStore.getState().runSearch();
+            if (e.key === "Escape" && !e.nativeEvent.isComposing) {
+              useKbStore.getState().setSearchQuery("");
+            }
+          }}
+          placeholder={t("kb.search.placeholder")}
+          aria-label={t("kb.search.placeholder")}
+          className="h-10 pl-9 pr-9"
+        />
+        {query !== "" && (
           <button
             type="button"
             aria-label={t("kb.search.clear")}
@@ -92,8 +83,23 @@ export const SearchBox = () => {
           >
             <X className="h-4 w-4" aria-hidden="true" />
           </button>
-        )
-      )}
+        )}
+      </div>
+      <Button
+        type="button"
+        className="h-10 shrink-0"
+        disabled={query.trim() === ""}
+        onClick={() => void useKbStore.getState().runSearch()}
+      >
+        {busy ? (
+          <>
+            <Loader2 className="mr-1 h-4 w-4 animate-spin" aria-hidden="true" />
+            {t("kb.search.searching")}
+          </>
+        ) : (
+          t("kb.search.button")
+        )}
+      </Button>
     </div>
   );
 };
@@ -221,7 +227,7 @@ const ResultCard = ({ hit }: { hit: KbSessionHit }) => {
         type="button"
         onClick={() => void open(hit, hit.hits[0], t)}
         aria-label={t("kb.sessions.open", { title })}
-        className="flex w-full flex-col gap-1 text-left hover:text-accent-foreground focus-visible:outline-none focus-visible:underline"
+        className="flex w-full flex-col gap-1 text-left hover:text-accent focus-visible:outline-none focus-visible:underline"
       >
         <span className="flex items-center gap-2">
           <span className="truncate font-medium">{title}</span>

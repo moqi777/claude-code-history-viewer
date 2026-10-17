@@ -72,8 +72,10 @@ const response = (patch: Partial<KbSearchResponse> = {}): KbSearchResponse => ({
   ...patch,
 });
 
-const type = (text: string) =>
-  fireEvent.change(screen.getByLabelText("kb.search.placeholder"), { target: { value: text } });
+const box = () => screen.getByLabelText("kb.search.placeholder");
+const type = (text: string) => fireEvent.change(box(), { target: { value: text } });
+const enter = (init: Record<string, unknown> = {}) =>
+  fireEvent.keyDown(box(), { key: "Enter", ...init });
 
 describe("home page search", () => {
   beforeEach(async () => {
@@ -104,8 +106,9 @@ describe("home page search", () => {
   const runSearch = async (outcome: unknown, text = "死锁") => {
     mocks.api.search.mockResolvedValue(outcome);
     type(text);
+    enter();
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(400);
+      await vi.advanceTimersByTimeAsync(10);
     });
   };
 
@@ -120,7 +123,7 @@ describe("home page search", () => {
     expect(document.activeElement).not.toBe(box);
   });
 
-  it("searches once the typing pauses and replaces the session list with the hits", async () => {
+  it("searches on Enter and replaces the session list with the hits", async () => {
     await runSearch({ state: "ok", response: response() });
     expect(mocks.api.search).toHaveBeenCalledTimes(1);
     expect(mocks.api.search.mock.calls[0]?.[0]).toMatchObject({
@@ -140,18 +143,96 @@ describe("home page search", () => {
     expect(marks[0]?.textContent).toBe("死锁");
   });
 
-  it("does not search on every keystroke", async () => {
+  it("does not search while typing, however long the pause", async () => {
     mocks.api.search.mockResolvedValue({ state: "ok", response: response() });
-    type("死");
+    type("s");
+    type("su");
+    type("s u do");
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(100);
+      await vi.advanceTimersByTimeAsync(5000);
     });
+    expect(mocks.api.search).not.toHaveBeenCalled();
+    expect(screen.getByText("Fix the login bug")).toBeTruthy();
+  });
+
+  it("searches once on Enter", async () => {
+    mocks.api.search.mockResolvedValue({ state: "ok", response: response() });
     type("死锁");
+    enter();
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(400);
+      await vi.advanceTimersByTimeAsync(10);
     });
     expect(mocks.api.search).toHaveBeenCalledTimes(1);
-    expect(mocks.api.search.mock.calls[0]?.[0].query).toBe("死锁");
+  });
+
+  it("an Enter that confirms an IME composition is not a search", async () => {
+    mocks.api.search.mockResolvedValue({ state: "ok", response: response() });
+    type("usb");
+    fireEvent.keyDown(box(), { key: "Enter", isComposing: true });
+    fireEvent.keyDown(box(), { key: "Enter", keyCode: 229 });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10);
+    });
+    expect(mocks.api.search).not.toHaveBeenCalled();
+    enter();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10);
+    });
+    expect(mocks.api.search).toHaveBeenCalledTimes(1);
+  });
+
+  it("the Search button searches once, and is disabled while the box is empty", async () => {
+    mocks.api.search.mockResolvedValue({ state: "ok", response: response() });
+    const button = screen.getByRole("button", { name: "kb.search.button" }) as HTMLButtonElement;
+    expect(button.disabled).toBe(true);
+    type("死锁");
+    expect(button.disabled).toBe(false);
+    fireEvent.click(button);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10);
+    });
+    expect(mocks.api.search).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows the button as searching while waiting, and typing stays possible without losing text", async () => {
+    let resolve: (v: unknown) => void = () => undefined;
+    mocks.api.search.mockReturnValue(new Promise((r) => (resolve = r)));
+    type("死锁");
+    enter();
+    expect(await screen.findByRole("button", { name: "kb.search.searching" })).toBeTruthy();
+    const before = box();
+    type("死锁 redis");
+    expect(box()).toBe(before); // not remounted
+    await act(async () => {
+      resolve({ state: "ok", response: response() });
+    });
+    expect((box() as HTMLInputElement).value).toBe("死锁 redis");
+    expect(screen.getByRole("button", { name: "kb.search.button" })).toBeTruthy();
+  });
+
+  it("with two searches in flight only the later one counts", async () => {
+    const resolvers: ((v: unknown) => void)[] = [];
+    mocks.api.search.mockImplementation(() => new Promise((r) => resolvers.push(r)));
+    type("死锁");
+    enter();
+    type("限流");
+    enter();
+    await act(async () => {
+      resolvers[1]?.({ state: "ok", response: response({ results: [hit({ session: { ...hit().session, title: "新的" } })] }) });
+    });
+    await act(async () => {
+      resolvers[0]?.({ state: "ok", response: response() });
+    });
+    expect(screen.getByText("新的")).toBeTruthy();
+    expect(screen.queryByText("排查 Ghostty 卡死")).toBeNull();
+  });
+
+  it("Escape clears the box and the results", async () => {
+    await runSearch({ state: "ok", response: response() });
+    fireEvent.keyDown(box(), { key: "Escape" });
+    expect((box() as HTMLInputElement).value).toBe("");
+    expect(screen.getByText("Fix the login bug")).toBeTruthy();
+    expect(useKbStore.getState().search.status).toBe("idle");
   });
 
   it("the filters narrow the search", async () => {
@@ -197,9 +278,7 @@ describe("home page search", () => {
 
     mocks.api.search.mockRejectedValue(new Error("boom"));
     type("超时");
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(400);
-    });
+    enter();
     expect((await screen.findByRole("alert")).textContent).toContain("boom");
   });
 
@@ -214,9 +293,7 @@ describe("home page search", () => {
     let resolve: (v: unknown) => void = () => undefined;
     mocks.api.search.mockReturnValue(new Promise((r) => (resolve = r)));
     type("死锁");
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(400);
-    });
+    enter();
     type("");
     await act(async () => {
       resolve({ state: "ok", response: response() });
