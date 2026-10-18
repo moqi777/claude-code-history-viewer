@@ -1,0 +1,9 @@
+docs/agent-kb/P7-acceptance.md
+  ai_agent 20
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.11",
+  "base_commit_sha": "9e0d374330a62583dc3ffd3270a2a2b54608cba5",
+  "prompts": {}
+}
