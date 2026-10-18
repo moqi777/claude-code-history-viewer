@@ -167,3 +167,56 @@ python -u scripts/p7_windows_smoke.py D:\AgentKB-build\target\release\AgentKB.ex
 待完成：leader/Mac 复核；安装新版并更新两份技能后的 GUI/代理验收；真实移动硬盘；隔天自动整理；重启登录后自动恢复。七项原始检查结果见第 4 节，本轮未改变产品实现，不重复全套构建及打包。新增 Rust 验收另跑 Clippy/fmt，提交仍使用正常检查钩子。
 
 最终版本实测：真实模型用例 **1 passed / 0 failed，41.17 秒**（模型测试 2.63 秒）；timer 用例通过，临时任务 `AgentKB-P7-real-6f084a15-9405-43fc-b0d9-2cbb5221cee2` 已删除；本轮语义模型目录、两轮 timer 目录均不存在，临时任务剩余 **0**。`cargo fmt --all -- --check`、新增用例的 `cargo clippy ... -- -D warnings`、`git diff --check` 均通过；Clippy 首次提示文档中的环境变量缺少反引号，修正后无警告。日志 `p7-extra-clippy-final.log`。C 盘剩余 **18.85 GiB**，所有新增构建产物在 D 盘。
+
+## 7. 2026-10-18 安装版升级与后续验收准备
+
+用户进一步要求继续完成可执行工作。本节更新第 5/6 节中“尚未覆盖安装”的历史状态。
+
+### 7.1 实际升级及正式技能更新
+
+- 23:13 左右在原目录 **`D:\AgentKB`** 执行第 5 节安装包，参数 `/S /UPDATE /NS /D=D:\AgentKB`，安装器退出 **0**，无需提权。安装前只暂时停用正式任务并关闭闲置 GUI，finally 恢复任务原启用状态。
+- 旧 `AgentKB.exe`、卸载程序、两份旧 skill 和任务 XML 备份在 `D:\AgentKB-build\upgrade-backup-20261018`。备份不含会话或凭据。
+- 注册表 InstallLocation 仍为 `D:\AgentKB`；安装后 GUI 为 56,249,856 字节，console 为 31,442,944 字节。
+- GUI SHA-256：`242FCC837016B127F690CBEB562E1F07714E836D5402419860119E365AA7DEAB`。
+- Console SHA-256：`E39570C70A807BEA460D104C8DAB3100CEE40406C9296577621AE34F8EA2852E`，与构建产物完全一致。
+- 最初直接比较 GUI 与未打包 release 的哈希不一致，使验证脚本提前报错；安装器本身已成功。逐字节检查发现仅 3 个字节不同，即 Tauri 的 `__TAURI_BUNDLE_TYPE_VAR_UNK → __TAURI_BUNDLE_TYPE_VAR_NSS`。本地 `tauri-utils 2.9.2/src/platform.rs` 明确解释该标记由打包器修改；应用这一预期替换后全部字节一致。没有再次安装或替换二进制。
+- AgentKB 配置仍为 847 字节，修改时间仍为 16:14:29；应用界面偏好文件仍为 25 字节，修改时间仍为 13:10:11。升级后的配置哈希 `2DE5B3B4C4B4E82FC0F93634BBD9F982453949FB340D1B86732FA8888A2E4B6F` 在后续操作中保持不变。
+- 两份正式技能使用安装后的 console `--kb-skill-print` 生成模板 **6**；确认原文件与升级前备份一致且有 AgentKB marker 后原子替换，仅修改 `.claude/skills/agentkb/SKILL.md` 和 `.codex/skills/agentkb/SKILL.md`。当前均指向 **`D:\AgentKB\agentkb-cli.exe`**。这是程序生成模板的安装，不声称点击过设置页“更新”。
+
+### 7.2 安装目录中的程序实测
+
+- 本轮 Codex 的实际命令工具直接执行 `& 'D:\AgentKB\agentkb-cli.exe' --kb-search '数据库'`，在临时 `CCHV_TEST_HOME`/`AGENTKB_DATA_DIR` 下收到完整 JSON、中文、matched_sessions=1；无管道、cmd 包装或重定向。
+- Git Bash 执行正式 Claude 模板中的 `'D:/AgentKB/agentkb-cli.exe' --kb-search '数据库'`，返回相同结果。本轮未再次调用付费 AI。
+- 将 `AGENTKB_ACCEPTANCE_EXE` 改为 **`D:\AgentKB\AgentKB.exe`** 后重跑真实模型集成用例：**1 passed / 0 failed，35.23 秒**。实际下载并校验模型，安装版 CPU 测试 **2.59 秒**，6 个向量及口语查询排名均通过，临时模型随测试清理。日志：`D:\AgentKB-build\p7-installed-semantic.log`。
+- 正式任务在升级后的 **23:25:25** 自动运行返回 **0**；仍每 5 分钟执行安装目录中的 GUI 后台入口。正式应用已恢复启动。
+- 尝试用隔离 HOME 和独立 D 盘 WebView profile 打开安装版验证界面，发现 Windows 正处于锁屏（同会话 LogonUI 存在，截图为锁屏，无法取得可操作的设置控件）。因此 GUI 点击下载、测试、开关、技能更新流程仍未验收，不能用后端测试替代。
+
+### 7.3 已安排真实跨日及重启后的检查
+
+新增 `scripts/p7_windows_deferred.py`。`prepare <installed AgentKB.exe>` 在临时目录建立假会话、fake AI、独立配置，先验证当天生成 1 条笔记，再加入截点之后的第二条会话。仅使用用户级 InteractiveToken/LeastPrivilege 任务，不使用真实 AI、不改系统时钟、不主动重启或注销。
+
+本机准备目录：**`D:\AgentKB-build\tmp\agentkb-p7-deferred-zksf03k5`**。runner 已复制到该目录，后续切换仓库不会改变任务执行的脚本。
+
+| 任务 | 触发条件 | 实际检查 |
+|---|---|---|
+| `AgentKB-P7-deferred-881b8bf69eed4c5a9648c4bde684f867-midnight` | 2026-10-19 **00:01**，错过后 StartWhenAvailable | 正式安装版定时收集后，真实时钟进入新日期，假数据产生第二个 daily round 和第 2 条笔记 |
+| `AgentKB-P7-deferred-881b8bf69eed4c5a9648c4bde684f867-logon` | 当前用户下次登录，延迟 2 分钟 | LastBootUpTime 必须变化；对正式任务只读检查本次启动后的成功运行，再做隔离收集，源哈希不变 |
+
+若只是注销后登录但没有重启，logon 验收记录 pending 并继续等真正重启。任务完成检查后删除自身；均设置 7 天有效期和过期后自动删除。程序、假数据、结果保留在 D 盘供复核。不会创建新的常驻服务。
+
+准备过程当天基线通过；两个 runner 的提前调用都返回 **pending**、未误执行或移除任务；`pythonw.exe` 的实际入口验证成功。这里仍未将跨日/重启项目标为通过。后续读取：
+
+- `...\midnight-result.json`
+- `...\logon-result.json`
+- `...\state.json`（基线和触发信息）
+
+### 7.4 新发现和清理边界
+
+带 `+08:00` 的假消息暴露了每日整理公共候选筛选的时间戳字符串比较问题。最小复现、影响与建议见 [P7-timezone-findings.md](P7-timezone-findings.md)。原验收第 3 节要求只改 Windows，因此没有顺手修改 Mac/Windows 共用逻辑；跨日自动验收采用正常 UTC `Z` 假记录，不能视为该问题已解决。
+
+本轮两个目录的清理由自动安全审核以 `blocked by policy` 拒绝，未给更细理由，没有换方式重试。保留：
+
+- `D:\AgentKB-build\tmp\agentkb-installed-ui-用户 d7ifcmly`：隔离 GUI profile、假数据。
+- `D:\AgentKB-build\tmp\agentkb-p7-deferred-xttn5goq`：时区问题的失败复现、fake AI、假数据；未注册任何任务。
+
+此外，升级备份、工具依赖、一次性任务证据都在 D 盘。测试使用临时假会话，未对真实 Claude/Codex 记录执行测试写入或删除，未读取凭据文件；正式技能更新是本轮实际安装工作，正式收集任务按原配置继续运行。新增脚本语法检查和 `git diff --check` 通过；没有产品代码变化，不重新打包。
