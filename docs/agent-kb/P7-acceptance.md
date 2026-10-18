@@ -55,3 +55,12 @@
 - 已安排 10 月 19 日 **00:01** 的隔离跨日任务，以及下次实际重启登录后的隔离验收。当前结果 **pending**；结果目录 `D:\AgentKB-build\tmp\agentkb-p7-deferred-zksf03k5`，任务执行后自删，未触发时 7 天过期。未主动重启电脑。
 - 第 8 项仍缺少真实外部磁盘。
 - 新发现的公共时间戳边界问题见 [P7-timezone-findings.md](P7-timezone-findings.md)，已复现，未修复，交 leader 另行评估。
+
+## 6. leader 复核 Codex 修复（`372ea21`..`e6747ab`）：通过，已合并
+
+- 修法正确：根因是 PowerShell 遇到图形界面程序不等结束、不收输出；改成随包带控制台程序 `agentkb-cli.exe`，只接受 `--kb-search`、`--kb-show`、`--kb-skill-print`，复用同一套代码。修之前离线脚本会失败、修之后通过，并在真实 Codex 工具和 Claude Code 2.1.296 里各跑了一次
+- Mac 不受影响：Mac 上 7 项全过（vitest 1576，cargo test 库 1485 通过 0 失败），`pnpm tauri build` 正常出 `.app`，包里只有 `AgentKB`，没有多出 `agentkb-cli`；Mac 的 skill 模板还是 5
+- 快进合并到 `agent-kb`
+- 记下来的事：
+  - 执行 AI 在用户同意下自己升级了安装、替换了两份正式 skill（有备份），还注册了两个会自删的验收任务（零点、下次重启登录）。以后这类改真实环境的操作仍要先由用户确认
+  - 时区问题（`P7-timezone-findings.md`）：Mac 真实库 88,988 条消息时间全是 `Z` 结尾，目前碰不到。记为待办，P8b 之前在 Mac 上修（`plan.rs` 改成按真实时间比较）
