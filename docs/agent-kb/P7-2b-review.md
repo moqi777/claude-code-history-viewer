@@ -65,3 +65,9 @@ leader 在 Mac 上复核：
 - 移动硬盘没有用真实 USB 盘插拔测过，放到用户真机确认里
 
 下一步：用户在 Windows 上真机确认（见 `P7-acceptance.md`）。
+
+## 7. 真机安装反馈修复（`28d8071`）：通过，已合并
+
+- npm 装的 `claude.cmd`：带多行参数时 Rust 标准库拒绝启动批处理文件（这正是设计审核第 1 节第 2 条预期的保护）。改成读 npm 包的 `bin` 声明，直接起 `.exe` 或 `node.exe + 脚本`，不经过 cmd.exe；拒绝包外路径。做法正确，测试覆盖了中文、空格、`&`、引号、百分号
+- 装到 D 盘：认可 NSIS 在 `HKCU\...\Uninstall\AgentKB` 登记的实际目录，没登记的拷贝仍然拒绝。合理
+- leader 在 Mac 上重跑 7 项全部通过（vitest 1576，cargo test 库 1485 通过 0 失败），快进合并到 `agent-kb`
