@@ -1,8 +1,8 @@
 //! Checking what the AI answered, and merging it into the session's notes.
 //!
 //! The answer is untrusted text: it is parsed, bounds-checked, redacted again
-//! and only then becomes part of a note file. Nothing is repaired; an answer
-//! that breaks a rule is rejected as a whole (one failed attempt).
+//! and only then becomes part of a note file. Only the first eight entries
+//! are kept; a retained entry that breaks a rule rejects the whole answer.
 
 use serde::Deserialize;
 
@@ -20,7 +20,7 @@ const MAX_KEYWORD: usize = 40;
 
 #[derive(Debug, Deserialize)]
 struct Answer {
-    entries: Vec<Raw>,
+    entries: Vec<serde_json::Value>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -81,15 +81,27 @@ fn limit(field: &str, text: &str, max: usize) -> Result<String, String> {
 }
 
 pub fn check(answer: &str, bounds: &Bounds<'_>) -> Result<Vec<Checked>, String> {
+    check_with_log(answer, bounds, |discarded| {
+        log::warn!("digest answer: discarded {discarded} entries beyond {MAX_ENTRIES}");
+    })
+}
+
+pub fn check_with_log(
+    answer: &str,
+    bounds: &Bounds<'_>,
+    discarded: impl FnOnce(usize),
+) -> Result<Vec<Checked>, String> {
     let json = json_slice(answer).ok_or("the answer holds no JSON object")?;
     let parsed: Answer = serde_json::from_str(json)
         .map_err(|e| format!("the answer is not the expected JSON: {e}"))?;
     if parsed.entries.len() > MAX_ENTRIES {
-        return Err(format!("more than {MAX_ENTRIES} entries"));
+        discarded(parsed.entries.len() - MAX_ENTRIES);
     }
     let mut out = Vec::new();
-    for (n, raw) in parsed.entries.iter().enumerate() {
+    for (n, value) in parsed.entries.into_iter().take(MAX_ENTRIES).enumerate() {
         let at = |msg: String| format!("entry {}: {msg}", n + 1);
+        let raw: Raw = serde_json::from_value(value)
+            .map_err(|e| at(format!("not the expected entry JSON: {e}")))?;
         let title = limit("title", &raw.title, MAX_TITLE).map_err(at)?;
         if title.is_empty() {
             return Err(at("title is empty".into()));
@@ -228,31 +240,78 @@ mod tests {
     }
 
     #[test]
+    fn nine_entries_keep_the_first_eight_unchanged_and_log_once() {
+        let entries: Vec<serde_json::Value> = (0..9)
+            .map(|i| {
+                let mut value: serde_json::Value = serde_json::from_str(&entry("")).unwrap();
+                value["entries"][0]["title"] = format!("topic {i}").into();
+                value["entries"][0].clone()
+            })
+            .collect();
+        let expected = check(
+            &serde_json::json!({"entries": &entries[..8]}).to_string(),
+            &bounds(&[]),
+        )
+        .unwrap();
+        let logged = std::cell::Cell::new(0);
+        let actual = check_with_log(
+            &serde_json::json!({"entries": entries}).to_string(),
+            &bounds(&[]),
+            |n| {
+                assert_eq!(n, 1);
+                logged.set(logged.get() + 1);
+            },
+        )
+        .unwrap();
+        assert_eq!(actual, expected);
+        assert_eq!(logged.get(), 1);
+        let mut discarded_invalid = serde_json::json!({"entries": entries});
+        discarded_invalid["entries"][8] = serde_json::json!({"seq_from": "invalid"});
+        assert_eq!(
+            check(&discarded_invalid.to_string(), &bounds(&[])).unwrap(),
+            expected
+        );
+        let mut invalid = serde_json::json!({"entries": entries});
+        invalid["entries"][0]["seq_to"] = 999.into();
+        assert!(check(&invalid.to_string(), &bounds(&[])).is_err());
+    }
+
+    #[test]
     fn every_rule_rejects_the_whole_answer() {
         let b = bounds(&["n1"]);
         for (what, answer) in [
             ("not json", "sorry, I cannot".to_string()),
             ("no entries key", r#"{"notes":[]}"#.to_string()),
-            ("range below", entry("").replace("\"seq_from\":12", "\"seq_from\":2")),
-            ("range above", entry("").replace("\"seq_to\":20", "\"seq_to\":51")),
-            ("inverted", entry("").replace("\"seq_from\":12", "\"seq_from\":30")),
-            ("no keywords", entry("").replace("[\"k\"]", "[]")),
-            ("empty title", entry("").replace("\"title\":\"t\"", "\"title\":\" \"")),
-            ("empty conclusion", entry("").replace("\"conclusion\":\"c\"", "\"conclusion\":\"\"")),
-            ("unknown id", entry("").replace("\"id\":null", "\"id\":\"n7\"")),
             (
-                "title too long",
-                entry("").replace("\"title\":\"t\"", &format!("\"title\":\"{}\"", "x".repeat(81))),
+                "range below",
+                entry("").replace("\"seq_from\":12", "\"seq_from\":2"),
             ),
             (
-                "too many entries",
-                format!(
-                    "{{\"entries\":[{}]}}",
-                    [
-                        r#"{"id":null,"title":"t","problem":"","cause":"","solution":"","conclusion":"c","keywords":["k"],"seq_from":12,"seq_to":13}"#;
-                        9
-                    ]
-                    .join(",")
+                "range above",
+                entry("").replace("\"seq_to\":20", "\"seq_to\":51"),
+            ),
+            (
+                "inverted",
+                entry("").replace("\"seq_from\":12", "\"seq_from\":30"),
+            ),
+            ("no keywords", entry("").replace("[\"k\"]", "[]")),
+            (
+                "empty title",
+                entry("").replace("\"title\":\"t\"", "\"title\":\" \""),
+            ),
+            (
+                "empty conclusion",
+                entry("").replace("\"conclusion\":\"c\"", "\"conclusion\":\"\""),
+            ),
+            (
+                "unknown id",
+                entry("").replace("\"id\":null", "\"id\":\"n7\""),
+            ),
+            (
+                "title too long",
+                entry("").replace(
+                    "\"title\":\"t\"",
+                    &format!("\"title\":\"{}\"", "x".repeat(81)),
                 ),
             ),
         ] {

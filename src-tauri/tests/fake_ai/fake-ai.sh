@@ -70,6 +70,7 @@ emit() { # $1 = JSON text of the answer
 case "$mode" in
   ok) emit "$(entries)" ;;
   update) emit "$(entries)" ;;
+  custom) emit "$(cat "$dir/answer.json")" ;;
   nothing) emit '{"entries":[]}' ;;
   bad_json)
     if [ "$codex" = 1 ]; then emit_codex "sorry, I cannot do that"; else emit_claude "" "sorry, I cannot do that"; fi ;;

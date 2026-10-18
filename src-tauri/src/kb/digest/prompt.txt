@@ -15,6 +15,7 @@ Each entry:
 - seq_from, seq_to: the first and last message number that this entry is based on (numbers taken from the [#n] headers; for an update, cover old and new evidence).
 
 Rules:
+- Return at most 8 entries in total per response, including updates to previous notes. If there are more topics, choose the 8 most useful ones.
 - Write in the main language of the conversation.
 - Only state what the messages support. Do not invent causes, commands, numbers or file names.
 - Never copy secrets (passwords, tokens, keys), even if they appear in the messages.

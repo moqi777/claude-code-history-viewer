@@ -86,6 +86,111 @@ impl Rig {
 }
 
 #[test]
+fn oversized_answer_is_stored_as_eight_notes_with_a_discard_log() {
+    let rig = Rig::new();
+    rig.session("s", 6, "2026-10-15T14:00:00Z");
+    let entries: Vec<_> = (0..9).map(|i| serde_json::json!({
+        "id": null, "title": format!("topic {i}"), "problem": "p", "cause": "c",
+        "solution": "s", "conclusion": "answer", "keywords": ["k"], "seq_from": 1, "seq_to": 6,
+    })).collect();
+    std::fs::write(
+        rig.ai.dir.join("answer.json"),
+        serde_json::json!({"entries": entries}).to_string(),
+    )
+    .unwrap();
+    rig.ai.mode("custom");
+    let summary = rig.run();
+    assert_eq!((summary.done, summary.failed, summary.retried), (1, 0, 0));
+    assert_eq!(rig.ai.calls(), 1);
+    let notes = rig.note("s").unwrap();
+    assert_eq!(notes.entries.len(), 8);
+    for (i, note) in notes.entries.iter().enumerate() {
+        assert_eq!(note.title, format!("topic {i}"));
+        assert_eq!(note.solution, "s");
+    }
+    let count: i64 = rig
+        .kb
+        .conn
+        .query_row("SELECT COUNT(*) FROM notes", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(count, 8);
+    let log: String = std::fs::read_dir(rig.kb.data.logs())
+        .unwrap()
+        .map(|entry| std::fs::read_to_string(entry.unwrap().path()).unwrap())
+        .collect();
+    assert_eq!(log.matches("discarded 1 entries beyond 8").count(), 1);
+    assert!(log.contains("ai reply claude:s tokens=115/20"));
+}
+
+#[test]
+fn one_attempt_scope_never_resumes_failures_or_other_pending_sessions() {
+    for mode in ["ok", "fail", "quota", "auth"] {
+        let rig = Rig::new();
+        rig.session("selected", 6, "2026-10-15T14:00:00Z");
+        rig.session("unselected", 6, "2026-10-15T14:00:00Z");
+        rig.ai.mode(mode);
+        let summary = run(
+            &rig.env(),
+            Trigger::Cli,
+            &Scope::SessionOnce {
+                source: "claude".into(),
+                session_id: "selected".into(),
+            },
+        )
+        .unwrap();
+        assert_eq!(rig.ai.calls(), 1, "{mode}");
+        assert_eq!(summary.remaining, 0);
+        assert_eq!(summary.retried, 0);
+        assert_eq!(summary.done, usize::from(mode == "ok"));
+        assert_eq!(summary.failed, usize::from(mode != "ok"));
+        let items = store::items(&rig.kb.conn, &summary.rounds[0]).unwrap();
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].session_id, "selected");
+        assert_eq!(items[0].attempts, 1);
+        assert!(!store::has_due_item(&rig.kb.conn, "2099-01-01T00:00:00Z").unwrap());
+        assert!(rig.note("unselected").is_none());
+    }
+}
+
+#[test]
+fn interrupted_one_attempt_round_is_closed_without_another_call() {
+    let rig = Rig::new();
+    rig.at("2026-10-16T00:00:00.123456789Z");
+    rig.session("selected", 6, "2026-10-15T14:00:00Z");
+    let env = rig.env();
+    let round = plan_manual(
+        &env,
+        &rig.kb.conn,
+        &Scope::SessionOnce {
+            source: "claude".into(),
+            session_id: "selected".into(),
+        },
+        Trigger::Cli,
+    )
+    .unwrap()
+    .unwrap();
+    assert_eq!(round.state, "superseded");
+    assert_eq!(round.cutoff_at, "2026-10-16T00:00:00.123456789Z");
+    assert!(!store::has_due_item(&rig.kb.conn, "2099-01-01T00:00:00Z").unwrap());
+    let item = store::items(&rig.kb.conn, &round.round_id)
+        .unwrap()
+        .remove(0);
+    store::mark_running(&rig.kb.conn, &item).unwrap();
+    recover_running(
+        &env,
+        &rig.kb.conn,
+        &SyncLog::open_digest(&rig.kb.data.logs()),
+    )
+    .unwrap();
+    let item = store::items(&rig.kb.conn, &round.round_id)
+        .unwrap()
+        .remove(0);
+    assert_eq!(item.state, "failed");
+    assert_eq!(item.attempts, 1);
+    assert_eq!(rig.ai.calls(), 0);
+}
+
+#[test]
 fn a_night_off_is_made_up_at_the_first_check_and_the_round_completes() {
     let rig = Rig::new();
     // Chats from the evening before; the machine was off at 03:00.

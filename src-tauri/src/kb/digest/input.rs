@@ -113,7 +113,7 @@ fn short_ts(ts: Option<&str>) -> String {
     ts.and_then(|t| t.get(5..16)).unwrap_or("").to_string()
 }
 
-fn parse_ts(ts: &str) -> Option<DateTime<Utc>> {
+pub(super) fn parse_ts(ts: &str) -> Option<DateTime<Utc>> {
     DateTime::parse_from_rfc3339(ts)
         .ok()
         .map(|t| t.with_timezone(&Utc))

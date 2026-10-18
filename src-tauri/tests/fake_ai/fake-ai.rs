@@ -55,6 +55,7 @@ fn main() -> ExitCode {
     };
     match mode.as_str() {
         "ok" | "update" => emit(&answer),
+        "custom" => emit(&text(dir.join("answer.json"))),
         "nothing" => emit("{\"entries\":[]}"),
         "bad_json" => { if codex { if let Some(path) = &out { let _ = fs::write(path, "sorry, I cannot do that"); } println!("sorry, I cannot do that"); } else { println!("{{\"type\":\"result\",\"is_error\":false,\"result\":\"sorry, I cannot do that\"}}"); } },
         "bad_range" => emit(r#"{"entries":[{"id":null,"title":"Out of range","problem":"p","cause":"","solution":"","conclusion":"c","keywords":["k"],"seq_from":900000,"seq_to":900001}]}"#),

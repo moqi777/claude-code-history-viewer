@@ -756,6 +756,8 @@ fn parse_claude(output: &Output) -> Result<Reply, Failure> {
 fn parse_codex(output: &Output, last_message: Option<&str>) -> Result<Reply, Failure> {
     let mut usage = Value::Null;
     let mut failure: Option<String> = None;
+    let mut completed = false;
+    let mut turn_failed = false;
     let mut last_agent_text: Option<String> = None;
     for line in output.stdout.lines() {
         let Ok(event) = serde_json::from_str::<Value>(line) else {
@@ -764,8 +766,10 @@ fn parse_codex(output: &Output, last_message: Option<&str>) -> Result<Reply, Fai
         match event.get("type").and_then(Value::as_str) {
             Some("turn.completed") => {
                 usage = event.get("usage").cloned().unwrap_or(Value::Null);
+                completed = true;
             }
             Some("turn.failed") => {
+                turn_failed = true;
                 failure = Some(
                     event
                         .pointer("/error/message")
@@ -796,8 +800,12 @@ fn parse_codex(output: &Output, last_message: Option<&str>) -> Result<Reply, Fai
             _ => {}
         }
     }
-    if let Some(message) = failure {
-        return Err(classify(status_in(&message), &message));
+    // `error` also carries transient reconnect notices. A completed turn with
+    // a successful exit supersedes those notices, but never a terminal failure.
+    if turn_failed || !completed || !output.success {
+        if let Some(message) = failure {
+            return Err(codex_failure(&message));
+        }
     }
     if !output.success {
         let detail = if output.stderr.trim().is_empty() {
@@ -805,7 +813,7 @@ fn parse_codex(output: &Output, last_message: Option<&str>) -> Result<Reply, Fai
         } else {
             &output.stderr
         };
-        return Err(classify(None, detail));
+        return Err(codex_failure(detail));
     }
     let answer = last_message
         .map(str::to_string)
@@ -821,6 +829,20 @@ fn parse_codex(output: &Output, last_message: Option<&str>) -> Result<Reply, Fai
         cost_usd: None,
         turns: None,
     })
+}
+
+fn codex_failure(message: &str) -> Failure {
+    let lower = message.to_ascii_lowercase();
+    if lower.contains("workspace routing discovery failed")
+        || lower.contains("workspace routing discovery timed out")
+    {
+        Failure::Other(format!(
+            "Codex 工作区路由连接失败或超时。请检查网络/代理，在 Codex 中确认当前工作区可用，再到每日整理设置点“测试”后重试。原始错误：{}",
+            clip(message, 120)
+        ))
+    } else {
+        classify(status_in(message), message)
+    }
 }
 
 /// `"status": 429` inside an error message that is itself JSON text.
@@ -1088,6 +1110,35 @@ mod tests {
             parse_claude(&output("not json", true)),
             Err(Failure::Other(_))
         ));
+    }
+
+    #[test]
+    fn codex_reconnect_notices_do_not_discard_a_completed_answer() {
+        let warning = r#"{"type":"error","message":"Reconnecting... 2/5 (workspace routing discovery timed out)"}"#;
+        let completed =
+            r#"{"type":"turn.completed","usage":{"input_tokens":123,"output_tokens":45}}"#;
+        let stdout = format!("{warning}\n{completed}\n");
+        let reply = parse_codex(&output(&stdout, true), Some(r#"{"entries":[]}"#)).unwrap();
+        assert_eq!((reply.input_tokens, reply.output_tokens), (123, 45));
+        for (text, success) in [
+            (warning.to_string(), false),
+            (stdout.clone(), false),
+            (format!("{stdout}{{\"type\":\"turn.failed\",\"error\":{{\"message\":\"workspace routing discovery failed\"}}}}\n"), true),
+        ] {
+            let failure = parse_codex(&output(&text, success), Some(r#"{"entries":[]}"#)).unwrap_err();
+            assert!(matches!(failure, Failure::Other(_)));
+            assert!(failure.message().contains("网络/代理"));
+            assert!(failure.message().contains("workspace routing discovery"));
+        }
+        let stderr = Output {
+            stdout: String::new(),
+            stderr: "workspace routing discovery failed".into(),
+            success: false,
+        };
+        assert!(parse_codex(&stderr, None)
+            .unwrap_err()
+            .message()
+            .contains("网络/代理"));
     }
 
     #[test]

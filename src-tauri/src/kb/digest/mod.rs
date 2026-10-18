@@ -81,6 +81,8 @@ pub enum Scope {
     All,
     /// One session, now ("立即整理这个").
     Session { source: String, session_id: String },
+    /// One explicitly selected session, one attempt; never resumed automatically.
+    SessionOnce { source: String, session_id: String },
 }
 
 type Clock = Arc<dyn Fn() -> DateTime<Utc> + Send + Sync>;
@@ -174,7 +176,9 @@ fn new_round(
     Round {
         round_id: id.to_string(),
         kind: kind.to_string(),
-        cutoff_at: plan::rfc3339(cutoff),
+        // Preserve the input boundary; retry timestamps keep their existing
+        // fixed-width seconds format for SQLite's text comparisons.
+        cutoff_at: cutoff.to_rfc3339_opts(chrono::SecondsFormat::AutoSi, true),
         planned_at: plan::rfc3339(env.now()),
         completed_at: None,
         state: "open".into(),
@@ -247,15 +251,27 @@ fn plan_manual(
     trigger: Trigger,
 ) -> Result<Option<Round>, String> {
     let now = env.now();
-    let base = manual_round_id(now);
+    let once = matches!(scope, Scope::SessionOnce { .. });
+    let base = if once {
+        format!("once-{}", manual_round_id(now))
+    } else {
+        manual_round_id(now)
+    };
     let mut id = base.clone();
     let mut n = 1;
     while store::get_round(conn, &id)?.is_some() {
         n += 1;
         id = format!("{base}-{n}");
     }
-    let round = new_round(env, &id, "manual", now, trigger);
-    let found = if let Scope::Session { source, session_id } = scope {
+    let mut round = new_round(env, &id, "manual", now, trigger);
+    // Persist the no-resume policy before the first call. Even an older app
+    // cannot pick this up after a crash: automatic runs only resume open rounds.
+    if once {
+        round.state = "superseded".into();
+    }
+    let found = if let Scope::Session { source, session_id }
+    | Scope::SessionOnce { source, session_id } = scope
+    {
         let info = input::session_info(conn, source, session_id)?
             .ok_or_else(|| format!("{source}:{session_id} is not in the index"))?;
         let digested = notes::digested_seq(conn, source, session_id)?.unwrap_or(0);
@@ -375,7 +391,7 @@ fn run_locked(
 
     let mut summary = RunSummary::with_status("ok");
     let mut ctx = Context::new(env)?;
-    let respect_quiet = !matches!(scope, Scope::Session { .. });
+    let respect_quiet = !matches!(scope, Scope::Session { .. } | Scope::SessionOnce { .. });
     'rounds: for round in rounds {
         summary.rounds.push(round.round_id.clone());
         loop {
@@ -435,7 +451,7 @@ fn recover_running(env: &DigestEnv, conn: &Connection, log: &SyncLog) -> Result<
             item.source, item.session_id
         ));
         let error = "the digest was interrupted";
-        if item.attempts >= MAX_ATTEMPTS {
+        if item.attempts >= MAX_ATTEMPTS || item.round_id.starts_with("once-") {
             let newest = newest_seq(conn, &item.source, &item.session_id)?;
             store::mark_failed(conn, &item, error, newest, &plan::rfc3339(env.now()))?;
         } else {
@@ -531,6 +547,16 @@ fn process_item(
     let cli = match &ctx.cli {
         Ok(path) => path.clone(),
         Err(failure) => {
+            if round.round_id.starts_with("once-") {
+                store::mark_failed(
+                    conn,
+                    item,
+                    &clip_error(&failure.message()),
+                    newest_seq(conn, &item.source, &item.session_id)?,
+                    &now_text,
+                )?;
+                return Ok(Outcome::Failed);
+            }
             pause(env, conn, failure)?;
             return Ok(Outcome::Pause(failure.clone()));
         }
@@ -586,6 +612,16 @@ fn process_item(
                 item.session_id,
                 clip_error(&failure.message())
             ));
+            if round.round_id.starts_with("once-") {
+                store::mark_failed(
+                    conn,
+                    item,
+                    &clip_error(&failure.message()),
+                    newest_seq(conn, &item.source, &item.session_id)?,
+                    &plan::rfc3339(env.now()),
+                )?;
+                return Ok(Outcome::Failed);
+            }
             match failure {
                 Failure::Cancelled => {
                     store::mark_pending(conn, item, true, None, None)?;
@@ -637,19 +673,9 @@ fn is_active(
     info: &input::SessionInfo,
     now: DateTime<Utc>,
 ) -> Result<bool, String> {
-    let latest: Option<String> = conn
-        .query_row(
-            "SELECT MAX(x) FROM (SELECT last_activity_at AS x FROM sessions WHERE file_id=?1 \
-             UNION ALL SELECT last_activity_at FROM sessions WHERE source=?2 \
-               AND parent_session_id=?3 AND is_subagent=1)",
-            rusqlite::params![info.file_id, info.source, info.session_id],
-            |r| r.get(0),
-        )
-        .map_err(|e| format!("read activity: {e}"))?;
+    let latest = plan::latest_activity(conn, info)?;
     let quiet = chrono::Duration::minutes(i64::from(env.config.quiet_minutes));
-    Ok(latest
-        .and_then(|t| DateTime::parse_from_rfc3339(&t).ok())
-        .is_some_and(|t| now - t.with_timezone(&Utc) < quiet))
+    Ok(now - latest < quiet)
 }
 
 struct Digested {
@@ -780,12 +806,25 @@ fn digest_session(
             .min()
             .map_or(chunk.from_seq, |m| m.min(chunk.from_seq));
         let ids: Vec<&str> = file.entries.iter().map(|e| e.id.as_str()).collect();
-        let checked = validate::check(
+        // Record usage before validation too: a rejected answer still costs tokens.
+        log.line(&format!(
+            "ai reply {}:{} tokens={}/{}",
+            info.source, info.session_id, reply.input_tokens, reply.output_tokens
+        ));
+        let checked = validate::check_with_log(
             &reply.answer,
             &validate::Bounds {
                 seq_min,
                 seq_max: chunk.to_seq,
                 previous_ids: ids,
+            },
+            |discarded| {
+                log.line(&format!(
+                    "answer {}:{} discarded {discarded} entries beyond {}",
+                    info.source,
+                    info.session_id,
+                    validate::MAX_ENTRIES
+                ));
             },
         )
         .map_err(|e| Failure::Other(format!("invalid answer: {e}")))?;

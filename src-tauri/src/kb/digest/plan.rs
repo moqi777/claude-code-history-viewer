@@ -46,8 +46,7 @@ pub struct Rules<'a> {
 }
 
 fn parse(ts: Option<&str>) -> Option<DateTime<Utc>> {
-    ts.and_then(|t| DateTime::parse_from_rfc3339(t).ok())
-        .map(|t| t.with_timezone(&Utc))
+    ts.and_then(input::parse_ts)
 }
 
 pub fn rfc3339(t: DateTime<Utc>) -> String {
@@ -79,7 +78,6 @@ pub fn candidates(conn: &Connection, rules: &Rules<'_>) -> Result<Vec<Candidate>
     }
     let work = rules.data.digest_work().to_string_lossy().into_owned();
     let work_rule = [work];
-    let cutoff_text = rfc3339(rules.cutoff);
     let recent_from = rules.now - Duration::days(i64::from(rules.cfg.recent_days));
     let quiet_from = rules.now - Duration::minutes(i64::from(rules.cfg.quiet_minutes));
 
@@ -87,16 +85,14 @@ pub fn candidates(conn: &Connection, rules: &Rules<'_>) -> Result<Vec<Candidate>
         .prepare(
             "SELECT s.file_id, s.source, s.session_id, s.title, s.project_name, s.cwd, \
                     s.last_activity_at, \
-                    (SELECT MAX(c.last_activity_at) FROM sessions c WHERE c.source=s.source \
-                       AND c.parent_session_id=s.session_id AND c.is_subagent=1), \
                     COALESCE((SELECT MAX(seq) FROM messages m WHERE m.file_id=s.file_id), 0) \
              FROM sessions s WHERE s.is_subagent=0 AND s.cwd_excluded=0",
         )
         .map_err(|e| format!("prepare sessions: {e}"))?;
     let mut count = conn
         .prepare(
-            "SELECT COUNT(*) FROM messages WHERE file_id=?1 AND seq>?2 \
-             AND kind IN ('user','assistant') AND (ts IS NULL OR ts<=?3)",
+            "SELECT kind, ts FROM messages WHERE file_id=?1 AND seq>?2 \
+             AND kind IN ('user','assistant','tool_use','tool_error') ORDER BY seq",
         )
         .map_err(|e| format!("prepare count: {e}"))?;
     let rows = stmt
@@ -111,28 +107,20 @@ pub fn candidates(conn: &Connection, rules: &Rules<'_>) -> Result<Vec<Candidate>
                     cwd: r.get(5)?,
                     last_activity_at: r.get(6)?,
                 },
-                r.get::<_, Option<String>>(7)?,
-                u64::try_from(r.get::<_, i64>(8)?).unwrap_or(0),
+                u64::try_from(r.get::<_, i64>(7)?).unwrap_or(0),
             ))
         })
         .map_err(|e| format!("read sessions: {e}"))?;
 
     let mut out = Vec::new();
     for row in rows {
-        let (info, child_activity, newest_seq) = row.map_err(|e| format!("read sessions: {e}"))?;
+        let (info, newest_seq) = row.map_err(|e| format!("read sessions: {e}"))?;
         // The digest's own working directory is never digested, whatever the
         // user's exclusion list says.
         if db::is_cwd_excluded(info.cwd.as_deref(), &work_rule) {
             continue;
         }
-        let activity = [
-            parse(info.last_activity_at.as_deref()),
-            parse(child_activity.as_deref()),
-        ]
-        .into_iter()
-        .flatten()
-        .max()
-        .unwrap_or(DateTime::UNIX_EPOCH);
+        let activity = latest_activity(conn, &info)?;
         let (digested_seq, partial) = digested
             .get(&(info.source.clone(), info.session_id.clone()))
             .copied()
@@ -144,17 +132,27 @@ pub fn candidates(conn: &Connection, rules: &Rules<'_>) -> Result<Vec<Candidate>
         if rules.quiet && activity > quiet_from {
             continue;
         }
-        let new_messages: usize = count
-            .query_row(
+        let messages = count
+            .query_map(
                 params![
                     info.file_id,
-                    i64::try_from(digested_seq).unwrap_or(i64::MAX),
-                    cutoff_text
+                    i64::try_from(digested_seq).unwrap_or(i64::MAX)
                 ],
-                |r| r.get::<_, i64>(0),
+                |r| Ok((r.get::<_, String>(0)?, r.get::<_, Option<String>>(1)?)),
             )
-            .map_err(|e| format!("count messages: {e}"))
-            .map(|n| usize::try_from(n).unwrap_or(0))?;
+            .map_err(|e| format!("count messages: {e}"))?;
+        let mut new_messages = 0;
+        for message in messages {
+            let (kind, ts) = message.map_err(|e| format!("count messages: {e}"))?;
+            // Match input::load_items exactly, including its sequence boundary
+            // and treatment of missing/unparseable timestamps. No text is loaded.
+            if parse(ts.as_deref()).is_some_and(|t| t > rules.cutoff) {
+                break;
+            }
+            if matches!(kind.as_str(), "user" | "assistant") {
+                new_messages += 1;
+            }
+        }
         let needed = if has_notes {
             MIN_NEW_MESSAGES_UPDATE
         } else {
@@ -179,6 +177,32 @@ pub fn candidates(conn: &Connection, rules: &Rules<'_>) -> Result<Vec<Candidate>
     }
     out.sort_by_key(|c| std::cmp::Reverse(c.activity));
     Ok(out)
+}
+
+/// Latest activity of the main session and all children, by instant rather
+/// than SQL's lexical MAX (offset timestamps do not sort chronologically).
+pub(super) fn latest_activity(
+    conn: &Connection,
+    info: &SessionInfo,
+) -> Result<DateTime<Utc>, String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT last_activity_at FROM sessions WHERE file_id=?1 OR \
+         (source=?2 AND parent_session_id=?3 AND is_subagent=1)",
+        )
+        .map_err(|e| format!("read activity: {e}"))?;
+    let rows = stmt
+        .query_map(params![info.file_id, info.source, info.session_id], |r| {
+            r.get::<_, Option<String>>(0)
+        })
+        .map_err(|e| format!("read activity: {e}"))?;
+    let mut latest = DateTime::UNIX_EPOCH;
+    for row in rows {
+        if let Some(at) = parse(row.map_err(|e| format!("read activity: {e}"))?.as_deref()) {
+            latest = latest.max(at);
+        }
+    }
+    Ok(latest)
 }
 
 // ---------------------------------------------------------------------------
@@ -345,6 +369,122 @@ mod tests {
             quiet: true,
             honour_failures: true,
         }
+    }
+
+    #[test]
+    fn candidate_cutoff_matches_input_for_offsets_and_fractional_seconds() {
+        let cutoff = utc("2026-10-17T16:00:00.123456789Z");
+        for (ts, eligible) in [
+            ("2026-10-17T23:22:03.702228+08:00", true),
+            ("2026-10-17T16:00:00.123456789Z", true),
+            ("2026-10-18T00:00:00.123456789+08:00", true),
+            ("2026-10-17T12:00:00.123456789-04:00", true),
+            ("2026-10-17T16:00:00.123456788Z", true),
+            ("2026-10-17T16:00:00.123456790Z", false),
+            ("2026-10-17T12:00:00.123456790-04:00", false),
+            ("2026-10-18T00:00:00.123456790+08:00", false),
+            ("unparseable", true),
+        ] {
+            let kb = TestKb::new();
+            let file = kb.session("codex", "s", "/p", None, ts);
+            kb.messages(
+                file,
+                1,
+                &[("user", ts, "question"), ("assistant", ts, "answer")],
+            );
+            let cfg = DigestConfig {
+                min_messages: 2,
+                ..DigestConfig::default()
+            };
+            let rules = Rules {
+                cfg: &cfg,
+                data: &kb.data,
+                cutoff,
+                now: cutoff,
+                recent_only: false,
+                quiet: false,
+                honour_failures: false,
+            };
+            let found = candidates(&kb.conn, &rules).unwrap();
+            let info = input::session_info(&kb.conn, "codex", "s")
+                .unwrap()
+                .unwrap();
+            let chunk =
+                input::next_chunk(&kb.conn, &info, 0, cutoff, None, input::CHUNK_CHARS).unwrap();
+            assert_eq!(!found.is_empty(), eligible, "{ts}");
+            assert_eq!(chunk.is_some(), eligible, "input: {ts}");
+            if eligible {
+                assert_eq!(found[0].new_messages, 2);
+            }
+            kb.conn.execute("UPDATE messages SET ts=NULL", []).unwrap();
+            assert_eq!(candidates(&kb.conn, &rules).unwrap()[0].new_messages, 2);
+        }
+    }
+
+    #[test]
+    fn candidate_stops_at_the_same_tool_boundary_as_input() {
+        let kb = TestKb::new();
+        let file = kb.session("claude", "s", "/p", None, "2026-10-17T15:00:00Z");
+        kb.messages(
+            file,
+            1,
+            &[
+                ("user", "2026-10-17T15:00:00Z", "before"),
+                ("tool_use", "2026-10-17T17:00:00Z", "after cutoff"),
+                ("assistant", "2026-10-17T15:00:00Z", "out of order"),
+            ],
+        );
+        let cfg = DigestConfig {
+            min_messages: 2,
+            ..DigestConfig::default()
+        };
+        let mut rule = rules(&cfg, &kb.data, "2026-10-17T16:00:00Z", false);
+        rule.quiet = false;
+        assert!(candidates(&kb.conn, &rule).unwrap().is_empty());
+        let info = input::session_info(&kb.conn, "claude", "s")
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            input::next_chunk(&kb.conn, &info, 0, rule.cutoff, None, input::CHUNK_CHARS)
+                .unwrap()
+                .unwrap()
+                .to_seq,
+            1
+        );
+    }
+
+    #[test]
+    fn child_activity_uses_real_time_for_quiet_and_recent_filters() {
+        let kb = TestKb::new();
+        let cfg = DigestConfig::default();
+        let file = kb.session("claude", "parent", "/p", None, "2026-09-01T00:00:00Z");
+        kb.chat(file, 6, "2026-09-01T00:00:00Z");
+        kb.session(
+            "claude",
+            "lexically_later",
+            "/p",
+            Some("parent"),
+            "2026-10-18T00:00:00+08:00",
+        );
+        kb.session(
+            "claude",
+            "actually_later",
+            "/p",
+            Some("parent"),
+            "2026-10-17T20:55:00Z",
+        );
+        let rule = rules(&cfg, &kb.data, "2026-10-17T21:00:00Z", true);
+        assert!(
+            candidates(&kb.conn, &rule).unwrap().is_empty(),
+            "recent child still active"
+        );
+        let found = candidates(
+            &kb.conn,
+            &rules(&cfg, &kb.data, "2026-10-17T22:00:00Z", true),
+        )
+        .unwrap();
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].activity, utc("2026-10-17T20:55:00Z"));
     }
 
     #[test]

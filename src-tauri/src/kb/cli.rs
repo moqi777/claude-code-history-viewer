@@ -15,7 +15,7 @@ use super::sync::{self, KbEnv};
 const USAGE: &str = "usage: --kb-sync | --kb-reindex | --kb-backup | --kb-move-data <new dir> \
 | --kb-schedule install|uninstall|status|ensure | --kb-search \"<words>\" [options] \
 | --kb-show <source:session-id> [--around <seq>] [options] | --kb-skill-print claude|codex \
-| --kb-digest --auto|--all|--session <source:session-id>|--test \
+| --kb-digest --auto|--all|--session <source:session-id> [--once]|--test \
 | --kb-embed --auto|--all|--status|--test \
 | --kb-export <file.agentkb> [--overwrite] [--no-vectors] \
 | --kb-import <file.agentkb> [--inspect|--plan] [--no-sync] [--no-settings] [--adopt-settings]";
@@ -196,13 +196,24 @@ fn run_embed_command(args: &[String]) -> i32 {
     }
 }
 
-/// `--kb-digest --auto | --all | --session <source:id> | --test`.
+/// `--kb-digest --auto | --all | --session <source:id> [--once] | --test`.
 fn run_digest_command(args: &[String]) -> i32 {
     use super::digest::{self, DigestEnv, Scope, Trigger};
-    let flags = match parse_flags(args, &["session"], &["auto", "all", "test"]) {
+    let flags = match parse_flags(args, &["session"], &["auto", "all", "test", "once"]) {
         Ok(flags) => flags,
         Err(e) => return usage_error(&e),
     };
+    if flags.switches.contains("once")
+        && (!flags.values.contains_key("session")
+            || flags
+                .switches
+                .iter()
+                .any(|s| matches!(s.as_str(), "auto" | "all" | "test")))
+    {
+        return usage_error(
+            "--once requires --session and cannot be combined with --auto, --all or --test",
+        );
+    }
     let config = match load_config() {
         Ok(config) => config,
         Err(code) => return code,
@@ -226,9 +237,16 @@ fn run_digest_command(args: &[String]) -> i32 {
         }
         (
             manual_trigger(),
-            Scope::Session {
-                source: source.to_string(),
-                session_id: session_id.to_string(),
+            if flags.switches.contains("once") {
+                Scope::SessionOnce {
+                    source: source.to_string(),
+                    session_id: session_id.to_string(),
+                }
+            } else {
+                Scope::Session {
+                    source: source.to_string(),
+                    session_id: session_id.to_string(),
+                }
             },
         )
     } else {
