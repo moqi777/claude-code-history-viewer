@@ -117,3 +117,53 @@ AssertionError: codex: no output at shell exit (GUI subsystem regression)
 
 - `D:\AgentKB-build\tmp\agentkb-p7-用户 with space-hw6bx597`
 - `D:\AgentKB-build\tmp\p7-console-repro-_aqzylhe`
+
+## 6. 2026-10-18 补充自主验收
+
+用户要求在 leader 离线期间先完成本机可独立执行的验证。本节测试基于 `372ea213` 的正式 release EXE；仅增加验收脚本和文档，没有修改产品代码，安装包沿用第 5 节的 SHA-256。
+
+### 6.1 真实模型下载、CPU 推理、口语化查询
+
+新增 Windows 专用、默认忽略的集成验收 `src-tauri/tests/p7_windows_semantic.rs`。只在明确传入正式 EXE、执行 `--ignored` 时下载模型，普通测试不会下载。所有文件放在 D 盘 `tempfile` 目录，中文及空格路径；三个会话分别描述电池耗电、番茄炒蛋、数据库主键冲突。
+
+```powershell
+$env:TEMP = 'D:\AgentKB-build\tmp'
+$env:TMP = $env:TEMP
+$env:CARGO_TARGET_DIR = 'D:\AgentKB-build\target'
+$env:AGENTKB_ACCEPTANCE_EXE = 'D:\AgentKB-build\target\release\AgentKB.exe'
+cargo test --manifest-path src-tauri/Cargo.toml -j 1 --features windows-cli --test p7_windows_semantic -- --ignored --nocapture
+```
+
+- 调用设置页使用的同一个 `model::download`，从 ModelScope 实际下载 **585,562,194 字节**，按内置长度和 SHA-256 校验两个模型文件，状态 `Missing → Ready`。下载部分直接调用库函数，没有声称点击过 GUI 下载按钮。
+- 正式 `AgentKB.exe --kb-embed --test` 返回 `ok:true`、`dim:1024`；一次测量 **2.64 秒**。包含中文/英文相关句相似度对照，不只是文件存在检查。
+- 正式 `--kb-embed --all` 生成 **6 个向量**，状态 idle、done=total=6。
+- 正式 `agentkb-cli.exe --kb-search "为什么充满了没多久就得接电源" --verbose` 返回 `semantic.state=used`，首条为电池问题，`match=semantic`、`hit_messages=0`、`semantic_score=0.738`，证明来自语义索引。
+- 假源文件逐字节不变。测试显式限定 `CCHV_TEST_HOME`、`AGENTKB_DATA_DIR` 和用户目录，避免继承外部数据目录覆盖。模型和临时数据由测试结束时删除。
+- 首次脚本把 JSON 字段名写成 Rust 内部字段 `match_kind`，而序列化后的名称是 `match`，导致断言失败；修正验收脚本后通过。首次运行产品已正确完成下载、推理与排名，未把脚本失败算通过。失败日志 `p7-extra-semantic.log`，通过日志 `p7-extra-semantic-pass.log`；最终版本日志 `D:\AgentKB-build\p7-extra-semantic-final.log`。
+
+这补齐了第 7 项的 Windows 后端真实模型链路；用户已安装应用中的设置页点击和真实数据搜索仍待确认。
+
+### 6.2 Windows 定时器自行触发，而非手工 /Run
+
+`scripts/p7_windows_smoke.py` 新增 `--timer`：沿用生产 XML 的 CalendarTrigger/Repetition，设置临时任务首次 15 秒后触发、每 60 秒重复；不调用 `schtasks /Run`。任务使用唯一 `AgentKB-P7-real-<UUID>` 名称，只执行显式携带临时环境的 wrapper。
+
+```powershell
+$env:TEMP = 'D:\AgentKB-build\tmp'
+$env:TMP = $env:TEMP
+python -u scripts/p7_windows_smoke.py D:\AgentKB-build\target\release\AgentKB.exe --timer
+```
+
+结果：两次自动触发退出码均为 **0**；第一次收集先退出，慢速 fake AI 在后台完成 **1 条笔记**；第二次收集后笔记仍为 **1 条**，没有重做已完成的当日轮次。两次语义后台任务均在模型缺失时进入 `paused_model`，没有偷偷下载。三种 shell 的搜索、两份模板的 show、错误退出码、源文件哈希检查一并通过。任务和本轮临时目录自动清理。
+
+日志：`D:\AgentKB-build\p7-extra-timer.log`；最终版本 `p7-extra-timer-final.log`。这是当前登录会话内的真实计时触发，不等同于隔天或重启验收。
+
+### 6.3 安装包、正式任务及剩余项目
+
+- 重新计算交付包 SHA-256，与第 5 节一致。核对 NSIS 安装/卸载路径逻辑：console 随包安装并卸载，更新流程保留应用数据；本轮没有运行安装器覆盖用户安装，不能算安装升级实测。当前 `D:\AgentKB` 仍是旧版，尚无 console 程序。
+- 只读检查正式任务：2026-10-18 **21:20:20** 最近运行返回 **0**；下一次 21:25:25；Interactive、Limited、StartWhenAvailable=true，不限制交流电，命令仍为 `D:\AgentKB\AgentKB.exe --kb-sync --scheduled`。
+- 本机只有一块 NVMe 磁盘，C/D/E 均为内部 NTFS 分区，没有 USB/移动硬盘，不能以 D/E 分区代替第 8 项。
+- 本轮未操作真实 Claude/Codex 记录、技能或凭据，未重启/注销电脑，未再次调用真实 AI 整理。
+
+待完成：leader/Mac 复核；安装新版并更新两份技能后的 GUI/代理验收；真实移动硬盘；隔天自动整理；重启登录后自动恢复。七项原始检查结果见第 4 节，本轮未改变产品实现，不重复全套构建及打包。新增 Rust 验收另跑 Clippy/fmt，提交仍使用正常检查钩子。
+
+最终版本实测：真实模型用例 **1 passed / 0 failed，41.17 秒**（模型测试 2.63 秒）；timer 用例通过，临时任务 `AgentKB-P7-real-6f084a15-9405-43fc-b0d9-2cbb5221cee2` 已删除；本轮语义模型目录、两轮 timer 目录均不存在，临时任务剩余 **0**。`cargo fmt --all -- --check`、新增用例的 `cargo clippy ... -- -D warnings`、`git diff --check` 均通过；Clippy 首次提示文档中的环境变量缺少反引号，修正后无警告。日志 `p7-extra-clippy-final.log`。C 盘剩余 **18.85 GiB**，所有新增构建产物在 D 盘。

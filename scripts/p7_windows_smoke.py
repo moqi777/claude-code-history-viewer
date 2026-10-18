@@ -1,15 +1,17 @@
 """Offline Windows release CLI check. All data and executables live in a temp home.
 
-Usage: python scripts/p7_windows_smoke.py path/to/AgentKB.exe [--scheduled]
+Usage: python scripts/p7_windows_smoke.py path/to/AgentKB.exe [--scheduled|--timer]
 Prints the exact rendered skill commands and complete UTF-8 JSON responses.
 The adjacent agentkb-cli.exe is required. --legacy-gui intentionally fails on
 template 5, proving the Codex/PowerShell early-exit regression. --keep retains
 only this run's temporary fixture for actual agent-tool tests.
 The optional check registers, runs and deletes a unique temporary scheduled task.
+--timer waits for two actual timer triggers (one minute apart), without /Run.
 Set AGENTKB_TEST_POWERSHELL to test another PowerShell executable (e.g. 5.1).
 """
 
 from contextlib import closing, nullcontext
+from datetime import datetime, timedelta
 import hashlib
 import json
 import os
@@ -82,7 +84,7 @@ def delayed_shell_search(args, env, db_path):
             unlock.join()
 
 
-def scheduled_check(root, exe, config, env, powershell):
+def scheduled_check(root, exe, config, env, powershell, timer=False):
     """Run real scheduled sync with a slow, offline fake AI; never the user's CLI."""
     repository = Path(__file__).resolve().parent.parent
     fake = root / "fake-ai"
@@ -107,7 +109,7 @@ def scheduled_check(root, exe, config, env, powershell):
     assert json.loads(probe_text)["ok"] is True
     print("NPM LAUNCHER DIGEST TEST: " + probe_text)
     (fake / "mode").write_text("slow", encoding="utf-8")
-    task_env = {key: env[key] for key in ["CCHV_TEST_HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA", "TEMP", "TMP"] if key in env}
+    task_env = {key: env[key] for key in ["CCHV_TEST_HOME", "AGENTKB_DATA_DIR", "USERPROFILE", "APPDATA", "LOCALAPPDATA", "TEMP", "TMP"] if key in env}
     task_env["FAKE_AI_DIR"] = str(fake)
     literal = lambda value: json.dumps(str(value), ensure_ascii=False)
     env_calls = "".join(f".env({literal(k)}, {literal(v)})" for k, v in task_env.items())
@@ -116,12 +118,15 @@ def scheduled_check(root, exe, config, env, powershell):
     wrapper = root / "scheduled-sync.rs"
     wrapper.write_text(f'''#![windows_subsystem = "windows"]
 fn main() {{
+    use std::io::Write;
     let log = std::fs::File::create({literal(root / "sync-output.json")}).unwrap();
     let mut command = std::process::Command::new({literal(exe)});
     command.args(["--kb-sync", "--scheduled"]){env_calls}
         .stdin(std::process::Stdio::null()).stdout(log.try_clone().unwrap()).stderr(log);
     let status = command.status().unwrap();
     std::fs::write({literal(root / "sync-exited")}, status.code().unwrap_or(-1).to_string()).unwrap();
+    let mut runs = std::fs::OpenOptions::new().create(true).append(true).open({literal(root / "sync-runs")}).unwrap();
+    writeln!(runs, "{{}}", status.code().unwrap_or(-1)).unwrap();
 }}
 ''', encoding="utf-8")
     runner = root / "scheduled-sync.exe"
@@ -132,10 +137,15 @@ fn main() {{
     name = "AgentKB-P7-real-" + str(uuid.uuid4())
     source = (repository / "src-tauri/src/kb/schedule.rs").read_text(encoding="utf-8")
     xml = re.search(r'r#"(<\?xml.*?</Task>\n)"#', source, re.S).group(1)
-    for value in [name, "600", escape(str(runner)), escape(str(root))]:
+    for value in [name, "60" if timer else "600", escape(str(runner)), escape(str(root))]:
         xml = xml.replace("{}", value, 1)
     xml = xml.replace("{user}", escape(user)).replace("--kb-sync --scheduled", "")
-    xml = xml.replace("<Enabled>true</Enabled>", "<Enabled>false</Enabled>")
+    if timer:
+        boundary = (datetime.now() + timedelta(seconds=15)).isoformat(timespec="seconds")
+        xml = xml.replace("2000-01-01T00:00:00", boundary)
+        xml = xml.replace("<LogonTrigger><Enabled>true</Enabled>", "<LogonTrigger><Enabled>false</Enabled>")
+    else:
+        xml = xml.replace("<Enabled>true</Enabled>", "<Enabled>false</Enabled>")
     definition = root / "task.xml"
     definition.write_text(xml, encoding="utf-16")
 
@@ -145,8 +155,11 @@ fn main() {{
 
     try:
         task("/Create", "/TN", name, "/XML", str(definition), "/F")
-        task("/Run", "/TN", name)
-        deadline = time.monotonic() + 90
+        if not timer:
+            task("/Run", "/TN", name)
+        else:
+            print("Waiting for two real timer triggers, starting " + boundary, flush=True)
+        deadline = time.monotonic() + (180 if timer else 90)
         while not (root / "sync-exited").exists() and time.monotonic() < deadline:
             time.sleep(0.2)
         assert (root / "sync-exited").read_text() == "0"
@@ -163,6 +176,19 @@ fn main() {{
             time.sleep(0.5)
         assert count == 1, "background digest did not finish after scheduled sync exited"
         print(f"Background digest completed after sync exit: notes={count}; fake AI only")
+        if timer:
+            while time.monotonic() < deadline:
+                runs = (root / "sync-runs").read_text().splitlines()
+                if len(runs) >= 2:
+                    break
+                time.sleep(0.5)
+            assert runs == ["0", "0"], f"timer did not complete two successful runs: {runs}"
+            # A second automatic collection must not digest a completed daily
+            # round again. Wait longer than the deliberately slow fake AI.
+            time.sleep(10)
+            with closing(sqlite3.connect(root / "AgentKB/kb.db")) as db:
+                assert db.execute("SELECT count(*) FROM notes").fetchone()[0] == 1
+            print("PASS: two real timer triggers exited 0; completed daily round was not duplicated")
         for path in sorted((root / "AgentKB/logs").glob("embed-*.log")):
             print("EMBED LOG: " + path.read_text(encoding="utf-8").strip())
         # Let normal child shutdown close SQLite/log handles before temp cleanup.
@@ -239,7 +265,8 @@ def main():
             "digest": {"enabled": False}, "semantic": {"enabled": False},
         }, ensure_ascii=False), encoding="utf-8")
         env = os.environ.copy()
-        env.update(CCHV_TEST_HOME=str(root), USERPROFILE=str(root), APPDATA=str(root / "AppData"),
+        env.update(CCHV_TEST_HOME=str(root), AGENTKB_DATA_DIR=str(root / "AgentKB"),
+                   USERPROFILE=str(root), APPDATA=str(root / "AppData"),
                    LOCALAPPDATA=str(root / "Local AppData"), MSYS_NO_PATHCONV="1")
         before = snapshot([claude, codex])
 
@@ -295,8 +322,8 @@ def main():
             print("PASS: both skill show commands; CLI errors return stderr + exit 2")
         assert snapshot([claude, codex]) == before, "Collection/search changed source fixtures"
         print("\nPASS: both shells returned identical complete UTF-8 JSON; 3 sessions; source hashes unchanged")
-        if "--scheduled" in sys.argv[2:]:
-            scheduled_check(root, exe, config, env, powershell)
+        if "--scheduled" in sys.argv[2:] or "--timer" in sys.argv[2:]:
+            scheduled_check(root, exe, config, env, powershell, timer="--timer" in sys.argv[2:])
             assert snapshot([claude, codex]) == before
         if keep:
             print("KEPT TEMP FIXTURE FOR LIVE AGENT TEST: " + str(root))
