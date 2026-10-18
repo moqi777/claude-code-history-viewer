@@ -2,11 +2,14 @@
 
 Usage: python scripts/p7_windows_smoke.py path/to/AgentKB.exe [--scheduled]
 Prints the exact rendered skill commands and complete UTF-8 JSON responses.
+The adjacent agentkb-cli.exe is required. --legacy-gui intentionally fails on
+template 5, proving the Codex/PowerShell early-exit regression. --keep retains
+only this run's temporary fixture for actual agent-tool tests.
 The optional check registers, runs and deletes a unique temporary scheduled task.
 Set AGENTKB_TEST_POWERSHELL to test another PowerShell executable (e.g. 5.1).
 """
 
-from contextlib import closing
+from contextlib import closing, nullcontext
 import hashlib
 import json
 import os
@@ -14,12 +17,69 @@ from pathlib import Path
 import re
 import shutil
 import sqlite3
+import struct
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import uuid
 from xml.sax.saxutils import escape
+
+
+def shell_output_at_exit(args, env):
+    """Codex observes the shell's exit, not EOF from every GUI grandchild.
+
+    subprocess.run(..., capture_output=True) waits for inherited output pipes to
+    close, hiding PowerShell's early exit for a standalone GUI command. Snapshot
+    the streams when the shell exits; drain late output only for child cleanup.
+    Console commands wait and deliver stdout/stderr before that boundary.
+    """
+    proc = subprocess.Popen(args, env=env, stdin=subprocess.DEVNULL,
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                            creationflags=subprocess.CREATE_NO_WINDOW)
+    buffers = [bytearray(), bytearray()]
+
+    def drain(pipe, buffer):
+        while chunk := os.read(pipe.fileno(), 65536):
+            buffer.extend(chunk)
+
+    readers = [threading.Thread(target=drain, args=(pipe, buffer), daemon=True)
+               for pipe, buffer in zip([proc.stdout, proc.stderr], buffers)]
+    for reader in readers:
+        reader.start()
+    try:
+        proc.wait(timeout=60)
+        # Match a bounded final drain, never wait for a GUI descendant's EOF.
+        for reader in readers:
+            reader.join(timeout=0.05)
+        stdout, stderr = [bytes(buffer) for buffer in buffers]
+        for reader in readers:
+            reader.join(timeout=15)
+        assert all(not reader.is_alive() for reader in readers), "shell child did not finish"
+        return subprocess.CompletedProcess(args, proc.returncode, stdout, stderr)
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+            proc.wait()
+        proc.stdout.close()
+        proc.stderr.close()
+
+
+def delayed_shell_search(args, env, db_path):
+    """A short fixture DB lock makes the GUI early-exit regression deterministic.
+
+    An actual search may be delayed by an index update. The console shell must
+    wait for the result; a GUI command returns from PowerShell before unlock.
+    """
+    with closing(sqlite3.connect(db_path, check_same_thread=False)) as db:
+        db.execute("BEGIN EXCLUSIVE")
+        unlock = threading.Timer(2, db.rollback)
+        unlock.start()
+        try:
+            return shell_output_at_exit(args, env)
+        finally:
+            unlock.join()
 
 
 def scheduled_check(root, exe, config, env, powershell):
@@ -125,6 +185,13 @@ def snapshot(roots):
             for root in roots for p in root.rglob("*") if p.is_file()}
 
 
+def pe_subsystem(path):
+    data = path.read_bytes()
+    pe = struct.unpack_from("<I", data, 0x3C)[0]
+    assert data[pe:pe + 4] == b"PE\0\0"
+    return struct.unpack_from("<H", data, pe + 24 + 68)[0]
+
+
 def main():
     sys.stdout.reconfigure(encoding="utf-8")
     sys.stderr.reconfigure(encoding="utf-8")
@@ -132,11 +199,20 @@ def main():
     bash = Path(os.environ.get("ProgramFiles", r"C:\Program Files")) / "Git/bin/bash.exe"
     powershell = os.environ.get("AGENTKB_TEST_POWERSHELL") or shutil.which("pwsh.exe")
     assert bash.is_file() and powershell, "Git Bash and PowerShell are required"
-    with tempfile.TemporaryDirectory(prefix="agentkb-p7-用户 with space-") as directory:
+    keep = "--keep" in sys.argv[2:]
+    legacy = "--legacy-gui" in sys.argv[2:]
+    sandbox = (nullcontext(tempfile.mkdtemp(prefix="agentkb-p7-用户 with space-")) if keep
+               else tempfile.TemporaryDirectory(prefix="agentkb-p7-用户 with space-"))
+    with sandbox as directory:
         root = Path(directory)
         exe = root / "Local AppData/Programs/AgentKB/AgentKB.exe"
         exe.parent.mkdir(parents=True)
         shutil.copy2(binary, exe)
+        console = exe.with_name("agentkb-cli.exe")
+        if not legacy:
+            shutil.copy2(binary.with_name("agentkb-cli.exe"), console)
+            assert pe_subsystem(exe) == 2, "desktop entry must remain GUI"
+            assert pe_subsystem(console) == 3, "skill entry must be console"
         claude, codex = root / ".claude", root / ".codex"
         project = str(root / "中文项目")
         for index in [1, 2]:
@@ -174,7 +250,8 @@ def main():
             return output
 
         print("CCHV_TEST_HOME=" + str(root))
-        assert "template 5" in run([str(exe), "--kb-skill-print", "codex"]), "use this revision's release build"
+        revision = 5 if legacy else 6
+        assert f"template {revision}" in run([str(exe), "--kb-skill-print", "codex"]), "use this revision's release build"
         print("SYNC " + run([str(exe), "--kb-sync"]))
         results = []
         for target in ["claude", "codex"]:
@@ -182,7 +259,10 @@ def main():
             command = re.search(r"2\. 搜索：`([^`]+)`", template).group(1).replace("<关键词>", "数据库")
             shell = [str(bash), "--noprofile", "--norc", "-c"] if target == "claude" else [powershell, "-NoProfile", "-NonInteractive", "-Command"]
             print(f"\n{target} COMMAND: {command}")
-            output = run([*shell, command])
+            result = delayed_shell_search([*shell, command], env, root / "AgentKB/kb.db")
+            output = result.stdout.decode("utf-8", errors="strict").strip()
+            assert result.returncode == 0, result.stderr.decode("utf-8", errors="replace")
+            assert output, f"{target}: no output at shell exit (GUI subsystem regression)"
             print(output)
             value = json.loads(output)
             if value["matched_sessions"] != 3:
@@ -193,11 +273,33 @@ def main():
             assert "数据库" in output and "中文" in output
             results.append(value)
         assert results[0] == results[1], "Shells must return the same complete JSON"
+        if not legacy:
+            # cmd also invokes the console program directly, without a wrapper
+            # script, pipe, Start-Process or output-file workaround.
+            command = f'"{os.environ["COMSPEC"]}" /d /s /c ""{console}" --kb-search "数据库""'
+            result = delayed_shell_search(command, env, root / "AgentKB/kb.db")
+            assert result.returncode == 0 and json.loads(result.stdout) == results[0]
+            print("PASS: cmd returned the same JSON")
+            sid = "claude:11111111-2222-3333-4444-000000000001"
+            for target in ["claude", "codex"]:
+                template = run([str(exe), "--kb-skill-print", target])
+                command = re.search(r'`([^`]+ --kb-show <source>:<session_id> --around <hits\[\].seq>)`', template).group(1)
+                command = command.replace("<source>:<session_id>", sid).replace("<hits[].seq>", "1")
+                shell = [str(bash), "--noprofile", "--norc", "-c"] if target == "claude" else [powershell, "-NoProfile", "-NonInteractive", "-Command"]
+                result = shell_output_at_exit([*shell, command], env)
+                assert result.returncode == 0 and "中文" in result.stdout.decode("utf-8")
+                json.loads(result.stdout)
+            invalid = subprocess.run([str(console), "--kb-unknown"], env=env, capture_output=True)
+            assert invalid.returncode == 2 and b"usage:" in invalid.stderr
+            assert not invalid.stdout
+            print("PASS: both skill show commands; CLI errors return stderr + exit 2")
         assert snapshot([claude, codex]) == before, "Collection/search changed source fixtures"
         print("\nPASS: both shells returned identical complete UTF-8 JSON; 3 sessions; source hashes unchanged")
         if "--scheduled" in sys.argv[2:]:
             scheduled_check(root, exe, config, env, powershell)
             assert snapshot([claude, codex]) == before
+        if keep:
+            print("KEPT TEMP FIXTURE FOR LIVE AGENT TEST: " + str(root))
 
 
 if __name__ == "__main__":

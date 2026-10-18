@@ -7,6 +7,7 @@ license = "MIT"
 repository = "https://github.com/jhlee0409/claude-code-history-viewer"
 edition = "2021"
 rust-version = "1.77.2"
+default-run = "claude-code-history-viewer"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -16,7 +17,15 @@ crate-type = ["cdylib", "rlib"]
 
 [features]
 default = []
+windows-cli = []
 webui-server = ["dep:axum", "dep:tower-http", "dep:tower", "dep:tokio", "dep:tokio-stream", "dep:rust-embed", "dep:mime_guess", "dep:argon2"]
+
+# Enabled only by tauri.windows.conf.json. Keep this outside src/bin: Tauri's
+# auto-discovery would otherwise bundle it on macOS even without the feature.
+[[bin]]
+name = "agentkb-cli"
+path = "windows/cli.rs"
+required-features = ["windows-cli"]
 
 [build-dependencies]
 tauri-build = { version = "2.6.2", features = [] }

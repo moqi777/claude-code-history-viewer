@@ -19,7 +19,19 @@ pub const SKILL_DIR_NAME: &str = "agentkb";
 const SKILL_FILE: &str = "SKILL.md";
 const MARKER_PREFIX: &str = "<!-- agentkb-skill v1";
 /// Template revision; bump when the text changes so installed copies show as stale.
+#[cfg(not(windows))]
 pub const TEMPLATE_VERSION: u32 = 5;
+#[cfg(windows)]
+pub const TEMPLATE_VERSION: u32 = 6;
+
+/// Windows shells must invoke the console companion, not the GUI subsystem
+/// executable. On other platforms the app remains the command-line entry.
+pub fn command_executable(exe: &Path) -> PathBuf {
+    #[cfg(windows)]
+    return exe.with_file_name("agentkb-cli.exe");
+    #[cfg(not(windows))]
+    exe.to_path_buf()
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -80,6 +92,10 @@ pub struct SkillStatus {
 /// Skill text for `target`, pointing at `exe`.
 pub fn render(target: Target, exe: &str) -> String {
     #[cfg(windows)]
+    let exe_path = command_executable(Path::new(exe));
+    #[cfg(windows)]
+    let exe = exe_path.to_string_lossy();
+    #[cfg(windows)]
     let command_exe = match target {
         Target::Claude => format!("'{}'", exe.replace('\\', "/").replace('\'', "'\"'\"'")),
         Target::Codex => format!("& '{}'", exe.replace('\'', "''")),
@@ -93,6 +109,10 @@ pub fn render(target: Target, exe: &str) -> String {
     };
     #[cfg(not(windows))]
     let shell_note = "";
+    #[cfg(windows)]
+    let missing_command_note = "- 命令不存在时：从安装目录打开 AgentKB，在设置里更新技能；若缺少 agentkb-cli.exe，请重新运行安装包修复安装。";
+    #[cfg(not(windows))]
+    let missing_command_note = "- 命令不存在时（App 被移动）：`mdfind \"kMDItemCFBundleIdentifier == 'io.github.moqi777.agentkb'\"` 找到 AgentKB.app，把上面路径换成它里面的 `Contents/MacOS/AgentKB`。";
     let allowed = match target {
         // Pre-approves exactly the two read-only commands; a pipe, `cd` or
         // anything else falls outside the prefix and asks again.
@@ -132,7 +152,7 @@ description: Search the user's past Claude Code and Codex conversations (backed 
 - 不要自己 grep 或读取 `~/.claude`、`~/.codex`、`~/AgentKB`，只用上面两个命令。\n\
 - 结果是过去的记录，可能已过时（看 `data_as_of` 和会话日期），据此动手前先到代码里核实。\n\
 - 搜索本身产生的内容不会被再次索引，不用担心循环。\n\
-- 命令不存在时（App 被移动）：`mdfind \"kMDItemCFBundleIdentifier == 'io.github.moqi777.agentkb'\"` 找到 AgentKB.app，把上面路径换成它里面的 `Contents/MacOS/AgentKB`。\n"
+{missing_command_note}\n"
     )
 }
 
@@ -207,7 +227,8 @@ pub fn status(target: Target, root: Option<&Path>, current_exe: &Path) -> SkillS
     } else if exe_exists == Some(false) {
         out.state = State::Stale;
         out.stale_reason = Some("missing_exe");
-    } else if parsed.exe.as_deref().map(Path::new) != Some(current_exe)
+    } else if parsed.exe.as_deref().map(Path::new)
+        != Some(command_executable(current_exe).as_path())
         && classify_exe(current_exe) == ExeStability::Stable
     {
         out.state = State::Stale;
@@ -244,6 +265,10 @@ pub fn install(target: Target, root: &Path, exe: &Path) -> Result<SkillStatus, S
              {instruction}",
             exe.display()
         ));
+    }
+    #[cfg(windows)]
+    if !command_executable(exe).is_file() {
+        return Err("agentkb-cli.exe is missing from the installed directory. Run the AgentKB installer again to repair the installation.".into());
     }
     let dir = skill_dir(root);
     ensure_regular_dir(&dir)?;
@@ -354,7 +379,10 @@ pub fn roots_for(config: &super::config::KbConfig) -> SourceRoots {
 mod tests {
     use super::*;
 
+    #[cfg(not(windows))]
     const EXE: &str = "/Applications/AgentKB.app/Contents/MacOS/AgentKB";
+    #[cfg(windows)]
+    const EXE: &str = "D:\\用户 with space\\AgentKB\\AgentKB.exe";
 
     fn snapshot(root: &Path) -> Vec<(String, u64)> {
         let mut files = fsutil::walk_files(root);
@@ -370,6 +398,7 @@ mod tests {
         let exe = local.join("Programs").join("AgentKB").join("AgentKB.exe");
         std::fs::create_dir_all(exe.parent().unwrap()).unwrap();
         std::fs::write(&exe, b"test executable").unwrap();
+        std::fs::write(command_executable(&exe), b"test console executable").unwrap();
         (exe, guard)
     }
 
@@ -391,7 +420,13 @@ mod tests {
         let claude = render(Target::Claude, EXE);
         let codex = render(Target::Codex, EXE);
         #[cfg(windows)]
-        let command_exe = format!("'{EXE}'");
+        let command_exe = format!(
+            "'{}'",
+            command_executable(Path::new(EXE))
+                .display()
+                .to_string()
+                .replace('\\', "/")
+        );
         #[cfg(not(windows))]
         let command_exe = EXE.to_string();
         assert!(claude.contains(&format!(
@@ -408,15 +443,26 @@ mod tests {
         );
         #[cfg(windows)]
         {
-            assert!(codex.contains(&format!("`& '{EXE}' --kb-search")));
+            assert!(codex.contains(&format!(
+                "`& '{}' --kb-search",
+                command_executable(Path::new(EXE)).display()
+            )));
             assert!(codex.contains("PowerShell"));
             assert!(claude.contains("Git Bash"));
+            assert!(!codex.contains("AgentKB.exe"));
+            assert!(!claude.contains("AgentKB.exe"));
         }
         for text in [&claude, &codex] {
             assert!(text.starts_with("---\nname: agentkb\ndescription: "));
             assert!(text.contains("不要加管道"));
+            #[cfg(not(windows))]
             assert!(text.contains("mdfind"));
-            assert!(text.contains(&format!("exe={EXE}")));
+            #[cfg(windows)]
+            assert!(!text.contains("mdfind"));
+            assert!(text.contains(&format!(
+                "exe={}",
+                command_executable(Path::new(EXE)).display()
+            )));
         }
     }
 
@@ -483,7 +529,7 @@ mod tests {
         // Simulate moving the installation, leaving a stale skill behind.
         #[cfg(windows)]
         {
-            std::fs::remove_file(&old_exe).unwrap();
+            std::fs::remove_file(command_executable(&old_exe)).unwrap();
         }
         #[cfg(windows)]
         let new_home = tempfile::tempdir().unwrap();
@@ -494,7 +540,10 @@ mod tests {
         let s = status(Target::Codex, Some(&root), &current_exe);
         assert_eq!(s.state, State::Stale);
         assert_eq!(s.stale_reason, Some("missing_exe"));
-        assert_eq!(s.installed_exe.as_deref(), old_exe.to_str());
+        assert_eq!(
+            s.installed_exe.as_deref(),
+            command_executable(&old_exe).to_str()
+        );
 
         // A copy written by another app version is still current: only the
         // template revision and the program path matter.
@@ -579,6 +628,36 @@ mod tests {
         assert_eq!(
             uninstall(Target::Claude, &root, &exe).unwrap().state,
             State::NotInstalled
+        );
+    }
+
+    #[cfg(windows)]
+    #[serial_test::serial]
+    #[test]
+    fn windows_gui_template_is_stale_and_missing_console_cannot_be_installed() {
+        let home = tempfile::tempdir().unwrap();
+        let root = home.path().join(".codex");
+        let (exe, _local) = test_exe(&home);
+        let file = skill_dir(&root).join(SKILL_FILE);
+        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+        let old = format!(
+            "{MARKER_PREFIX} · app {AGENTKB_VERSION} · template 5 · exe={} -->\n",
+            exe.display()
+        );
+        std::fs::write(&file, &old).unwrap();
+        let s = status(Target::Codex, Some(&root), &exe);
+        assert_eq!((s.state, s.stale_reason), (State::Stale, Some("version")));
+        std::fs::remove_file(command_executable(&exe)).unwrap();
+        assert!(install(Target::Codex, &root, &exe)
+            .unwrap_err()
+            .contains("agentkb-cli.exe"));
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), old);
+        std::fs::write(command_executable(&exe), b"restored console").unwrap();
+        let installed = install(Target::Codex, &root, &exe).unwrap();
+        assert_eq!(installed.state, State::Current);
+        assert_eq!(
+            installed.installed_exe.as_deref(),
+            command_executable(&exe).to_str()
         );
     }
 

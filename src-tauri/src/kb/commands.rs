@@ -916,7 +916,7 @@ pub async fn kb_skill_test() -> Res<skill::SkillTest> {
         let exe = statuses
             .iter()
             .find_map(|s| s.installed_exe.clone())
-            .map_or(current, PathBuf::from);
+            .map_or_else(|| skill::command_executable(&current), PathBuf::from);
         // Any word that is in the index: one from the newest session's title.
         let data = DataPaths::new(config.data_dir);
         let word = db::open_readonly(&data.db())?

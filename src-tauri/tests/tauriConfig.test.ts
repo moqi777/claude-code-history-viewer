@@ -240,6 +240,8 @@ describe('Tauri Configuration Tests', () => {
       const windows = JSON.parse(fs.readFileSync(path.join(__dirname, '../tauri.windows.conf.json'), 'utf-8'));
       expect(windows.bundle.targets).toEqual(['nsis']);
       expect(windows.bundle.windows.nsis.installMode).toBe('currentUser');
+      expect(windows.build.features).toEqual(['windows-cli']);
+      expect(config.build.features ?? []).not.toContain('windows-cli');
       const template = fs.readFileSync(path.join(__dirname, '..', windows.bundle.windows.nsis.template), 'utf-8');
       expect(template).toContain('StrCpy $INSTDIR "$LOCALAPPDATA\\Programs\\${PRODUCTNAME}"');
     });
