@@ -14,6 +14,28 @@ const STILL_ACTIVE: u32 = 259;
 const BELOW_NORMAL_PRIORITY_CLASS: u32 = 0x0000_4000;
 const IDLE_PRIORITY_CLASS: u32 = 0x0000_0040;
 
+/// NSIS records the actual directory, including a user-selected drive/path.
+pub fn installed_executable() -> Option<PathBuf> {
+    use winreg::{
+        enums::{HKEY_CURRENT_USER, KEY_READ, KEY_WOW64_64KEY},
+        RegKey,
+    };
+    let key = RegKey::predef(HKEY_CURRENT_USER)
+        .open_subkey_with_flags(
+            r"Software\Microsoft\Windows\CurrentVersion\Uninstall\AgentKB",
+            KEY_READ | KEY_WOW64_64KEY,
+        )
+        .ok()?;
+    let name: String = key.get_value("DisplayName").ok()?;
+    let binary: String = key.get_value("MainBinaryName").ok()?;
+    if name != "AgentKB" || binary != "AgentKB.exe" {
+        return None;
+    }
+    let location: String = key.get_value("InstallLocation").ok()?;
+    let dir = PathBuf::from(location.trim_matches('"'));
+    dir.is_absolute().then(|| dir.join(binary))
+}
+
 #[link(name = "secur32")]
 unsafe extern "system" {
     fn GetUserNameExW(format: u32, buffer: *mut u16, size: *mut u32) -> u8;

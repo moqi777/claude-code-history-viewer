@@ -239,8 +239,12 @@ pub fn codex_args(
 }
 
 /// `<cli> --version`, first line: recorded in each note. Not an AI call.
-pub fn cli_version(cli: &Path) -> String {
-    Command::new(cli)
+pub fn cli_version(engine: Engine, cli: &Path) -> String {
+    let Ok(mut command) = cli_command(engine, cli) else {
+        return "unknown".into();
+    };
+    crate::kb::platform::no_window(&mut command);
+    command
         .arg("--version")
         .stdin(Stdio::null())
         .stderr(Stdio::null())
@@ -253,6 +257,82 @@ pub fn cli_version(cli: &Path) -> String {
                 .map(str::to_string)
         })
         .unwrap_or_else(|| "unknown".to_string())
+}
+
+/// npm's Windows shim goes through cmd.exe, which cannot carry our multiline
+/// prompts safely. Use the package's declared bin directly, preserving argv.
+#[cfg_attr(not(windows), allow(clippy::unnecessary_wraps))]
+fn cli_command(engine: Engine, cli: &Path) -> Result<Command, Failure> {
+    #[cfg(windows)]
+    if cli
+        .extension()
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("cmd"))
+    {
+        let failure = |detail: &str| {
+            Failure::Config(format!(
+            "cannot resolve npm launcher {}: {detail}; reinstall the CLI or select its executable in Settings",
+            cli.display()
+        ))
+        };
+        let prefix = cli.parent().ok_or_else(|| failure("missing parent"))?;
+        let package = prefix.join("node_modules").join(match engine {
+            Engine::Claude => "@anthropic-ai/claude-code",
+            Engine::Codex => "@openai/codex",
+        });
+        let metadata: Value = std::fs::read(package.join("package.json"))
+            .ok()
+            .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+            .ok_or_else(|| failure("package.json is missing or invalid"))?;
+        let bin = metadata
+            .get("bin")
+            .and_then(|bin| {
+                bin.as_str()
+                    .or_else(|| bin.get(engine.as_str()).and_then(Value::as_str))
+            })
+            .ok_or_else(|| failure("package has no matching bin"))?;
+        let relative = Path::new(bin);
+        if relative.is_absolute()
+            || relative.components().any(|c| {
+                !matches!(
+                    c,
+                    std::path::Component::Normal(_) | std::path::Component::CurDir
+                )
+            })
+        {
+            return Err(failure("bin must be inside the npm package"));
+        }
+        let entry = package.join(relative);
+        if !entry.is_file() {
+            return Err(failure("package bin does not exist"));
+        }
+        if entry
+            .extension()
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("exe"))
+        {
+            return Ok(Command::new(entry));
+        }
+        if !entry.extension().is_some_and(|ext| {
+            ["js", "cjs", "mjs"]
+                .iter()
+                .any(|kind| ext.eq_ignore_ascii_case(kind))
+        }) {
+            return Err(failure("unsupported package bin type"));
+        }
+        let node = std::iter::once(prefix.join("node.exe"))
+            .chain(std::env::var_os("PATH").into_iter().flat_map(|path| {
+                std::env::split_paths(&path)
+                    .map(|dir| dir.join("node.exe"))
+                    .collect::<Vec<_>>()
+            }))
+            .find(|path| path.is_file())
+            .ok_or_else(|| failure("node.exe not found"))?;
+        let mut command = Command::new(node);
+        command.arg(entry);
+        return Ok(command);
+    }
+    #[cfg(not(windows))]
+    let _ = engine;
+    Ok(Command::new(cli))
 }
 
 // ---------------------------------------------------------------------------
@@ -512,7 +592,7 @@ fn spawn_and_wait(
     args: &[OsString],
     stdin_text: String,
 ) -> Result<Output, Failure> {
-    let mut command = Command::new(call.cli);
+    let mut command = cli_command(call.engine, call.cli)?;
     command
         .args(args)
         .current_dir(call.work_dir)
@@ -753,6 +833,119 @@ fn status_in(message: &str) -> Option<u64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(windows)]
+    #[test]
+    #[serial_test::serial]
+    fn npm_native_launcher_preserves_multiline_prompt_and_isolation_args() {
+        use crate::kb::digest::testutil::FakeAi;
+        let root = tempfile::tempdir().unwrap();
+        let prefix = root.path().join("用户 with space & (npm)");
+        let package = prefix.join("node_modules/@anthropic-ai/claude-code");
+        std::fs::create_dir_all(package.join("bin")).unwrap();
+        let fake = FakeAi::new(root.path());
+        std::fs::copy(&fake.script, package.join("bin/claude.exe")).unwrap();
+        std::fs::write(
+            package.join("package.json"),
+            r#"{"bin":{"claude":"bin/claude.exe"}}"#,
+        )
+        .unwrap();
+        let cli = prefix.join("claude.cmd");
+        std::fs::write(&cli, "@echo off\r\nexit /b 99\r\n").unwrap();
+        let args = claude_args("model & echo injected", SYSTEM_PROMPT);
+        // Regression: Rust rejects multiline batch arguments before launching.
+        assert_eq!(
+            Command::new(&cli).args(&args).output().unwrap_err().kind(),
+            std::io::ErrorKind::InvalidInput
+        );
+        let cancel = AtomicBool::new(false);
+        let call = Call {
+            engine: Engine::Claude,
+            cli: &cli,
+            model: "model & echo injected",
+            reasoning: "",
+            work_dir: root.path(),
+            system_prompt: SYSTEM_PROMPT,
+            input: "中文\n假会话",
+            timeout: Duration::from_secs(15),
+            cancel: &cancel,
+        };
+        assert!(run(&call).is_ok());
+        let actual: Vec<String> =
+            serde_json::from_slice(&std::fs::read(fake.dir.join("argv-1.json")).unwrap()).unwrap();
+        assert_eq!(actual.iter().map(OsString::from).collect::<Vec<_>>(), args);
+        assert_eq!(fake.input(1), call.input);
+        assert_eq!(cli_version(Engine::Claude, &cli), "9.9.9");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn npm_node_launchers_preserve_empty_json_unicode_and_shell_metacharacters() {
+        let root = tempfile::tempdir().unwrap();
+        let prefix = root.path().join("用户 with space & (npm)");
+        for (engine, package_name) in [
+            (Engine::Claude, "@anthropic-ai/claude-code"),
+            (Engine::Codex, "@openai/codex"),
+        ] {
+            let package = prefix.join("node_modules").join(package_name);
+            std::fs::create_dir_all(&package).unwrap();
+            std::fs::write(
+                package.join("package.json"),
+                serde_json::json!({"bin":{engine.as_str():"cli.cjs"}}).to_string(),
+            )
+            .unwrap();
+            std::fs::write(package.join("cli.cjs"), "let input=''; process.stdin.setEncoding('utf8'); process.stdin.on('data', c=>input+=c); process.stdin.on('end',()=>console.log(JSON.stringify({args:process.argv.slice(2),input}))); ").unwrap();
+            let cli = prefix.join(format!("{}.cmd", engine.as_str()));
+            std::fs::write(&cli, "@exit /b 99\r\n").unwrap();
+            let cancel = AtomicBool::new(false);
+            let call = Call {
+                engine,
+                cli: &cli,
+                model: "",
+                reasoning: "",
+                work_dir: root.path(),
+                system_prompt: "",
+                input: "中文\r\n假会话",
+                timeout: Duration::from_secs(15),
+                cancel: &cancel,
+            };
+            let mut args = match engine {
+                Engine::Claude => claude_args("", SYSTEM_PROMPT),
+                Engine::Codex => codex_args(
+                    "",
+                    "",
+                    root.path(),
+                    &root.path().join("schema.json"),
+                    &root.path().join("last.json"),
+                ),
+            };
+            args.extend(
+                [
+                    "",
+                    "中文\r\n第二行",
+                    "\" & echo injected > marker & \"",
+                    "%PATH% !VAR! ^ | < > ( )",
+                    "C:\\with space\\",
+                ]
+                .map(OsString::from),
+            );
+            let output = spawn_and_wait(&call, &args, call.input.into()).unwrap();
+            assert!(output.success, "{}", output.stderr);
+            let value: Value = serde_json::from_str(&output.stdout).unwrap();
+            assert_eq!(
+                value["args"],
+                serde_json::json!(args.iter().map(|a| a.to_str().unwrap()).collect::<Vec<_>>())
+            );
+            assert_eq!(value["input"], call.input);
+            assert!(!root.path().join("marker").exists());
+            std::fs::write(
+                package.join("package.json"),
+                r#"{"bin":"../../outside.js"}"#,
+            )
+            .unwrap();
+            assert!(cli_command(engine, &cli).is_err());
+        }
+    }
 
     fn has_pair(args: &[OsString], flag: &str, value: &str) -> bool {
         args.windows(2).any(|w| w[0] == flag && w[1] == value)

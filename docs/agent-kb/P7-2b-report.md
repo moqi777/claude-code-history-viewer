@@ -257,3 +257,75 @@ Finished 1 bundle at:
 - Mac `.app` 构建和 Mac 七项仍需 leader 在 Mac 上复核；本机没有伪造该结果。
 
 本次交付停在 P7 2b 返修检查点，推送目标仅为 `origin/agent-kb-win`。
+
+## 9. 用户真机截图反馈修复（2026-10-18）
+
+开始前已 fetch 并合并 `origin/agent-kb`，快进到 `3f9b0b90`（含 2b 通过结论和用户验收清单）。本节处理用户随后发来的两张错误截图。
+
+### 9.1 每日整理测试无法启动 claude.cmd
+
+- 错误：`cannot start C:\nvm4w\nodejs\claude.cmd: batch file arguments are invalid`。
+- 根因：Claude 参数里有多行 system prompt / JSON schema。Windows 下 Rust 启动批处理文件时会拒绝这些参数。以前的测试只执行假 EXE，没有覆盖 npm 的 `.cmd` 入口。
+- 只读检查本机 npm 包的 `package.json` 和 `claude.cmd`，确认其 `bin.claude` 是 `bin/claude.exe`。没有读取凭据，也没有启动真实 AI。
+- 修复：遇到 npm `.cmd` 时读取对应包的 `bin` 声明；EXE 直接启动，JS/CJS/MJS 用相邻或 PATH 中的 `node.exe` 启动。Claude 和 Codex 共用这一逻辑，版本查询也使用它。多行、空参数、JSON 均按普通 argv 原样传递，不构造 `cmd /c` 字符串。无效/缺失入口给出配置错误，非 Windows 仍直接执行原 CLI。
+- 回归覆盖：临时路径包含中文、空格、`&`、括号；先断言旧批处理路径出现 `InvalidInput`，再用实际整理调用验证 npm 原生入口；另外执行临时 Node.js 程序验证两个引擎的完整参数、中文 stdin、空串、引号、百分号等字符，拒绝包外 bin 路径。测试不调用真实 AI。
+
+### 9.2 已安装到 D 盘却被判断为临时位置
+
+- 截图中的实际路径是 `D:\Users\moqing\AppData\Local\Programs\AgentKB\AgentKB.exe`；当前 `%LOCALAPPDATA%` 和系统 LocalApplicationData 都是 C 盘。原判断只认可环境变量拼出的默认位置。
+- 只读查询 NSIS 的 AgentKB 卸载登记，确认 `InstallLocation` 正是截图中的 D 盘目录，`MainBinaryName=AgentKB.exe`。这不是需要用户搬回 C 盘才能使用的情况。
+- 修复：同时认可默认目录与当前用户 NSIS 登记的实际安装目录；检查登记的应用名、程序名、绝对目录及文件存在性。后台收集和 skill 安装使用同一个判断。未登记的复制件仍拒绝。
+- Windows skill 错误提示改为从实际安装位置打开，默认目录标为 `%LOCALAPPDATA%\Programs\AgentKB`；Mac 的 `/Applications` 提示保留在 Mac 分支。
+- 回归覆盖：临时自定义目录、未登记复制件、文件缺失及 Windows/Mac 提示分支。没有写真实注册表、任务计划或 skill 目录。
+
+### 9.3 磁盘清理中断记录（尚未交付新包）
+
+- npm 入口回归：3 项通过；前端 tsc、lint、i18n、build 通过，vitest 146 文件 / 1576 测试通过。
+- 用户要求立即清理 C 盘，已终止本轮 Rust 全量测试编译；全量 Rust 测试、clippy、新 NSIS 包尚未完成，本节修复尚未提交或推送。
+- 查明本仓库 `src-tauri/target/debug` 为 14.63 GiB，`release` 为 2.77 GiB。使用限定 manifest、target-dir 和 profile 的 `cargo clean` 清理，C 盘可用空间从 2.18 GiB 恢复至 19.62 GiB。源码和真实会话未删除。
+- 之前已验收的旧安装包已复制并核对 SHA-256，保存在 `D:\AgentKB-artifacts\AgentKB_1.32.0_x64-setup-before-screenshot-fixes.exe`。这是旧包，不含第 9 节修复。
+- 后续验证和打包必须使用 D 盘的构建及临时目录，并先检查剩余空间；本轮没有继续在 C 盘构建。
+
+### 9.4 在 D 盘恢复验证
+
+用户要求继续完成修复和新安装包。已将本机 Cargo target 固定到 `D:\AgentKB-build\target`，构建/测试的 `TEMP`、`TMP` 固定到 `D:\AgentKB-build\tmp`，并增加 D 盘至少 25 GiB 余量检查。本机配置在 Git 排除列表中，不影响 Mac。首次重建中观察到 Windows 分页文件随内存压力调整、C 盘空间短暂下降；测试结束时 C 盘恢复到约 19.6 GiB。后续构建默认并发降为 2，完整测试建议单任务编译。
+
+Windows 七项检查结果：
+
+| 检查 | 结果 |
+|---|---|
+| `pnpm.cmd tsc --build .` | 通过（本轮前端未修改，沿用清理前此次修复的检查结果） |
+| `pnpm.cmd vitest run` | 146 文件、1576 测试通过 |
+| `pnpm.cmd lint` | 通过 |
+| `pnpm.cmd run i18n:validate` | 5 种语言、1990 个键通过；原有 provider 名称提示不阻断 |
+| `cargo test --manifest-path src-tauri/Cargo.toml -j 4 -- --test-threads=1` | 库 1455 通过、0 失败、8 忽略；集成测试分别 6 / 5 / 4 / 3 通过，另有原有 6 项真实数据测试忽略；doc tests 通过 |
+| `cargo clippy --manifest-path src-tauri/Cargo.toml -j 4 --all-targets --all-features -- -D warnings` | 通过；修正了 skill 安装校验的 `single_match_else` 提示 |
+| `cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check` | 通过 |
+
+本次新增 3 项 Windows 回归测试全部通过：npm 原生入口保留完整 Claude 参数、两个引擎的 Node 入口保留完整 argv/stdin、自定义 NSIS 安装目录判断。库测试从 1452 增至 1455，忽略项未增加。测试全部使用临时目录和假 AI；没有使用真实会话或账号。
+
+前端 `pnpm.cmd build` 已通过。正式程序离线验证脚本另增加了通过临时 npm `.cmd` 入口执行 `--kb-digest --test`，以及使用同一入口执行后台整理的检查；任务子进程也显式继承 D 盘 TEMP/TMP。
+
+### 9.5 新包与正式 EXE 验证完成
+
+- `pnpm.cmd tauri build --config D:\AgentKB-build\package-config.json` 通过，release 编译耗时 13 分 53 秒。临时配置只清空 `beforeBuildCommand`，使用已通过的前端 build；NSIS 目标仍由 Windows 配置自动选择。
+- 原始产物：`D:\AgentKB-build\target\release\bundle\nsis\AgentKB_1.32.0_x64-setup.exe`。
+- 交付副本：**`D:\AgentKB-artifacts\AgentKB_1.32.0_x64-setup.exe`**，复制后已核对哈希相同。
+- 大小：**16,250,312 字节**。
+- SHA-256：**`2557C1A30FEB1318421158338D68AB66B901EA74474BA6E530F97204E82E95E3`**。
+- 生成的 NSIS 仍为 `currentUser`，默认 `%LOCALAPPDATA%\Programs\AgentKB`；新程序同时认可安装器登记的自定义安装位置。release 根目录无额外 DLL。版本号保持原约定不变。
+
+执行：`python scripts/p7_windows_smoke.py D:\AgentKB-build\target\release\AgentKB.exe --scheduled`，使用 D 盘临时目录、假会话和假 AI，退出码 0。关键输出：
+
+```text
+PASS: both shells returned identical complete UTF-8 JSON; 3 sessions; source hashes unchanged
+NPM LAUNCHER DIGEST TEST: {"ok":true,"kind":null,"message":null,"cli":"D:\\AgentKB-build\\tmp\\agentkb-p7-用户 with space-p1b81k32\\fake-ai\\claude.cmd","duration_ms":60,"input_tokens":115,"output_tokens":20,"model":"fake-model"}
+SCHEDULED SYNC: {"status":"ok","trigger":"schedule","scanned_files":3,"changed_files":0,"copied_bytes":0,"new_sessions":0,"deleted_sources":0,"moved_sources":0,"joined_twins":0,"rewritten_files":0,"duplicates_removed":0,"duplicate_bytes_freed":0,"errors":[],"unknown_types":{},"bad_lines":0,"longest_line_bytes":0,"duration_ms":9}
+Scheduled sync exited successfully before slow fake AI wrote a note
+Background digest completed after sync exit: notes=1; fake AI only
+Deleted temporary task: AgentKB-P7-real-889b1aa4-0cf1-40d0-bf0a-21526b775d1a
+```
+
+建索引进程返回 `paused_model / model not downloaded`，未下载模型。完整两种 shell JSON 和进程输出保存在本机 `D:\AgentKB-build\release-smoke.log`；全量 Rust / clippy / 打包日志分别在同目录的 `rust-tests.log`、`clippy.log`、`package.log`。
+
+本机旧 AgentKB 已按用户要求调用其卸载器卸载（退出码 0，卸载登记和程序文件均已移除），保留知识库数据和设置。新包未代用户安装，真实账号下的每日整理、后台收集和 skill 安装留待用户重新走安装流程确认。新修复的 Mac 实机检查仍由 leader 执行；本轮没有声称运行了 Mac 检查。推送目标仅为 `origin/agent-kb-win`。

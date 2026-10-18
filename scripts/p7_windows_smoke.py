@@ -29,14 +29,25 @@ def scheduled_check(root, exe, config, env, powershell):
     fake.mkdir()
     subprocess.run(["rustc", str(repository / "src-tauri/tests/fake_ai/fake-ai.rs"),
                     "-o", str(fake / "fake-ai.exe")], check=True, capture_output=True)
-    (fake / "mode").write_text("slow", encoding="utf-8")
+    package = fake / "node_modules/@anthropic-ai/claude-code"
+    (package / "bin").mkdir(parents=True)
+    shutil.copy2(fake / "fake-ai.exe", package / "bin/claude.exe")
+    (package / "package.json").write_text(json.dumps({"bin": {"claude": "bin/claude.exe"}}), encoding="utf-8")
+    launcher = fake / "claude.cmd"
+    launcher.write_text("@echo off\nexit /b 99\n", encoding="ascii")
     settings = json.loads(config.read_text(encoding="utf-8"))
-    settings["digest"] = {"enabled": True, "engine": "claude", "cli_path": str(fake / "fake-ai.exe"),
+    settings["digest"] = {"enabled": True, "engine": "claude", "cli_path": str(launcher),
                           "time": "00:00", "quiet_minutes": 0, "min_messages": 1,
                           "max_sessions_per_round": 1, "recent_days": 365}
     settings["semantic"] = {"enabled": True}
     config.write_text(json.dumps(settings, ensure_ascii=False), encoding="utf-8")
-    task_env = {key: env[key] for key in ["CCHV_TEST_HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA"]}
+    probe = subprocess.run([str(exe), "--kb-digest", "--test"],
+                           env={**env, "FAKE_AI_DIR": str(fake)}, capture_output=True, check=True)
+    probe_text = probe.stdout.decode("utf-8", errors="strict").strip()
+    assert json.loads(probe_text)["ok"] is True
+    print("NPM LAUNCHER DIGEST TEST: " + probe_text)
+    (fake / "mode").write_text("slow", encoding="utf-8")
+    task_env = {key: env[key] for key in ["CCHV_TEST_HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA", "TEMP", "TMP"] if key in env}
     task_env["FAKE_AI_DIR"] = str(fake)
     literal = lambda value: json.dumps(str(value), ensure_ascii=False)
     env_calls = "".join(f".env({literal(k)}, {literal(v)})" for k, v in task_env.items())

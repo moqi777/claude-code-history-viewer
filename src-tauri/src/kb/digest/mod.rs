@@ -477,7 +477,7 @@ impl Context {
 
     fn version(&mut self, cli: &std::path::Path) -> String {
         self.version
-            .get_or_insert_with(|| engine::cli_version(cli))
+            .get_or_insert_with(|| engine::cli_version(self.engine, cli))
             .clone()
     }
 }

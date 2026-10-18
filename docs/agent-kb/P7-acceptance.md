@@ -7,7 +7,9 @@
 
 ## 2. 用户在 Windows 上真机确认
 
-安装包：Windows 电脑上 `src-tauri\target\release\bundle\nsis\AgentKB_1.32.0_x64-setup.exe`，SHA-256 `B4B22F6BFB7AE5D2AAD65E132BFF6D2F1FF38B52CB2F197FA897C3037122672A`
+安装包（2026-10-18 真机反馈修复版）：Windows 电脑上 `D:\AgentKB-artifacts\AgentKB_1.32.0_x64-setup.exe`，SHA-256 `2557C1A30FEB1318421158338D68AB66B901EA74474BA6E530F97204E82E95E3`。
+
+已修复 npm `claude.cmd` 参数无效，以及自定义安装目录导致后台收集/skill 安装被拒绝的问题；七项检查与正式 EXE 离线验证见 `P7-2b-report.md` 第 9 节。旧版已按用户要求卸载，数据和设置保留，以下真机验收请使用此新包重试。
 
 | # | 项 | 结果 |
 |---|---|---|

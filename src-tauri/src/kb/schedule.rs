@@ -403,7 +403,7 @@ fn windows_install(config: &KbConfig) -> Result<ScheduleStatus, String> {
     let exe = std::env::current_exe().map_err(|e| format!("cannot locate AgentKB.exe: {e}"))?;
     if classify_exe(&exe) != ExeStability::Stable {
         return Err(format!(
-            "AgentKB must run from %LOCALAPPDATA%\\Programs\\AgentKB: {}",
+            "Open AgentKB from its installed location (the default is %LOCALAPPDATA%\\Programs\\AgentKB): {}",
             exe.display()
         ));
     }
@@ -526,18 +526,10 @@ pub enum ExeStability {
 pub fn classify_exe(exe: &Path) -> ExeStability {
     #[cfg(windows)]
     {
-        let Some(local) = std::env::var_os("LOCALAPPDATA") else {
-            return ExeStability::NotInApp;
-        };
-        let expected = PathBuf::from(local)
-            .join("Programs")
-            .join("AgentKB")
-            .join("AgentKB.exe");
-        if same_file(exe, &expected) && exe.is_file() {
-            ExeStability::Stable
-        } else {
-            ExeStability::NotInApp
-        }
+        let expected = std::env::var_os("LOCALAPPDATA")
+            .map(|local| PathBuf::from(local).join("Programs/AgentKB/AgentKB.exe"));
+        let installed = super::platform::installed_executable();
+        classify_windows_exe(exe, expected.as_deref(), installed.as_deref())
     }
     #[cfg(not(windows))]
     {
@@ -551,6 +543,24 @@ pub fn classify_exe(exe: &Path) -> ExeStability {
         } else {
             ExeStability::Stable
         }
+    }
+}
+
+#[cfg(windows)]
+fn classify_windows_exe(
+    exe: &Path,
+    default: Option<&Path>,
+    installed: Option<&Path>,
+) -> ExeStability {
+    if exe.is_file()
+        && [default, installed]
+            .into_iter()
+            .flatten()
+            .any(|path| same_file(exe, path))
+    {
+        ExeStability::Stable
+    } else {
+        ExeStability::NotInApp
     }
 }
 
@@ -1179,6 +1189,34 @@ fn main() {
             Some(v) => std::env::set_var("LOCALAPPDATA", v),
             None => std::env::remove_var("LOCALAPPDATA"),
         }
+    }
+
+    #[test]
+    fn custom_nsis_install_is_stable_but_unregistered_copies_are_not() {
+        let dir = tempfile::tempdir().unwrap();
+        let default = dir.path().join("local/Programs/AgentKB/AgentKB.exe");
+        let custom = dir.path().join("另一个盘 with space/AgentKB/AgentKB.exe");
+        std::fs::create_dir_all(custom.parent().unwrap()).unwrap();
+        std::fs::write(&custom, "test executable").unwrap();
+        assert_eq!(
+            classify_windows_exe(&custom, Some(&default), Some(&custom)),
+            ExeStability::Stable
+        );
+        assert_eq!(
+            classify_windows_exe(&custom, Some(&default), None),
+            ExeStability::NotInApp
+        );
+        let copied = dir.path().join("AgentKB.exe");
+        std::fs::copy(&custom, &copied).unwrap();
+        assert_eq!(
+            classify_windows_exe(&copied, Some(&default), Some(&custom)),
+            ExeStability::NotInApp
+        );
+        std::fs::remove_file(&custom).unwrap();
+        assert_eq!(
+            classify_windows_exe(&custom, Some(&default), Some(&custom)),
+            ExeStability::NotInApp
+        );
     }
 
     #[test]

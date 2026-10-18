@@ -233,15 +233,17 @@ fn ensure_regular_dir(dir: &Path) -> Result<(), String> {
 
 /// Write (or update) the skill. Only ever the one file inside `skills/agentkb/`.
 pub fn install(target: Target, root: &Path, exe: &Path) -> Result<SkillStatus, String> {
-    match classify_exe(exe) {
-        ExeStability::Stable => {}
-        _ => {
-            return Err(format!(
-                "AgentKB is running from {} — a temporary or unpackaged location. \
-                 Move the app to /Applications and open it from there before installing the skill.",
-                exe.display()
-            ))
-        }
+    if classify_exe(exe) != ExeStability::Stable {
+        #[cfg(windows)]
+        let instruction = "Open AgentKB from its installed location (the default is %LOCALAPPDATA%\\Programs\\AgentKB) before installing the skill.";
+        #[cfg(not(windows))]
+        let instruction =
+            "Move the app to /Applications and open it from there before installing the skill.";
+        return Err(format!(
+            "AgentKB is running from {} — a temporary or unpackaged location. \
+             {instruction}",
+            exe.display()
+        ));
     }
     let dir = skill_dir(root);
     ensure_regular_dir(&dir)?;
@@ -604,7 +606,13 @@ mod tests {
             Path::new("/Users/me/dev/target/debug/claude-code-history-viewer"),
         )
         .unwrap_err();
+        #[cfg(not(windows))]
         assert!(err.contains("/Applications"));
+        #[cfg(windows)]
+        {
+            assert!(err.contains("%LOCALAPPDATA%"));
+            assert!(!err.contains("/Applications"));
+        }
         assert!(!root.exists());
     }
 

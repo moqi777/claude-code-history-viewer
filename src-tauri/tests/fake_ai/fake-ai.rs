@@ -34,6 +34,7 @@ fn main() -> ExitCode {
     let n = text(dir.join("count")).trim().parse::<u64>().unwrap_or(0) + 1;
     let _ = fs::write(dir.join("count"), n.to_string());
     let _ = fs::write(dir.join(format!("args-{n}")), args.iter().map(|a| format!("{a}\n")).collect::<String>());
+    let _ = fs::write(dir.join(format!("argv-{n}.json")), format!("[{}]", args.iter().map(|a| json_escape(a)).collect::<Vec<_>>().join(",")));
     let _ = fs::write(dir.join(format!("cwd-{n}")), env::current_dir().unwrap_or_default().display().to_string());
     let mut input = String::new(); let _ = io::stdin().read_to_string(&mut input);
     let _ = fs::write(dir.join(format!("input-{n}")), &input);
