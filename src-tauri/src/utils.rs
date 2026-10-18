@@ -7,7 +7,8 @@ use std::path::{Component, Path, PathBuf};
 
 /// The user's home directory, sandboxed under `cfg(test)`.
 ///
-/// In a normal build this is exactly `dirs::home_dir()`.
+/// Normally this is `dirs::home_dir()`. Windows CLI smoke checks may explicitly
+/// set an absolute `CCHV_TEST_HOME` to isolate the release executable as well.
 ///
 /// # Why this indirection exists
 ///
@@ -33,6 +34,14 @@ use std::path::{Component, Path, PathBuf};
 /// branch is eight chances for one of them to drift.
 #[cfg(not(test))]
 pub(crate) fn home_dir() -> Option<PathBuf> {
+    // Explicit sandbox for Windows end-to-end CLI checks. Known-folder APIs
+    // ignore USERPROFILE/HOME; never fall back when a sandbox was requested.
+    #[cfg(windows)]
+    if let Some(root) = std::env::var_os("CCHV_TEST_HOME") {
+        let path = PathBuf::from(root);
+        assert!(path.is_absolute(), "CCHV_TEST_HOME must be absolute");
+        return Some(path);
+    }
     dirs::home_dir()
 }
 
@@ -55,6 +64,10 @@ pub(crate) fn home_dir() -> Option<PathBuf> {
 /// `$XDG_CONFIG_HOME` or `~/.config`, `%APPDATA%`).
 #[cfg(not(test))]
 pub(crate) fn config_dir() -> Option<PathBuf> {
+    #[cfg(windows)]
+    if std::env::var_os("CCHV_TEST_HOME").is_some() {
+        return home_dir().map(|home| home.join(".config"));
+    }
     dirs::config_dir()
 }
 

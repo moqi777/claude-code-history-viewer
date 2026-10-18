@@ -7,7 +7,8 @@
 //! from the mount point of whatever filesystem actually holds the path.
 //!
 //! The OS queries sit behind [`SystemQuery`] so the decision logic is tested
-//! with fakes; [`MacQuery`] shells out to `df` and `diskutil`.
+//! with fakes; [`SystemVolumes`] uses `df`/`diskutil` on macOS and Win32 APIs
+//! on Windows.
 
 use std::path::{Path, PathBuf};
 #[cfg(not(windows))]
@@ -206,18 +207,10 @@ pub fn list_external(query: &dyn SystemQuery) -> Vec<VolumeInfo> {
 // The real thing
 // ---------------------------------------------------------------------------
 
-#[cfg(not(windows))]
-pub struct MacQuery;
+pub struct SystemVolumes;
 
 #[cfg(windows)]
-pub type MacQuery = super::platform::WindowsQuery;
-
-#[cfg(windows)]
-#[allow(non_upper_case_globals)]
-pub const MacQuery: super::platform::WindowsQuery = super::platform::WindowsQuery;
-
-#[cfg(windows)]
-impl SystemQuery for super::platform::WindowsQuery {
+impl SystemQuery for SystemVolumes {
     fn mount_point(&self, path: &Path) -> Result<PathBuf, String> {
         super::platform::volume_info(path).map(|v| v.mount_point)
     }
@@ -314,7 +307,7 @@ pub fn parse_diskutil_info(mount: &Path, plist_bytes: &[u8]) -> Result<VolumeInf
 }
 
 #[cfg(not(windows))]
-impl SystemQuery for MacQuery {
+impl SystemQuery for SystemVolumes {
     fn mount_point(&self, path: &Path) -> Result<PathBuf, String> {
         let out = run("df", &["-P", &path.to_string_lossy()])?;
         parse_df_mount_point(&String::from_utf8_lossy(&out))

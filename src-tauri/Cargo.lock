@@ -842,6 +842,7 @@ dependencies = [
  "plist",
  "pretty_assertions",
  "proptest",
+ "quick-xml",
  "rayon",
  "regex",
  "rstest",

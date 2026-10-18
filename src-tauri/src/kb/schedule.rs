@@ -1,6 +1,6 @@
 //! The scheduled collection task: a launchd user agent that runs
 //! `<this executable> --kb-sync` every N seconds and once at login, whether or
-//! not the app window is open. Windows Task Scheduler support comes later.
+//! not the app window is open. Windows uses a per-user Task Scheduler task.
 
 use std::path::{Path, PathBuf};
 
@@ -244,7 +244,7 @@ fn run_schtasks(args: &[&str]) -> Result<std::process::Output, String> {
 }
 
 #[cfg(windows)]
-fn windows_task_xml(exe: &Path, interval_secs: u64) -> String {
+fn windows_task_xml(exe: &Path, interval_secs: u64, user: &str) -> String {
     let esc = |s: &str| {
         s.replace('&', "&amp;")
             .replace('<', "&lt;")
@@ -258,19 +258,20 @@ fn windows_task_xml(exe: &Path, interval_secs: u64) -> String {
         .to_string();
     let exe = esc(&exe.display().to_string());
     let work = esc(&work_dir);
-    let interval = interval_secs.max(60);
+    let interval = interval_secs.clamp(60, 86_400);
+    let user = esc(user);
     format!(
-        r#"<?xml version="1.0" encoding="UTF-8"?>
+        r#"<?xml version="1.0" encoding="UTF-16"?>
 <Task version="1.4" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
   <RegistrationInfo><URI>\{}</URI></RegistrationInfo>
   <Triggers>
-    <LogonTrigger><Enabled>true</Enabled></LogonTrigger>
+    <LogonTrigger><Enabled>true</Enabled><UserId>{user}</UserId></LogonTrigger>
     <CalendarTrigger><StartBoundary>2000-01-01T00:00:00</StartBoundary><Enabled>true</Enabled>
       <ScheduleByDay><DaysInterval>1</DaysInterval></ScheduleByDay>
-      <Repetition><Interval>PT{}S</Interval><StopAtDurationEnd>false</StopAtDurationEnd></Repetition>
+      <Repetition><Interval>PT{}S</Interval><Duration>P1D</Duration><StopAtDurationEnd>false</StopAtDurationEnd></Repetition>
     </CalendarTrigger>
   </Triggers>
-  <Principals><Principal id="Author"><LogonType>InteractiveToken</LogonType><RunLevel>LeastPrivilege</RunLevel></Principal></Principals>
+  <Principals><Principal id="Author"><UserId>{user}</UserId><LogonType>InteractiveToken</LogonType><RunLevel>LeastPrivilege</RunLevel></Principal></Principals>
   <Settings><MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy><DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries><StopIfGoingOnBatteries>false</StopIfGoingOnBatteries><StartWhenAvailable>true</StartWhenAvailable><ExecutionTimeLimit>PT0S</ExecutionTimeLimit></Settings>
   <Actions Context="Author"><Exec><Command>{}</Command><Arguments>--kb-sync --scheduled</Arguments><WorkingDirectory>{}</WorkingDirectory></Exec></Actions>
 </Task>
@@ -283,22 +284,117 @@ fn windows_task_xml(exe: &Path, interval_secs: u64) -> String {
 }
 
 #[cfg(windows)]
+fn utf16_xml(xml: &str) -> Vec<u8> {
+    std::iter::once(0xFEFFu16)
+        .chain(xml.encode_utf16())
+        .flat_map(u16::to_le_bytes)
+        .collect()
+}
+
+#[cfg(windows)]
+fn decode_task_xml(bytes: &[u8]) -> Result<String, String> {
+    if bytes.starts_with(&[0xFF, 0xFE]) || bytes.starts_with(&[b'<', 0]) {
+        let bytes = bytes.strip_prefix(&[0xFF, 0xFE]).unwrap_or(bytes);
+        if bytes.len() % 2 != 0 {
+            return Err("invalid UTF-16 task XML".into());
+        }
+        String::from_utf16(
+            &bytes
+                .chunks_exact(2)
+                .map(|c| u16::from_le_bytes([c[0], c[1]]))
+                .collect::<Vec<_>>(),
+        )
+        .map_err(|e| e.to_string())
+    } else {
+        // schtasks /Query can emit the console code page even though the
+        // document declares UTF-16. Decode the actual bytes, not that header.
+        Ok(super::platform::console_text(bytes))
+    }
+}
+
+#[cfg(windows)]
+fn parse_task_xml(xml: &str) -> Result<InstalledPlist, String> {
+    use quick_xml::{events::Event, Reader};
+    let mut reader = Reader::from_str(xml);
+    let mut installed = InstalledPlist {
+        program: None,
+        interval_secs: None,
+    };
+    loop {
+        match reader.read_event().map_err(|e| e.to_string())? {
+            Event::Start(e) if e.local_name().as_ref() == b"Command" => {
+                let text = reader.read_text(e.name()).map_err(|e| e.to_string())?;
+                installed.program = Some(PathBuf::from(
+                    quick_xml::escape::unescape(&text)
+                        .map_err(|e| e.to_string())?
+                        .as_ref(),
+                ));
+            }
+            Event::Start(e) if e.local_name().as_ref() == b"Interval" => {
+                let text = reader.read_text(e.name()).map_err(|e| e.to_string())?;
+                installed.interval_secs = parse_interval(&text);
+            }
+            Event::Eof => break,
+            _ => {}
+        }
+    }
+    Ok(installed)
+}
+
+#[cfg(windows)]
+fn parse_interval(text: &str) -> Option<u64> {
+    if let Some(days) = text.strip_prefix('P').and_then(|s| s.strip_suffix('D')) {
+        return days
+            .parse::<u64>()
+            .ok()?
+            .checked_mul(86_400)
+            .filter(|n| *n > 0);
+    }
+    let mut total = 0u64;
+    let mut digits = String::new();
+    for c in text.strip_prefix("PT")?.chars() {
+        if c.is_ascii_digit() {
+            digits.push(c);
+        } else {
+            let multiplier = match c {
+                'H' => 3600,
+                'M' => 60,
+                'S' => 1,
+                _ => return None,
+            };
+            total = total.checked_add(digits.parse::<u64>().ok()?.checked_mul(multiplier)?)?;
+            digits.clear();
+        }
+    }
+    (digits.is_empty() && total > 0).then_some(total)
+}
+
+#[cfg(windows)]
 fn windows_status() -> Result<ScheduleStatus, String> {
-    let output = run_schtasks(&["/Query", "/TN", windows_task_name(), "/FO", "LIST"])?;
+    windows_status_named(windows_task_name())
+}
+
+#[cfg(windows)]
+fn windows_status_named(name: &str) -> Result<ScheduleStatus, String> {
+    let output = run_schtasks(&["/Query", "/TN", name, "/XML"])?;
     let installed = output.status.success();
+    let definition = if installed {
+        Some(parse_task_xml(&decode_task_xml(&output.stdout)?)?)
+    } else {
+        None
+    };
+    let program = definition.as_ref().and_then(|d| d.program.as_ref());
     Ok(ScheduleStatus {
         supported: true,
-        label: LAUNCHD_LABEL.into(),
-        plist_path: windows_task_name().into(),
+        label: name.into(),
+        plist_path: name.into(),
         installed,
         loaded: installed,
-        state: installed.then_some("ready".into()),
-        program: None,
-        plist_program: None,
-        program_exists: None,
-        interval_secs: None,
-        last_exit_code: None,
-        runs: None,
+        program: program.map(|p| p.display().to_string()),
+        plist_program: program.map(|p| p.display().to_string()),
+        program_exists: program.map(|p| p.is_file()),
+        interval_secs: definition.and_then(|d| d.interval_secs),
+        ..ScheduleStatus::default()
     })
 }
 
@@ -311,38 +407,63 @@ fn windows_install(config: &KbConfig) -> Result<ScheduleStatus, String> {
             exe.display()
         ));
     }
-    let temp = tempfile::Builder::new()
-        .prefix("agentkb-task-")
-        .suffix(".xml")
-        .tempfile()
-        .map_err(|e| format!("cannot create task definition: {e}"))?;
-    std::fs::write(
-        temp.path(),
-        windows_task_xml(&exe, config.interval_secs).as_bytes(),
-    )
-    .map_err(|e| format!("cannot write task definition: {e}"))?;
-    let output = run_schtasks(&[
-        "/Create",
-        "/TN",
+    windows_register(
         windows_task_name(),
-        "/XML",
-        &temp.path().to_string_lossy(),
-        "/F",
-    ])?;
-    if !output.status.success() {
-        return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
-    }
+        &windows_task_xml(
+            &exe,
+            config.interval_secs,
+            &super::platform::current_user()?,
+        ),
+    )?;
     windows_status()
 }
 
 #[cfg(windows)]
-fn windows_uninstall() -> Result<ScheduleStatus, String> {
-    let output = run_schtasks(&["/Delete", "/TN", windows_task_name(), "/F"])?;
-    if !output.status.success() && !String::from_utf8_lossy(&output.stderr).contains("cannot find")
-    {
-        return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
+fn windows_register(name: &str, xml: &str) -> Result<(), String> {
+    let temp = tempfile::Builder::new()
+        .prefix("agentkb-task-")
+        .suffix(".xml")
+        .tempfile()
+        .map_err(|e| format!("cannot create task definition: {e}"))?
+        .into_temp_path();
+    // schtasks opens its input exclusively: keep the cleanup guard, but close
+    // NamedTempFile's handle before asking the scheduler to read it.
+    std::fs::write(&temp, utf16_xml(xml))
+        .map_err(|e| format!("cannot write task definition: {e}"))?;
+    let output = run_schtasks(&[
+        "/Create",
+        "/TN",
+        name,
+        "/XML",
+        &temp.to_string_lossy(),
+        "/F",
+    ])?;
+    if !output.status.success() {
+        return Err(super::platform::console_text(&output.stderr)
+            .trim()
+            .to_string());
     }
-    windows_status()
+    Ok(())
+}
+
+#[cfg(windows)]
+fn windows_uninstall() -> Result<ScheduleStatus, String> {
+    windows_uninstall_named(windows_task_name())
+}
+
+#[cfg(windows)]
+fn windows_uninstall_named(name: &str) -> Result<ScheduleStatus, String> {
+    let status = windows_status_named(name)?;
+    if !status.installed {
+        return Ok(status);
+    }
+    let output = run_schtasks(&["/Delete", "/TN", name, "/F"])?;
+    if !output.status.success() {
+        return Err(super::platform::console_text(&output.stderr)
+            .trim()
+            .to_string());
+    }
+    windows_status_named(name)
 }
 
 #[cfg(windows)]
@@ -350,20 +471,25 @@ fn windows_ensure(config: &KbConfig) -> Result<Repair, String> {
     if !config.schedule_enabled {
         return Ok(Repair::NotNeeded);
     }
-    let status = windows_status()?;
-    if status.installed {
-        Ok(Repair::NotNeeded)
-    } else {
-        windows_install(config)?;
-        Ok(Repair::Repaired {
-            from: None,
-            to: std::env::current_exe()
-                .map_err(|e| e.to_string())?
-                .display()
-                .to_string(),
-            reason: "the task was not installed".into(),
-        })
+    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    let stability = classify_exe(&exe);
+    if stability != ExeStability::Stable {
+        return Ok(Repair::Skipped { stability });
     }
+    let status = windows_status()?;
+    let installed = status.installed.then(|| InstalledPlist {
+        program: status.program.as_ref().map(PathBuf::from),
+        interval_secs: status.interval_secs,
+    });
+    let Some(reason) = definition_difference(installed.as_ref(), &exe, config.interval_secs) else {
+        return Ok(Repair::NotNeeded);
+    };
+    windows_install(config)?;
+    Ok(Repair::Repaired {
+        from: status.program,
+        to: exe.display().to_string(),
+        reason: reason.into(),
+    })
 }
 
 /// `\tkey = value` lines from `launchctl print`.
@@ -474,6 +600,24 @@ fn same_file(a: &Path, b: &Path) -> bool {
     }
 }
 
+/// Shared by launchd and Task Scheduler; absence, path and interval all matter.
+fn definition_difference(
+    installed: Option<&InstalledPlist>,
+    exe: &Path,
+    interval: u64,
+) -> Option<&'static str> {
+    match installed {
+        None => Some("the task was not installed"),
+        Some(i) if i.program.as_deref().map_or(true, |p| !same_file(p, exe)) => {
+            Some("the app moved")
+        }
+        Some(i) if i.interval_secs != Some(interval) => {
+            Some("the interval differs from the settings")
+        }
+        Some(_) => None,
+    }
+}
+
 impl Scheduler<'_> {
     /// Reinstall the task if it no longer matches this app and the settings.
     /// Safe to call on every start: it only acts when something differs.
@@ -486,23 +630,14 @@ impl Scheduler<'_> {
             return Ok(Repair::Skipped { stability });
         }
         let installed = read_installed(&self.plist_path());
-        let reason = match &installed {
-            None => Some("the task was not installed"),
-            Some(i)
-                if i.program
-                    .as_deref()
-                    .map_or(true, |p| !same_file(p, &self.exe)) =>
-            {
-                Some("the app moved")
-            }
-            Some(i) if i.interval_secs != Some(config.interval_secs) => {
-                Some("the interval differs from the settings")
-            }
-            Some(_) if self.launchctl.print(&self.target())?.is_none() => {
-                Some("the task was not loaded")
-            }
-            Some(_) => None,
-        };
+        let reason =
+            match definition_difference(installed.as_ref(), &self.exe, config.interval_secs) {
+                Some(reason) => Some(reason),
+                None if self.launchctl.print(&self.target())?.is_none() => {
+                    Some("the task was not loaded")
+                }
+                None => None,
+            };
         let Some(reason) = reason else {
             return Ok(Repair::NotNeeded);
         };
@@ -631,7 +766,7 @@ pub fn unsupported_status() -> ScheduleStatus {
     }
 }
 
-#[cfg(all(test, not(windows)))]
+#[cfg(test)]
 mod tests {
     use super::*;
     use std::cell::RefCell;
@@ -767,8 +902,10 @@ mod tests {
     }
 
     const APP_A: &str = "/Applications/AgentKB.app/Contents/MacOS/AgentKB";
+    #[cfg(not(windows))]
     const APP_B: &str = "/Users/x/Apps/AgentKB.app/Contents/MacOS/AgentKB";
 
+    #[cfg(not(windows))]
     #[test]
     fn exe_stability_classification() {
         assert_eq!(classify_exe(Path::new(APP_A)), ExeStability::Stable);
@@ -790,6 +927,7 @@ mod tests {
         );
     }
 
+    #[cfg(not(windows))]
     #[test]
     fn a_moved_app_gets_the_task_repointed_and_the_old_path_is_reported() {
         let dir = tempfile::tempdir().unwrap();
@@ -842,6 +980,7 @@ mod tests {
         assert_eq!(still.program, Some(PathBuf::from(APP_A)));
     }
 
+    #[cfg(not(windows))]
     #[test]
     fn missing_plist_changed_interval_or_unloaded_task_are_repaired_and_disabled_is_left_alone() {
         let dir = tempfile::tempdir().unwrap();
@@ -897,11 +1036,197 @@ mod tests {
 mod windows_tests {
     use super::*;
 
+    /// Only launched by the temporary scheduled task in the explicit OS check.
+    #[test]
+    #[ignore = "helper for temporary_task_keeps_background_children_alive"]
+    fn scheduled_child_probe() {
+        let root = std::env::current_dir().unwrap();
+        assert!(root.join("p7-probe-marker").is_file());
+        let exe = root.join("worker.exe");
+        let data = crate::kb::paths::DataPaths::new(root.clone());
+        crate::kb::digest::spawn_background(&exe, &data, &["digest"], &[]).unwrap();
+        crate::kb::semantic::build::spawn_background(&exe, &data, &["embed"]).unwrap();
+        std::fs::write(root.join("parent.pid"), std::process::id().to_string()).unwrap();
+    }
+
+    #[test]
+    #[ignore = "registers and deletes a temporary Windows task; run explicitly"]
+    fn temporary_task_keeps_background_children_alive() {
+        let root = tempfile::Builder::new()
+            .prefix("agentkb-用户 with space-")
+            .tempdir()
+            .unwrap();
+        std::fs::write(root.path().join("p7-probe-marker"), "test").unwrap();
+        let source = root.path().join("worker.rs");
+        std::fs::write(
+            &source,
+            r#"
+fn main() {
+    let root = std::env::current_exe().unwrap().parent().unwrap().to_path_buf();
+    let kind = std::env::args().nth(1).unwrap();
+    std::fs::write(root.join(format!("{kind}.started")), std::process::id().to_string()).unwrap();
+    std::thread::sleep(std::time::Duration::from_secs(8));
+    std::fs::write(root.join(format!("{kind}.done")), "completed after parent exit").unwrap();
+}
+"#,
+        )
+        .unwrap();
+        let compiled = std::process::Command::new("rustc")
+            .arg(&source)
+            .arg("-o")
+            .arg(root.path().join("worker.exe"))
+            .output()
+            .unwrap();
+        assert!(
+            compiled.status.success(),
+            "{}",
+            String::from_utf8_lossy(&compiled.stderr)
+        );
+        let name = format!("AgentKB-P7-probe-{}", uuid::Uuid::new_v4());
+        struct TaskCleanup(String);
+        impl Drop for TaskCleanup {
+            fn drop(&mut self) {
+                // Cleanup must still work if querying/parsing is what failed.
+                let _ = run_schtasks(&["/Delete", "/TN", &self.0, "/F"]);
+            }
+        }
+        let _cleanup = TaskCleanup(name.clone());
+        println!("temporary task: {name}");
+        assert!(!windows_uninstall_named(&name).unwrap().installed);
+        let exe = std::env::current_exe().unwrap();
+        let mut xml = windows_task_xml(&exe, 600, &crate::kb::platform::current_user().unwrap());
+        xml = xml
+            .replace(
+                &format!("<URI>\\{LAUNCHD_LABEL}</URI>"),
+                &format!("<URI>\\{name}</URI>"),
+            )
+            .replace(
+                "--kb-sync --scheduled",
+                "--exact kb::schedule::windows_tests::scheduled_child_probe --ignored --nocapture",
+            )
+            .replace(
+                &format!(
+                    "<WorkingDirectory>{}</WorkingDirectory>",
+                    xml_escape(&exe.parent().unwrap().display().to_string())
+                ),
+                &format!(
+                    "<WorkingDirectory>{}</WorkingDirectory>",
+                    xml_escape(&root.path().display().to_string())
+                ),
+            );
+        xml = xml.replace("<Enabled>true</Enabled>", "<Enabled>false</Enabled>");
+        windows_register(&name, &xml).unwrap();
+        let status = windows_status_named(&name).unwrap();
+        assert_eq!(status.program.as_deref(), exe.to_str());
+        assert_eq!(status.program_exists, Some(true));
+        assert_eq!(status.interval_secs, Some(600));
+        windows_register(&name, &xml.replace("PT600S", "PT300S")).unwrap();
+        assert_eq!(
+            windows_status_named(&name).unwrap().interval_secs,
+            Some(300)
+        );
+        assert!(run_schtasks(&["/Run", "/TN", &name])
+            .unwrap()
+            .status
+            .success());
+        let started = std::time::Instant::now();
+        while !root.path().join("parent.pid").is_file() && started.elapsed().as_secs() < 30 {
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+        let pid: u32 = std::fs::read_to_string(root.path().join("parent.pid"))
+            .unwrap()
+            .parse()
+            .unwrap();
+        while crate::kb::platform::process_alive(pid) && started.elapsed().as_secs() < 30 {
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+        assert!(
+            !crate::kb::platform::process_alive(pid),
+            "scheduled parent must exit"
+        );
+        assert!(!root.path().join("digest.done").exists());
+        assert!(!root.path().join("embed.done").exists());
+        println!("task={name}; parent pid={pid} exited before either worker completed");
+        for kind in ["digest", "embed"] {
+            while !root.path().join(format!("{kind}.done")).exists()
+                && started.elapsed().as_secs() < 40
+            {
+                std::thread::sleep(std::time::Duration::from_millis(100));
+            }
+            let result = std::fs::read_to_string(root.path().join(format!("{kind}.done"))).unwrap();
+            println!("{kind}: {result}");
+        }
+        assert!(!windows_uninstall_named(&name).unwrap().installed);
+        assert!(!windows_uninstall_named(&name).unwrap().installed);
+        println!("task deleted; repeated uninstall returned installed=false");
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn installed_location_is_required_and_must_exist() {
+        let dir = tempfile::tempdir().unwrap();
+        let previous = std::env::var_os("LOCALAPPDATA");
+        std::env::set_var("LOCALAPPDATA", dir.path());
+        let exe = dir.path().join("Programs/AgentKB/AgentKB.exe");
+        assert_eq!(classify_exe(&exe), ExeStability::NotInApp);
+        std::fs::create_dir_all(exe.parent().unwrap()).unwrap();
+        std::fs::write(&exe, "test").unwrap();
+        assert_eq!(classify_exe(&exe), ExeStability::Stable);
+        let dev = dir.path().join("AgentKB.exe");
+        std::fs::write(&dev, "test").unwrap();
+        assert_eq!(classify_exe(&dev), ExeStability::NotInApp);
+        match previous {
+            Some(v) => std::env::set_var("LOCALAPPDATA", v),
+            None => std::env::remove_var("LOCALAPPDATA"),
+        }
+    }
+
+    #[test]
+    fn xml_round_trip_preserves_unicode_paths_and_normalized_intervals() {
+        let path = Path::new(r"C:\用户 & space\AgentKB.exe");
+        let xml = windows_task_xml(path, 600, r"PC\用户");
+        let bytes = utf16_xml(&xml);
+        assert!(bytes.starts_with(&[0xFF, 0xFE]));
+        let decoded = decode_task_xml(&bytes).unwrap();
+        assert_eq!(decoded, xml);
+        let installed = parse_task_xml(&decoded).unwrap();
+        assert_eq!(installed.program.as_deref(), Some(path));
+        assert_eq!(installed.interval_secs, Some(600));
+        assert_eq!(parse_interval("PT10M"), Some(600));
+        assert_eq!(parse_interval("PT1H2M3S"), Some(3723));
+        assert_eq!(parse_interval("P1D"), Some(86_400));
+        assert_eq!(parse_interval("PTbad"), None);
+        assert!(xml.contains("encoding=\"UTF-16\""));
+        assert_eq!(xml.matches("<UserId>PC\\用户</UserId>").count(), 2);
+        assert!(xml.contains("<Duration>P1D</Duration>"));
+    }
+
+    #[test]
+    fn task_repairs_missing_moved_or_changed_interval_definitions() {
+        let path = Path::new(r"C:\用户 with space\AgentKB.exe");
+        let mut installed = parse_task_xml(&windows_task_xml(path, 600, "test")).unwrap();
+        assert_eq!(
+            definition_difference(None, path, 600),
+            Some("the task was not installed")
+        );
+        assert_eq!(definition_difference(Some(&installed), path, 600), None);
+        assert_eq!(
+            definition_difference(Some(&installed), path, 300),
+            Some("the interval differs from the settings")
+        );
+        installed.program = Some(PathBuf::from(r"C:\old\AgentKB.exe"));
+        assert_eq!(
+            definition_difference(Some(&installed), path, 600),
+            Some("the app moved")
+        );
+    }
+
     #[test]
     fn task_definition_uses_interactive_logon_and_start_when_available() {
         let xml = windows_task_xml(
             Path::new(r"C:\Users\Example User\AppData\Local\Programs\AgentKB\AgentKB.exe"),
             600,
+            r"TEST\用户",
         );
         assert!(xml.contains("<LogonType>InteractiveToken</LogonType>"));
         assert!(xml.contains("<StartWhenAvailable>true</StartWhenAvailable>"));

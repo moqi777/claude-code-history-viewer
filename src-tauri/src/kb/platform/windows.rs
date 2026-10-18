@@ -8,19 +8,58 @@ use std::process::Command;
 
 use super::super::volume::VolumeInfo;
 
-/// Marker used by the volume abstraction; all calls are direct Win32 APIs.
-pub struct WindowsQuery;
-
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 const PROCESS_QUERY_LIMITED_INFORMATION: u32 = 0x1000;
 const STILL_ACTIVE: u32 = 259;
-const DRIVE_REMOVABLE: u32 = 2;
-const DRIVE_FIXED: u32 = 3;
 const BELOW_NORMAL_PRIORITY_CLASS: u32 = 0x0000_4000;
 const IDLE_PRIORITY_CLASS: u32 = 0x0000_0040;
 
+#[link(name = "secur32")]
+unsafe extern "system" {
+    fn GetUserNameExW(format: u32, buffer: *mut u16, size: *mut u32) -> u8;
+}
+
+/// Windows console tools emit the OEM code page even when our own CLI is UTF-8.
+pub fn console_text(bytes: &[u8]) -> String {
+    if let Ok(text) = std::str::from_utf8(bytes) {
+        return text.into();
+    }
+    let Ok(len) = i32::try_from(bytes.len()) else {
+        return String::from_utf8_lossy(bytes).into_owned();
+    };
+    unsafe {
+        let needed = MultiByteToWideChar(1, 0, bytes.as_ptr(), len, std::ptr::null_mut(), 0);
+        if needed <= 0 {
+            return String::from_utf8_lossy(bytes).into_owned();
+        }
+        let mut output = vec![0u16; needed as usize];
+        let written = MultiByteToWideChar(1, 0, bytes.as_ptr(), len, output.as_mut_ptr(), needed);
+        String::from_utf16_lossy(&output[..written.max(0) as usize])
+    }
+}
+
+pub fn current_user() -> Result<String, String> {
+    let mut buffer = vec![0u16; 1024];
+    let mut size = buffer.len() as u32;
+    if unsafe { GetUserNameExW(2, buffer.as_mut_ptr(), &mut size) } == 0 {
+        return Err(format!(
+            "cannot determine current user: {}",
+            std::io::Error::last_os_error()
+        ));
+    }
+    Ok(String::from_utf16_lossy(&buffer[..size as usize]))
+}
+
 #[link(name = "kernel32")]
 unsafe extern "system" {
+    fn MultiByteToWideChar(
+        code_page: u32,
+        flags: u32,
+        input: *const u8,
+        input_len: i32,
+        output: *mut u16,
+        output_len: i32,
+    ) -> i32;
     fn OpenProcess(access: u32, inherit: i32, pid: u32) -> *mut c_void;
     fn GetExitCodeProcess(process: *mut c_void, code: *mut u32) -> i32;
     fn CloseHandle(handle: *mut c_void) -> i32;
@@ -44,6 +83,78 @@ unsafe extern "system" {
     ) -> i32;
     fn GetDriveTypeW(root: *const u16) -> u32;
     fn GetLogicalDriveStringsW(len: u32, buffer: *mut u16) -> u32;
+    fn CreateFileW(
+        name: *const u16,
+        access: u32,
+        share: u32,
+        security: *const c_void,
+        disposition: u32,
+        flags: u32,
+        template: *mut c_void,
+    ) -> *mut c_void;
+    fn DeviceIoControl(
+        handle: *mut c_void,
+        code: u32,
+        input: *const c_void,
+        input_len: u32,
+        output: *mut c_void,
+        output_len: u32,
+        returned: *mut u32,
+        overlapped: *mut c_void,
+    ) -> i32;
+}
+
+/// `StorageDeviceProperty` / `PropertyStandardQuery`. No write access is requested.
+fn storage_bus(root: &Path) -> Option<u32> {
+    let drive = root.to_str()?.trim_end_matches('\\');
+    if drive.len() != 2 || !drive.ends_with(':') {
+        return None;
+    }
+    let device = wide(&OsString::from(format!(r"\\.\{drive}")));
+    unsafe {
+        let handle = CreateFileW(
+            device.as_ptr(),
+            0,
+            3,
+            std::ptr::null(),
+            3,
+            0,
+            std::ptr::null_mut(),
+        );
+        if handle as isize == -1 {
+            return None;
+        }
+        let query = [0u32; 3];
+        let mut descriptor = [0u8; 1024];
+        let mut returned = 0;
+        let ok = DeviceIoControl(
+            handle,
+            0x002D_1400,
+            query.as_ptr().cast(),
+            12,
+            descriptor.as_mut_ptr().cast(),
+            descriptor.len() as u32,
+            &mut returned,
+            std::ptr::null_mut(),
+        ) != 0;
+        let _ = CloseHandle(handle);
+        // STORAGE_DEVICE_DESCRIPTOR.BusType follows the four string offsets.
+        (ok && returned >= 32).then(|| u32::from_le_bytes(descriptor[28..32].try_into().unwrap()))
+    }
+}
+
+fn is_external(root: &Path, system_drive: &str, drive_type: u32, bus: Option<u32>) -> bool {
+    !root
+        .to_string_lossy()
+        .trim_end_matches('\\')
+        .eq_ignore_ascii_case(system_drive.trim_end_matches('\\'))
+        && matches!(drive_type, 2 | 3)
+        && matches!(bus, Some(4 | 7 | 12 | 13)) // 1394, USB, SD, MMC
+}
+
+fn external_drive(root: &Path, drive_type: u32) -> bool {
+    let system = std::env::var("SystemDrive").unwrap_or_else(|_| "C:".into());
+    is_external(root, &system, drive_type, storage_bus(root))
 }
 
 #[repr(C)]
@@ -182,9 +293,9 @@ pub fn volume_info(mount: &Path) -> Result<VolumeInfo, String> {
     let drive_type = unsafe { GetDriveTypeW(root_w.as_ptr()) };
     Ok(VolumeInfo {
         uuid: volume_guid(&root).unwrap_or_else(|| format!("SERIAL-{serial:08X}")),
+        internal: !external_drive(&root, drive_type),
         mount_point: root,
         name: Some(text(&name)).filter(|s| !s.is_empty()),
-        internal: drive_type == DRIVE_FIXED,
         fs_type: text(&fs),
         writable: flags & 0x0008_0000 == 0,
     })
@@ -203,9 +314,11 @@ pub fn list_external() -> Vec<VolumeInfo> {
         let root_w = wide(&root.as_os_str().to_os_string());
         #[allow(unsafe_code)]
         let kind = unsafe { GetDriveTypeW(root_w.as_ptr()) };
-        if kind == DRIVE_REMOVABLE {
+        if external_drive(&root, kind) {
             if let Ok(info) = volume_info(&root) {
-                out.push(info);
+                if info.writable {
+                    out.push(info);
+                }
             }
         }
     }
@@ -214,5 +327,35 @@ pub fn list_external() -> Vec<VolumeInfo> {
 }
 
 pub fn same_volume(path: &Path, mount: &Path) -> bool {
-    volume_info(path).ok().map(|v| v.uuid) == volume_info(mount).ok().map(|v| v.uuid)
+    match (volume_info(path), volume_info(mount)) {
+        (Ok(a), Ok(b)) => a.uuid == b.uuid,
+        _ => false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn external_bus_includes_fixed_usb_disks_and_excludes_system_disk() {
+        for bus in [4, 7, 12, 13] {
+            for kind in [2, 3] {
+                assert!(is_external(Path::new(r"E:\"), "C:", kind, Some(bus)));
+                assert!(!is_external(Path::new(r"c:\"), "C:", kind, Some(bus)));
+            }
+        }
+        for bus in [None, Some(0), Some(3), Some(11), Some(17)] {
+            assert!(!is_external(Path::new(r"E:\"), "C:", 3, bus));
+        }
+        assert!(!is_external(Path::new(r"E:\"), "C:", 4, Some(7)));
+    }
+
+    #[test]
+    fn unknown_volumes_are_not_assumed_to_be_the_same_disk() {
+        assert!(!same_volume(
+            Path::new("not-a-drive"),
+            Path::new("also-unknown")
+        ));
+    }
 }

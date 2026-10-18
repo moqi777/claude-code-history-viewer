@@ -149,7 +149,7 @@ impl Summary {
 /// Run one collection. Takes the sync lock (waiting up to [`LOCK_WAIT`]); a
 /// held lock yields a `skipped` summary, not an error.
 pub fn run_sync(env: &KbEnv, trigger: &str) -> Result<Summary, String> {
-    run_sync_with(env, trigger, &super::volume::MacQuery)
+    run_sync_with(env, trigger, &super::volume::SystemVolumes)
 }
 
 /// [`run_sync`] with the disk-identification backend chosen by the caller.

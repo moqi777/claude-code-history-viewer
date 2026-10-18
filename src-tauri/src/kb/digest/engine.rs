@@ -366,7 +366,6 @@ pub fn candidate_paths(engine: Engine) -> Vec<PathBuf> {
             for dir in std::env::split_paths(&path) {
                 out.push(dir.join(format!("{name}.exe")));
                 out.push(dir.join(format!("{name}.cmd")));
-                out.push(dir.join(name));
             }
         }
         out
@@ -380,6 +379,22 @@ pub fn candidate_paths(engine: Engine) -> Vec<PathBuf> {
             out.extend(std::env::split_paths(&path).map(|d| d.join(name)));
         }
         out
+    }
+}
+
+#[cfg(all(test, windows))]
+#[test]
+#[serial_test::serial]
+fn windows_candidates_never_include_extensionless_npm_shell_scripts() {
+    let root = tempfile::tempdir().unwrap();
+    std::env::set_var("CCHV_TEST_HOME", root.path());
+    for engine in [Engine::Claude, Engine::Codex] {
+        let paths = candidate_paths(engine);
+        assert_ne!(paths.len(), 0);
+        assert!(paths
+            .iter()
+            .all(|p| matches!(p.extension().and_then(|s| s.to_str()), Some("exe" | "cmd"))));
+        assert_eq!(paths[0].extension().unwrap(), "exe");
     }
 }
 

@@ -19,7 +19,7 @@ pub const SKILL_DIR_NAME: &str = "agentkb";
 const SKILL_FILE: &str = "SKILL.md";
 const MARKER_PREFIX: &str = "<!-- agentkb-skill v1";
 /// Template revision; bump when the text changes so installed copies show as stale.
-pub const TEMPLATE_VERSION: u32 = 4;
+pub const TEMPLATE_VERSION: u32 = 5;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -80,9 +80,19 @@ pub struct SkillStatus {
 /// Skill text for `target`, pointing at `exe`.
 pub fn render(target: Target, exe: &str) -> String {
     #[cfg(windows)]
-    let command_exe = format!("\"{}\"", exe.replace('"', "\\\""));
+    let command_exe = match target {
+        Target::Claude => format!("'{}'", exe.replace('\\', "/").replace('\'', "'\"'\"'")),
+        Target::Codex => format!("& '{}'", exe.replace('\'', "''")),
+    };
     #[cfg(not(windows))]
     let command_exe = exe.to_string();
+    #[cfg(windows)]
+    let shell_note = match target {
+        Target::Claude => "在 Git Bash 中运行下面的命令。",
+        Target::Codex => "在 PowerShell 中运行下面的命令（保留开头的 & 调用运算符）。",
+    };
+    #[cfg(not(windows))]
+    let shell_note = "";
     let allowed = match target {
         // Pre-approves exactly the two read-only commands; a pipe, `cd` or
         // anything else falls outside the prefix and asks again.
@@ -99,6 +109,7 @@ description: Search the user's past Claude Code and Codex conversations (backed 
 {MARKER_PREFIX} · app {AGENTKB_VERSION} · template {TEMPLATE_VERSION} · exe={exe} -->\n\
 \n\
 # 查历史会话（AgentKB）\n\
+{shell_note}\n\
 \n\
 1. 从用户的话里提 2–4 个具体关键词（报错类名、组件名、中文名词），**不要传整句话**。\n\
 2. 搜索：`{command_exe} --kb-search \"<关键词>\"`\n\
@@ -343,7 +354,6 @@ mod tests {
 
     const EXE: &str = "/Applications/AgentKB.app/Contents/MacOS/AgentKB";
 
-    #[cfg(not(windows))]
     fn snapshot(root: &Path) -> Vec<(String, u64)> {
         let mut files = fsutil::walk_files(root);
         files.sort();
@@ -351,27 +361,42 @@ mod tests {
     }
 
     #[cfg(windows)]
-    fn test_exe(home: &tempfile::TempDir) -> PathBuf {
+    fn test_exe(home: &tempfile::TempDir) -> (PathBuf, LocalAppDataGuard) {
+        let guard = LocalAppDataGuard(std::env::var_os("LOCALAPPDATA"));
         let local = home.path().join("用户 with space").join("Local AppData");
         std::env::set_var("LOCALAPPDATA", &local);
         let exe = local.join("Programs").join("AgentKB").join("AgentKB.exe");
         std::fs::create_dir_all(exe.parent().unwrap()).unwrap();
         std::fs::write(&exe, b"test executable").unwrap();
-        exe
+        (exe, guard)
+    }
+
+    #[cfg(windows)]
+    struct LocalAppDataGuard(Option<std::ffi::OsString>);
+
+    #[cfg(windows)]
+    impl Drop for LocalAppDataGuard {
+        fn drop(&mut self) {
+            match &self.0 {
+                Some(value) => std::env::set_var("LOCALAPPDATA", value),
+                None => std::env::remove_var("LOCALAPPDATA"),
+            }
+        }
     }
 
     #[test]
-    fn the_two_templates_differ_only_by_the_permission_line() {
+    fn templates_use_the_target_shell_and_read_only_permissions() {
         let claude = render(Target::Claude, EXE);
         let codex = render(Target::Codex, EXE);
         #[cfg(windows)]
-        let command_exe = format!("\"{EXE}\"");
+        let command_exe = format!("'{EXE}'");
         #[cfg(not(windows))]
         let command_exe = EXE.to_string();
         assert!(claude.contains(&format!(
             "allowed-tools: Bash({command_exe} --kb-search:*), Bash({command_exe} --kb-show:*)"
         )));
         assert!(!codex.contains("allowed-tools"));
+        #[cfg(not(windows))]
         assert_eq!(
             claude.replace(
                 &format!("allowed-tools: Bash({command_exe} --kb-search:*), Bash({command_exe} --kb-show:*)\n"),
@@ -379,6 +404,12 @@ mod tests {
             ),
             codex
         );
+        #[cfg(windows)]
+        {
+            assert!(codex.contains(&format!("`& '{EXE}' --kb-search")));
+            assert!(codex.contains("PowerShell"));
+            assert!(claude.contains("Git Bash"));
+        }
         for text in [&claude, &codex] {
             assert!(text.starts_with("---\nname: agentkb\ndescription: "));
             assert!(text.contains("不要加管道"));
@@ -387,19 +418,19 @@ mod tests {
         }
     }
 
-    #[cfg(not(windows))]
     #[test]
+    #[serial_test::serial]
     fn install_status_update_and_uninstall_touch_only_the_skill_folder() {
         let home = tempfile::tempdir().unwrap();
         let root = home.path().join("用户 with space").join(".claude");
         std::fs::create_dir_all(root.join("projects/p")).unwrap();
         std::fs::write(root.join("projects/p/s.jsonl"), b"{}\n").unwrap();
         std::fs::write(root.join("settings.json"), b"{}").unwrap();
-        let before = snapshot(home.path());
         #[cfg(unix)]
         let exe = PathBuf::from(EXE);
         #[cfg(windows)]
-        let exe = test_exe(&home);
+        let (exe, _local) = test_exe(&home);
+        let before = snapshot(home.path());
 
         assert_eq!(
             status(Target::Claude, Some(&root), &exe).state,
@@ -410,7 +441,10 @@ mod tests {
         let after = snapshot(home.path());
         let added: Vec<_> = after.iter().filter(|f| !before.contains(f)).collect();
         assert_eq!(added.len(), 1, "{added:?}");
-        assert_eq!(added[0].0, ".claude/skills/agentkb/SKILL.md");
+        assert_eq!(
+            added[0].0,
+            "用户 with space/.claude/skills/agentkb/SKILL.md"
+        );
         assert!(
             before.iter().all(|f| after.contains(f)),
             "nothing else changed"
@@ -433,18 +467,28 @@ mod tests {
         assert!(!skill_dir(&root).exists());
     }
 
-    #[cfg(not(windows))]
     #[test]
+    #[serial_test::serial]
     fn a_stale_copy_is_noticed_and_updating_fixes_it() {
         let home = tempfile::tempdir().unwrap();
         let root = home.path().join(".codex");
+        #[cfg(not(windows))]
         let old_exe = PathBuf::from("/Applications/Old.app/Contents/MacOS/AgentKB");
+        #[cfg(windows)]
+        let (old_exe, _old_local) = test_exe(&home);
+
         install(Target::Codex, &root, &old_exe).unwrap();
-        // The old path does not exist on this machine.
+        // Simulate moving the installation, leaving a stale skill behind.
+        #[cfg(windows)]
+        {
+            std::fs::remove_file(&old_exe).unwrap();
+        }
+        #[cfg(windows)]
+        let new_home = tempfile::tempdir().unwrap();
         #[cfg(unix)]
         let current_exe = PathBuf::from(EXE);
         #[cfg(windows)]
-        let current_exe = test_exe(&home);
+        let (current_exe, _current_local) = test_exe(&new_home);
         let s = status(Target::Codex, Some(&root), &current_exe);
         assert_eq!(s.state, State::Stale);
         assert_eq!(s.stale_reason, Some("missing_exe"));
@@ -501,15 +545,19 @@ mod tests {
         assert!(dir.join("notes.txt").exists());
     }
 
-    #[cfg(not(windows))]
     #[test]
+    #[serial_test::serial]
     fn uninstall_leaves_extra_files_in_the_folder_alone() {
         let home = tempfile::tempdir().unwrap();
         let root = home.path().join(".claude");
-        install(Target::Claude, &root, Path::new(EXE)).unwrap();
+        #[cfg(not(windows))]
+        let exe = PathBuf::from(EXE);
+        #[cfg(windows)]
+        let (exe, _local) = test_exe(&home);
+        install(Target::Claude, &root, &exe).unwrap();
         let extra = skill_dir(&root).join("keep.txt");
         std::fs::write(&extra, "keep").unwrap();
-        uninstall(Target::Claude, &root, Path::new(EXE)).unwrap();
+        uninstall(Target::Claude, &root, &exe).unwrap();
         assert!(extra.exists(), "only SKILL.md is ours to remove");
         assert!(!skill_dir(&root).join(SKILL_FILE).exists());
     }
@@ -520,7 +568,7 @@ mod tests {
     fn windows_skill_install_works_from_the_user_install_directory() {
         let home = tempfile::tempdir().unwrap();
         let root = home.path().join(".claude");
-        let exe = test_exe(&home);
+        let (exe, _local) = test_exe(&home);
         assert_eq!(
             install(Target::Claude, &root, &exe).unwrap().state,
             State::Current

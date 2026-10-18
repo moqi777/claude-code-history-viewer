@@ -76,6 +76,7 @@ ureq = { version = "2", default-features = false, features = ["tls"] }
 
 [target.'cfg(windows)'.dependencies]
 winreg = "0.55"
+quick-xml = "0.37.5"
 
 [target.'cfg(unix)'.dependencies]
 # Process groups and signals for the digest's AI child processes (already in

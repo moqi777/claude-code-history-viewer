@@ -16,7 +16,7 @@ use super::progress::ProgressSink;
 use super::schedule::{self, ScheduleStatus};
 use super::status::{self, Facets, KbSession, KbStatus, SessionFilter};
 use super::sync::{self, KbEnv, Summary};
-use super::volume::{self, MacQuery, Presence, VolumeInfo};
+use super::volume::{self, Presence, SystemVolumes, VolumeInfo};
 use super::{db, AGENTKB_VERSION};
 use super::{search, skill};
 
@@ -113,7 +113,7 @@ pub async fn kb_get_backup_presence() -> Res<BackupPresence> {
         ) else {
             return Ok(BackupPresence::Disabled);
         };
-        Ok(match volume::presence(target, uuid, &MacQuery) {
+        Ok(match volume::presence(target, uuid, &SystemVolumes) {
             Presence::Connected { volume } => BackupPresence::Connected { volume },
             Presence::NotConnected { reason } => BackupPresence::NotConnected { reason },
             Presence::Unsupported { reason } => BackupPresence::Unsupported { reason },
@@ -172,7 +172,7 @@ pub async fn kb_sync_now(app: tauri::AppHandle) -> Res<Summary> {
 pub async fn kb_backup_now(app: tauri::AppHandle) -> Res<BackupSummary> {
     blocking(move || {
         let env = env()?.with_progress(sink(&app));
-        backup::run_standalone(&env, &MacQuery)
+        backup::run_standalone(&env, &SystemVolumes)
     })
     .await
 }
@@ -240,7 +240,7 @@ pub struct SaveOutcome {
 /// needs a migration), and a backup disk must pass its test before it is enabled.
 #[tauri::command]
 pub async fn kb_save_config(config: KbConfig) -> Res<SaveOutcome> {
-    blocking(move || save_config(&config_file()?, config, &MacQuery, &SystemSchedule)).await
+    blocking(move || save_config(&config_file()?, config, &SystemVolumes, &SystemSchedule)).await
 }
 
 fn config_file() -> Res<PathBuf> {
@@ -374,7 +374,7 @@ pub async fn kb_test_schedule_env() -> Res<ScheduleEnvReport> {
 
 #[tauri::command]
 pub async fn kb_list_external_volumes() -> Res<Vec<VolumeInfo>> {
-    blocking(|| Ok(volume::list_external(&MacQuery))).await
+    blocking(|| Ok(volume::list_external(&SystemVolumes))).await
 }
 
 #[tauri::command]
@@ -386,7 +386,7 @@ pub async fn kb_test_mirror(
         Ok(probe::test_mirror(
             &PathBuf::from(target_dir),
             expected_uuid.as_deref(),
-            &MacQuery,
+            &SystemVolumes,
         ))
     })
     .await
@@ -416,14 +416,14 @@ pub async fn kb_wizard_commit(draft: KbConfig, app: tauri::AppHandle) -> Res<Wiz
             &file,
             draft,
             &sink(&app),
-            &MacQuery,
+            &SystemVolumes,
             &SystemSchedule,
             &|| {
                 let app = app.clone();
                 std::thread::spawn(move || {
                     let outcome = env()
                         .map(|e| e.with_progress(sink(&app)))
-                        .and_then(|e| backup::run_standalone(&e, &MacQuery));
+                        .and_then(|e| backup::run_standalone(&e, &SystemVolumes));
                     let _ = app.emit(BACKUP_DONE_EVENT, outcome);
                 });
             },

@@ -12,6 +12,8 @@ use std::process::Command;
 pub fn no_window(command: &mut Command) {
     #[cfg(windows)]
     windows::no_window(command);
+    #[cfg(not(windows))]
+    let _ = command;
 }
 
 /// Configure a long-lived child so it can outlive the short sync process.

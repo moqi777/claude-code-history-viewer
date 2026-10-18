@@ -236,9 +236,16 @@ describe('Tauri Configuration Tests', () => {
   });
 
   describe('Bundle Configuration Validation', () => {
+    it('uses NSIS with per-user installation only in the Windows override', () => {
+      const windows = JSON.parse(fs.readFileSync(path.join(__dirname, '../tauri.windows.conf.json'), 'utf-8'));
+      expect(windows.bundle.targets).toEqual(['nsis']);
+      expect(windows.bundle.windows.nsis.installMode).toBe('currentUser');
+      const template = fs.readFileSync(path.join(__dirname, '..', windows.bundle.windows.nsis.template), 'utf-8');
+      expect(template).toContain('StrCpy $INSTDIR "$LOCALAPPDATA\\Programs\\${PRODUCTNAME}"');
+    });
     it('should have bundle configuration enabled', () => {
       expect(config.bundle.active).toBe(true);
-      expect(config.bundle.targets).toEqual(['nsis']);
+      expect(config.bundle.targets).toEqual(['app']);
       expect(config.bundle.createUpdaterArtifacts).toBe(false);
     });
 

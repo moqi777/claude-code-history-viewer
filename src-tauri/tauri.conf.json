@@ -39,7 +39,7 @@
   "bundle": {
     "active": true,
     "targets": [
-      "nsis"
+      "app"
     ],
     "createUpdaterArtifacts": false,
     "icon": [

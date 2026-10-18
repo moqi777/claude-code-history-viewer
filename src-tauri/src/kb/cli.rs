@@ -545,7 +545,8 @@ fn run_backup_command() -> i32 {
         Ok(config) => config,
         Err(code) => return code,
     };
-    match super::backup::run_standalone(&KbEnv::from_config(&config), &super::volume::MacQuery) {
+    match super::backup::run_standalone(&KbEnv::from_config(&config), &super::volume::SystemVolumes)
+    {
         Ok(summary) => {
             print_json(&summary);
             i32::from(summary.status == "error")
