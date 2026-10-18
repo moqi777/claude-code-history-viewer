@@ -47,3 +47,21 @@
 ## 5. 下一步
 
 改完第 1–4 节，两边 7 项（Mac 至少能编译），重新打 NSIS 包，写在 `P7-2b-report.md` 后面，推送到 `origin/agent-kb-win` 后停下。版本号 0.7.0 不变。
+
+## 6. 复审（`414077f`）：通过，已合并
+
+leader 在 Mac 上复核：
+
+- 7 项全部通过：vitest 1576，cargo test 库 1485 通过 0 失败 6 忽略，clippy、fmt 通过
+- `pnpm tauri build` 正常打出 `AgentKB.app`；可执行文件不依赖 onnxruntime 动态库；临时 HOME 里 `--kb-embed --test` 正常（0.67 秒，1024 维），`ort` 去掉默认特性对 Mac 没有影响
+- 第 1–4 节逐条核对，都改了；第 4 节两种 shell 都用正式 GUI 程序实测过，后台整理在收集进程退出后仍能完成，这两条是这次最有价值的验证
+- `414077f` 直接快进合并到 `agent-kb`
+
+记下来的事：
+
+- `windows/installer.nsi` 是 Tauri 2.11.2 模板的整份拷贝，只改了一行默认目录。以后升级 Tauri CLI 时要按 `windows/README.md` 重新同步，否则会悄悄用旧模板
+- skill 模板升到 5，Mac 上已装的 skill 会显示"需要更新"，点一下即可；Mac 版正文多了一个空行，不影响使用
+- Windows 正式程序在设置了 `CCHV_TEST_HOME` 时会把它当家目录，只为测试用；普通用户不会设这个变量
+- 移动硬盘没有用真实 USB 盘插拔测过，放到用户真机确认里
+
+下一步：用户在 Windows 上真机确认（见 `P7-acceptance.md`）。
