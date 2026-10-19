@@ -1,0 +1,9 @@
+docs/agent-kb/P7.2-backup-exfat.md
+  ai_agent 1-22
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.11",
+  "base_commit_sha": "f58de8f5b55f49694e9d23c8ded47f042e834ed7",
+  "prompts": {}
+}
