@@ -1,0 +1,9 @@
+docs/agent-kb/P7.5-stale-failures.md
+  ai_agent 1-23
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.11",
+  "base_commit_sha": "584a7ed12d2f69efa2556faa37f96e0bd7d24706",
+  "prompts": {}
+}
