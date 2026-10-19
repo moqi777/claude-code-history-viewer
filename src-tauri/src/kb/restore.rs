@@ -341,14 +341,17 @@ impl Moves {
     }
 }
 
-/// The entries of `vectors/` except the builder's lock file.
+/// The entries of `vectors/` except the builder's lock and its Windows diagnostic.
 fn vector_entries(data: &DataPaths) -> Vec<PathBuf> {
     let Ok(entries) = fs::read_dir(super::semantic::store::dir(data)) else {
         return Vec::new();
     };
     entries
         .flatten()
-        .filter(|e| e.file_name().to_string_lossy() != EMBED_LOCK_NAME)
+        .filter(|e| {
+            let name = e.file_name();
+            name != EMBED_LOCK_NAME && !(cfg!(windows) && name == ".embed.lock.info")
+        })
         .map(|e| e.path())
         .collect()
 }
@@ -782,7 +785,7 @@ mod tests {
         assert_eq!(info.raw_files, 1, "the ._ file is not counted");
         assert!(info.current_empty);
         assert!(!info.needs_upgrade);
-        assert!(!info.snapshot_at.is_empty());
+        assert_ne!(info.snapshot_at, "");
         assert!(
             fs::read_dir(w.target.env.data.root())
                 .unwrap()
@@ -866,6 +869,8 @@ mod tests {
             "the index is empty"
         );
         assert!(vectors.join(EMBED_LOCK_NAME).exists());
+        assert!(!aside.join("vectors/.embed.lock.info").exists());
+        assert!(!vectors.join(".embed.lock.info").exists());
         assert!(data.root().join("models/keep.bin").exists(), "models stay");
     }
 
@@ -1002,6 +1007,73 @@ mod tests {
             assert_eq!(digest_of(data.root()), before, "{point}: back as it was");
             assert_eq!(w.target.message_count(), 2);
             no_work_folders(data);
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_open_files_block_restore_and_all_prior_moves_are_undone() {
+        use std::os::windows::fs::OpenOptionsExt;
+
+        // Deny FILE_SHARE_DELETE using a real Windows handle, not DIE_AT.
+        // The vector case fails after the database, raw and notes were moved.
+        for locked in ["kb.db", "notes/held.json", "vectors/model.sqlite3"] {
+            let w = world();
+            w.target.write_source(1..=2);
+            w.target.sync();
+            let data = &w.target.env.data;
+            for (rel, bytes) in [
+                ("notes/held.json", b"old notes".as_slice()),
+                ("vectors/model.sqlite3", b"old vectors".as_slice()),
+                ("models/keep.bin", b"model".as_slice()),
+            ] {
+                let path = data.root().join(rel);
+                fs::create_dir_all(path.parent().unwrap()).unwrap();
+                fs::write(path, bytes).unwrap();
+            }
+            let before = digest_of(data.root());
+            let backup_before = digest_of(&w.folder);
+            let sources_before = digest_of(&w.target.claude);
+            let held = fs::OpenOptions::new()
+                .read(true)
+                .share_mode(0x1 | 0x2) // FILE_SHARE_READ | FILE_SHARE_WRITE
+                .open(data.root().join(locked))
+                .unwrap();
+            let err = run(&w.target.env, &w.folder).unwrap_err();
+            assert_eq!(err.code, "io", "{locked}: {err}");
+            assert!(err.message.contains("cannot move"), "{locked}: {err}");
+            let blocked_move = if locked.starts_with("notes/") {
+                data.notes()
+            } else {
+                data.root().join(locked)
+            };
+            assert!(
+                err.message
+                    .replace('\\', "/")
+                    .contains(&blocked_move.to_string_lossy().replace('\\', "/")),
+                "{locked}: failed at a different move: {err}"
+            );
+            assert!(
+                !err.message.contains("could not be moved back"),
+                "{locked}: rollback failed: {err}"
+            );
+            assert_eq!(digest_of(data.root()), before, "{locked}: full rollback");
+            assert_eq!(digest_of(&w.folder), backup_before, "backup is read only");
+            assert_eq!(digest_of(&w.target.claude), sources_before);
+            no_work_folders(data);
+            drop(held);
+            assert_eq!(w.target.message_count(), 2, "original database still live");
+            let report = run(&w.target.env, &w.folder).unwrap();
+            assert_eq!(report.sessions, 1);
+            assert_eq!(w.target.message_count(), 3, "restore works after release");
+            assert!(report.set_aside.is_some());
+            assert!(!data.root().join("vectors/model.sqlite3").exists());
+            assert_eq!(
+                fs::read(data.root().join("models/keep.bin")).unwrap(),
+                b"model"
+            );
+            no_work_folders(data);
+            eprintln!("Windows held file {locked}: rollback intact; restore after release passed");
         }
     }
 
