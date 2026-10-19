@@ -1,0 +1,9 @@
+docs/agent-kb/P7.4-backup-per-computer.md
+  ai_agent 1-22
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.11",
+  "base_commit_sha": "f14a0a6213ab9fca8eadfcd391e5770eaaa07b92",
+  "prompts": {}
+}
