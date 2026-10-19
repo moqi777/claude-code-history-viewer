@@ -1,0 +1,78 @@
+src-tauri/src/kb/transfer_commands.rs
+  s_cca7c29607588b::t_81857603863b95 10,231-234
+  s_cca7c29607588b::t_be4dd6dac39607 225-230
+src-tauri/src/kb/status.rs
+  s_cca7c29607588b::t_be4dd6dac39607 56-59,142-143
+src-tauri/src/lib.rs
+  s_cca7c29607588b::t_be4dd6dac39607 227
+src/i18n/locales/ko/kb.json
+  s_cca7c29607588b::t_e44de1f3c669a1 519-526
+src/kb/branding.ts
+  s_cca7c29607588b::t_e44de1f3c669a1 5
+src-tauri/src/kb/backup_dir.rs
+  s_cca7c29607588b::t_be4dd6dac39607 71-78
+  s_cca7c29607588b::t_b092db18fda2a9 285
+  s_cca7c29607588b::t_5d290ac188ef1b 453
+  s_cca7c29607588b::t_007470de39c964 1-70,79-85,93,98-106,108-120,126-249,252-284,286-452,454-461,466-687
+  s_cca7c29607588b::t_e77ebfbda64c1b 107
+  s_cca7c29607588b::t_09a74c8ec020c5 86-92,94-97,250-251
+  s_cca7c29607588b::t_8a4b4d75d083f3 121-125,462-465
+docs/agent-kb/P7.4-report.md
+  ai_agent 1-61
+src/kb/api.ts
+  s_cca7c29607588b::t_e44de1f3c669a1 21,84
+src/kb/KbSettings.tsx
+  s_cca7c29607588b::t_e44de1f3c669a1 19,168
+src/i18n/locales/zh-CN/kb.json
+  s_cca7c29607588b::t_e44de1f3c669a1 519-526
+src/kb/fixtures.ts
+  s_cca7c29607588b::t_e44de1f3c669a1 17,23
+src/kb/KbRestore.test.tsx
+  s_cca7c29607588b::t_4b424b446e7343 3-5,47-57,80,163-218
+src/i18n/locales/ja/kb.json
+  s_cca7c29607588b::t_e44de1f3c669a1 519-526
+src-tauri/src/kb/mod.rs
+  s_cca7c29607588b::t_00435ae0815431 10,48
+src/kb/KbRestore.tsx
+  s_cca7c29607588b::t_e44de1f3c669a1 21,27,75,84-100,159-191,335-349
+src/kb/testkit.ts
+  s_cca7c29607588b::t_e44de1f3c669a1 44
+src-tauri/src/kb/backup.rs
+  s_cca7c29607588b::t_e77ebfbda64c1b 593-595,597-600,607,609
+  s_cca7c29607588b::t_31f5c96027e795 582-586,588-592,596,931,1061-1062,1064-1174
+  s_cca7c29607588b::t_09a74c8ec020c5 587
+  s_cca7c29607588b::t_00435ae0815431 21,41-42,64-69,207-227,230-238,240,242-252,284-294
+  s_cca7c29607588b::t_5d290ac188ef1b 1063
+src/i18n/locales/en/kb.json
+  s_cca7c29607588b::t_e44de1f3c669a1 519-526
+src-tauri/src/kb/sync.rs
+  s_cca7c29607588b::t_e77ebfbda64c1b 3341
+  s_cca7c29607588b::t_8a4b4d75d083f3 3346-3353,3367,3375
+  s_cca7c29607588b::t_00435ae0815431 41,44-45,69
+src/kb/types.ts
+  s_cca7c29607588b::t_e44de1f3c669a1 86-89
+  s_cca7c29607588b::t_7c1e6afafe88da 759-770
+src/i18n/types.generated.ts
+  ai_agent 8
+src-tauri/src/kb/restore.rs
+  s_cca7c29607588b::t_81857603863b95 1075-1108,1110-1125
+  s_cca7c29607588b::t_5d290ac188ef1b 753,770,1109
+src/i18n/locales/zh-TW/kb.json
+  s_cca7c29607588b::t_e44de1f3c669a1 519-526
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.11",
+  "base_commit_sha": "a5232ce8d51f19ecfdfa7d33d0fef96291e8224b",
+  "prompts": {},
+  "sessions": {
+    "s_cca7c29607588b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ef228e77-8d37-45df-ab42-2d4c28a0387d",
+        "model": "claude-sonnet-5-5"
+      },
+      "human_author": "moqing <moqing@tsign.cn>"
+    }
+  }
+}
