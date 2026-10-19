@@ -750,7 +750,7 @@ mod tests {
     }
 
     struct World {
-        _dir: tempfile::TempDir,
+        dir: tempfile::TempDir,
         folder: PathBuf,
         source: Lib,
         target: Lib,
@@ -767,7 +767,7 @@ mod tests {
         backup_of(&source, &folder);
         let target = Lib::new(dir.path(), "b");
         World {
-            _dir: dir,
+            dir,
             folder,
             source,
             target,
@@ -1070,6 +1070,57 @@ mod tests {
         let report = run(&w.target.env, &w.folder).unwrap();
         assert_eq!(report.missing_files, 1);
         assert_eq!(report.sessions, 1);
+    }
+
+    #[test]
+    fn the_backups_of_several_computers_are_listed_and_each_can_be_restored() {
+        use crate::kb::backup_dir;
+        let w = world();
+        let root = w.folder.parent().unwrap().join("shared/AgentKB-backup");
+        // The old layout: the backup directly in the configured folder.
+        fs::create_dir_all(root.parent().unwrap()).unwrap();
+        copy_dir(&w.folder, &root);
+        let old = backup_dir::list(&root, None);
+        assert_eq!(old.len(), 1);
+        assert!(old[0].old_layout);
+        // Two computers' folders next to it.
+        for (id, name) in [("aaaaaaaa11111111", "Mac"), ("bbbbbbbb22222222", "Win")] {
+            let dir = root.join(format!("{name}-{}", &id[..8]));
+            copy_dir(&w.folder, &dir);
+            let marker = backup_dir::Marker {
+                id: id.into(),
+                name: name.into(),
+                os: if name == "Win" { "windows" } else { "macos" }.into(),
+                last_backup_at: "2026-10-19T08:00:00Z".into(),
+                sessions: 1,
+                ..Default::default()
+            };
+            fs::write(
+                dir.join(backup_dir::MARKER_NAME),
+                serde_json::to_string(&marker).unwrap(),
+            )
+            .unwrap();
+        }
+        let entries = backup_dir::list(&root, Some("bbbbbbbb22222222"));
+        assert_eq!(entries.len(), 3);
+        let win = entries.iter().find(|e| e.name == "Win").unwrap();
+        assert!(win.this_computer && win.os == "windows" && win.sessions == 1);
+        for entry in &entries {
+            let target = Lib::new(w.dir.path(), &format!("t-{}", entry.name.len()));
+            let info = inspect(&target.env, Path::new(&entry.folder)).unwrap();
+            assert_eq!(info.sessions, 1);
+        }
+        let report = run(&w.target.env, Path::new(&win.folder)).unwrap();
+        assert_eq!(report.sessions, 1);
+        assert_eq!(w.target.message_count(), 3);
+    }
+
+    fn copy_dir(from: &Path, to: &Path) {
+        for (rel, _) in fsutil::walk_files(from) {
+            let dst = to.join(&rel);
+            fs::create_dir_all(dst.parent().unwrap()).unwrap();
+            fs::copy(from.join(&rel), dst).unwrap();
+        }
     }
 
     /// By hand, on a real backup folder (read only; everything is written to a

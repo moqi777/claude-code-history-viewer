@@ -16,7 +16,7 @@ import { kbApi } from "./api";
 import { Field, IntervalField, MirrorField, SourcesField, VerdictLine } from "./fields";
 import { DigestField } from "./KbDigestField";
 import { digestValid, excludesValid, parseExcludes } from "./logic";
-import { RestoreField } from "./KbRestore";
+import { BackupFolderLine, RestoreField } from "./KbRestore";
 import { SkillField } from "./SkillField";
 import { SemanticField } from "./KbSemantic";
 import { TransferSection } from "./KbTransfer";
@@ -164,6 +164,8 @@ export const KbSettings = () => {
               onChange={(mirror) => setDraft({ ...draft, mirror })}
               onTested={setMirrorOk}
             />
+
+            <BackupFolderLine />
 
             <RestoreField
               configuredFolder={saved.mirror.enabled ? saved.mirror.target_dir : null}

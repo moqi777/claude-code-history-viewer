@@ -516,5 +516,12 @@
   "kb.restore.error.embed_running": "The semantic index is being built. Try again in a moment (or stop it below). Nothing was changed.",
   "kb.restore.error.no_space": "Not enough free disk space. {{message}}",
   "kb.restore.error.cancelled": "Cancelled. Your data has not changed.",
-  "kb.restore.error.generic": "Restore failed. Your data has not changed unless it says otherwise: {{message}}"
+  "kb.restore.error.generic": "Restore failed. Your data has not changed unless it says otherwise: {{message}}",
+  "kb.restore.pickComputer": "This disk holds backups of several computers. Which one do you want to restore?",
+  "kb.restore.entry": "{{os}} · last backup {{when}} · {{sessions}} sessions",
+  "kb.restore.thisComputer": "this computer",
+  "kb.restore.oldLayout": "Older backup (no computer recorded)",
+  "kb.backupFolder.line": "This computer backs up to: {{path}}",
+  "kb.backupFolder.notYet": "This computer's folder on the disk is created at the first backup.",
+  "kb.backupFolder.oldLayout": "The disk also holds an older backup that is not assigned to any computer. It was left as it is; you can still restore from it."
 }

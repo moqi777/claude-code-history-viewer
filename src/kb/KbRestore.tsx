@@ -18,12 +18,13 @@ import { pickFolder } from "./pickFolder";
 import { progressLabel } from "./progressLabel";
 import { restoreErrorText } from "./restoreErrors";
 import { splitTransferError } from "./transferErrors";
-import type { KbRestoreInspect, KbRestoreReport } from "./types";
+import type { KbBackupEntry, KbRestoreInspect, KbRestoreReport } from "./types";
 import { useKbStore } from "./useKbStore";
 
 type Stage =
   | { kind: "choose" }
   | { kind: "checking"; folder: string }
+  | { kind: "pick"; entries: KbBackupEntry[] }
   | { kind: "ready"; folder: string; info: KbRestoreInspect }
   | { kind: "restoring"; folder: string; info: KbRestoreInspect }
   | { kind: "done"; report: KbRestoreReport }
@@ -71,10 +72,27 @@ export const RestoreDialog = ({
     onClose();
   };
 
-  const look = async (folder: string) => {
+  const inspect = async (folder: string) => {
     setStage({ kind: "checking", folder });
     try {
       setStage({ kind: "ready", folder, info: await kbApi.restoreInspect(folder) });
+    } catch (e) {
+      setStage({ kind: "failed", message: restoreErrorText(e, t) });
+    }
+  };
+
+  /** A folder is either one backup or holds one per computer. */
+  const look = async (folder: string) => {
+    setStage({ kind: "checking", folder });
+    try {
+      const entries = await kbApi.restoreList(folder);
+      if (entries.length === 0) {
+        setStage({ kind: "failed", message: restoreErrorText(new Error("backup_incomplete: no backup in this folder"), t) });
+      } else if (entries.length === 1 && entries[0] != null) {
+        await inspect(entries[0].folder);
+      } else {
+        setStage({ kind: "pick", entries });
+      }
     } catch (e) {
       setStage({ kind: "failed", message: restoreErrorText(e, t) });
     }
@@ -135,6 +153,39 @@ export const RestoreDialog = ({
                 {t("kb.restore.pick")}
               </Button>
             </div>
+          </div>
+        )}
+
+        {stage.kind === "pick" && (
+          <div className="space-y-2">
+            <p className="text-sm text-muted-foreground">{t("kb.restore.pickComputer")}</p>
+            <ul className="space-y-2" aria-label={t("kb.restore.pickComputer")}>
+              {stage.entries.map((entry) => (
+                <li key={entry.folder}>
+                  <Button
+                    variant="outline"
+                    className="h-auto w-full justify-start whitespace-normal py-2 text-left"
+                    onClick={() => void inspect(entry.folder)}
+                  >
+                    <span className="block space-y-0.5">
+                      <span className="block font-medium">
+                        {entry.old_layout ? t("kb.restore.oldLayout") : entry.name}
+                        {entry.this_computer && ` · ${t("kb.restore.thisComputer")}`}
+                      </span>
+                      {!entry.old_layout && (
+                        <span className="block text-xs text-muted-foreground">
+                          {t("kb.restore.entry", {
+                            os: entry.os,
+                            when: entry.last_backup_at === "" ? "?" : formatWhen(entry.last_backup_at),
+                            sessions: entry.sessions,
+                          })}
+                        </span>
+                      )}
+                    </span>
+                  </Button>
+                </li>
+              ))}
+            </ul>
           </div>
         )}
 
@@ -278,6 +329,24 @@ const Done = ({
           {t("kb.restore.collect")}
         </Button>
       </div>
+    </div>
+  );
+};
+
+/** Which folder of the disk is this computer's, and a note about an older backup. */
+export const BackupFolderLine = () => {
+  const { t } = useTranslation();
+  const backup = useKbStore((s) => s.overview?.backup);
+  const enabled = useKbStore((s) => s.overview?.mirror.enabled === true);
+  if (!enabled || backup == null) return null;
+  return (
+    <div className="space-y-1 text-xs text-muted-foreground">
+      <p className="break-all">
+        {backup.folder != null
+          ? t("kb.backupFolder.line", { path: backup.folder })
+          : t("kb.backupFolder.notYet")}
+      </p>
+      {backup.old_layout && <p role="note">{t("kb.backupFolder.oldLayout")}</p>}
     </div>
   );
 };

@@ -83,6 +83,10 @@ export interface KbBackupMeta {
   last_bytes: number | null;
   /** `[done, total]` bytes of a running backup. */
   progress: [number, number] | null;
+  /** This computer's folder on the backup disk, as of the last backup. */
+  folder: string | null;
+  /** A backup in the old layout (0.7.3 and before) is still on the disk. */
+  old_layout: boolean;
 }
 
 export interface KbScheduleNotice {
@@ -751,4 +755,16 @@ export interface KbRestoreReport {
   rehomed_files: number;
   warnings: string[];
   duration_ms: number;
+}
+
+/** One backup found in a backup folder (`kb_restore_list`). */
+export interface KbBackupEntry {
+  folder: string;
+  name: string;
+  os: string;
+  last_backup_at: string;
+  sessions: number;
+  this_computer: boolean;
+  /** Made by 0.7.3 or before: no computer is recorded. */
+  old_layout: boolean;
 }

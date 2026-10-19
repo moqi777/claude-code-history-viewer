@@ -18,6 +18,7 @@ use std::time::{Duration, Instant};
 use rusqlite::Connection;
 use serde::Serialize;
 
+use super::backup_dir;
 use super::db;
 use super::fsutil;
 use super::log::SyncLog;
@@ -37,6 +38,8 @@ pub const META_LAST_BYTES: &str = "backup_last_bytes";
 pub const META_LAST_SKIPPED_AT: &str = "backup_last_skipped_at";
 pub const META_STATE: &str = "backup_state";
 pub const META_PROGRESS: &str = "backup_progress";
+pub const META_FOLDER: &str = "backup_folder";
+pub const META_OLD_LAYOUT: &str = "backup_old_layout";
 pub const META_SNAPSHOT_DAY: &str = "backup_last_db_snapshot_day";
 
 const PROGRESS_META_EVERY: Duration = Duration::from_secs(2);
@@ -58,6 +61,12 @@ pub struct BackupSummary {
     pub duplicates_removed: u64,
     pub duplicate_bytes_freed: u64,
     pub snapshot_taken: bool,
+    /// This computer's folder on the disk.
+    pub folder: Option<String>,
+    /// A backup in the old layout is still in the configured folder.
+    pub old_backup_left: bool,
+    /// An old-layout backup of this computer was moved into its folder.
+    pub moved_old_backup: bool,
     pub errors: Vec<SyncError>,
     pub duration_ms: u64,
 }
@@ -195,21 +204,52 @@ pub fn run(
         }
     };
 
+    // This computer's folder inside the configured one; never anybody else's.
+    let (who, resolved) = match own_folder(env, target, &mount, log) {
+        Ok(found) => found,
+        Err(message) => {
+            log.line(&format!("backup error: {message}"));
+            let _ = db::set_meta(conn, META_LAST_RESULT, &format!("error:{message}"));
+            return BackupSummary {
+                status: "error".into(),
+                errors: vec![backup_error(&target.target_dir, message)],
+                ..BackupSummary::default()
+            };
+        }
+    };
+    let dir = resolved.dir.clone();
+    let _ = db::set_meta(conn, META_FOLDER, &dir.display().to_string());
+    let _ = db::set_meta(
+        conn,
+        META_OLD_LAYOUT,
+        if resolved.old_backup_left { "1" } else { "0" },
+    );
+
     let _ = db::set_meta(conn, META_STATE, "running");
     let _ = db::set_meta(conn, META_PROGRESS, "0/0");
-    log.line(&format!("backup start -> {}", target.target_dir.display()));
-    let mut summary = BackupSummary::default();
-    if let Err(message) = copy_all(env, conn, log, &target.target_dir, &mount, &mut summary) {
-        summary
-            .errors
-            .push(backup_error(&target.target_dir, message));
+    log.line(&format!("backup start -> {}", dir.display()));
+    let mut summary = BackupSummary {
+        folder: Some(dir.display().to_string()),
+        old_backup_left: resolved.old_backup_left,
+        moved_old_backup: resolved.moved_old_backup,
+        ..BackupSummary::default()
+    };
+    if let Err(message) = copy_all(env, conn, log, &dir, &mount, &mut summary) {
+        summary.errors.push(backup_error(&dir, message));
     }
-    match snapshot_db(env, conn, &target.target_dir, &mount) {
+    match snapshot_db(env, conn, &dir, &mount) {
         Ok(taken) => summary.snapshot_taken = taken,
-        Err(message) => summary.errors.push(backup_error(
-            &target.target_dir.join(SNAPSHOT_NAME),
-            message,
-        )),
+        Err(message) => summary
+            .errors
+            .push(backup_error(&dir.join(SNAPSHOT_NAME), message)),
+    }
+    if summary.errors.is_empty() {
+        let sessions = conn
+            .query_row("SELECT COUNT(*) FROM sessions", [], |r| r.get::<_, i64>(0))
+            .map_or(0, |n| u64::try_from(n).unwrap_or(0));
+        if let Err(message) = backup_dir::touch(&dir, &who, sessions) {
+            summary.errors.push(backup_error(&dir, message));
+        }
     }
 
     summary.status = if summary.errors.is_empty() {
@@ -239,6 +279,19 @@ pub fn run(
         summary.errors.len()
     ));
     summary
+}
+
+/// Who this computer is and which folder of the disk is its own.
+fn own_folder(
+    env: &KbEnv,
+    target: &super::sync::MirrorTarget,
+    mount: &Path,
+    log: &SyncLog,
+) -> Result<(backup_dir::Identity, backup_dir::Resolved), String> {
+    ensure_on_disk(&target.target_dir, mount)?;
+    let who = backup_dir::identity(&target.id_file)?;
+    let resolved = backup_dir::resolve(&target.target_dir, &who, &env.roots, env.data.root(), log)?;
+    Ok((who, resolved))
 }
 
 fn backup_error(path: &Path, message: String) -> SyncError {
@@ -524,19 +577,36 @@ mod tests {
 
     fn rig() -> Rig {
         let tmp = tempfile::tempdir().unwrap();
-        let data = tmp.path().join("AgentKB");
         let disk = tmp.path().join("disk");
-        fs::create_dir_all(data.join("raw/claude/projects/p")).unwrap();
         fs::create_dir_all(&disk).unwrap();
-        let target = disk.join("AgentKB-backup");
+        rig_in(tmp, disk, "aaaaaaaa11111111aaaaaaaa11111111")
+    }
+
+    /// Another computer (its own data folder and id) on the disk of `disk`.
+    fn rig_on(disk: &Path, id: &str) -> Rig {
+        rig_in(tempfile::tempdir().unwrap(), disk.to_path_buf(), id)
+    }
+
+    fn rig_in(tmp: tempfile::TempDir, disk: PathBuf, id: &str) -> Rig {
+        let data = tmp.path().join("AgentKB");
+        fs::create_dir_all(data.join("raw/claude/projects/p")).unwrap();
+        let root = disk.join("AgentKB-backup");
+        let id_file = tmp.path().join("cfg/backup-device.json");
+        fs::create_dir_all(id_file.parent().unwrap()).unwrap();
+        fs::write(&id_file, format!(r#"{{"id":"{id}"}}"#)).unwrap();
+        // This computer's folder inside the configured one.
+        let target = root.join(backup_dir::folder_name(
+            &backup_dir::identity(&id_file).unwrap(),
+        ));
         let env = KbEnv {
             data: DataPaths::new(&data),
             roots: SourceRoots::default(),
             exclude_prefixes: Vec::new(),
             exclude_cwd_prefixes: Vec::new(),
             mirror: Some(MirrorTarget {
-                target_dir: target.clone(),
+                target_dir: root,
                 volume_uuid: "DISK-UUID".into(),
+                id_file,
             }),
             progress: ProgressSink::default(),
             force_reindex: false,
@@ -858,7 +928,7 @@ mod tests {
         );
         assert_eq!(
             names(&rig.target),
-            vec!["kb.db", "kb.db.prev", "raw"],
+            vec!["agentkb-backup.json", "kb.db", "kb.db.prev", "raw"],
             "no stray temp files or dated snapshots"
         );
     }
@@ -986,6 +1056,122 @@ mod tests {
             .arg(&mount)
             .output();
         result.unwrap();
+    }
+
+    fn other_computer(rig: &Rig, id: &str) -> Rig {
+        // A second computer: its own data folder and id, the same disk.
+        rig_on(&rig.disk, id)
+    }
+
+    #[test]
+    fn two_computers_back_up_to_one_disk_without_touching_each_other() {
+        let a = rig();
+        put(&a, REL, b"from A\n");
+        let b = other_computer(&a, "bbbbbbbb22222222bbbbbbbb22222222");
+        put(&b, REL, b"from B, a different file with the same name\n");
+        let (ra, rb) = (pass(&a), pass(&b));
+        assert_eq!(ra.status, "ok", "{:?}", ra.errors);
+        assert_eq!(rb.status, "ok", "{:?}", rb.errors);
+        assert_ne!(a.target, b.target);
+        assert_eq!(
+            fs::read(a.target.join("raw").join(REL)).unwrap(),
+            b"from A\n"
+        );
+        assert_eq!(
+            fs::read(b.target.join("raw").join(REL)).unwrap(),
+            b"from B, a different file with the same name\n"
+        );
+        // Each snapshot is that computer's own, and nothing was set aside.
+        for rig in [&a, &b] {
+            assert!(rig.target.join("kb.db").is_file());
+            assert_eq!(
+                names(&rig.target.join("raw/claude/projects/p")),
+                vec!["s.jsonl"],
+                "no .prev-* or .conflict-*"
+            );
+            let marker = backup_dir::read_marker(&rig.target).unwrap();
+            assert!(!marker.last_backup_at.is_empty() && !marker.first_backup_at.is_empty());
+        }
+        assert_eq!(names(&a.disk.join("AgentKB-backup")).len(), 2);
+        // A second pass changes nothing for anybody.
+        assert_eq!(pass(&a).copied_files, 0);
+        assert_eq!(pass(&b).copied_files, 0);
+    }
+
+    #[test]
+    fn a_folder_of_another_computer_is_never_written_to() {
+        let a = rig();
+        put(&a, REL, b"x\n");
+        // The folder this computer would use already belongs to somebody else.
+        fs::create_dir_all(&a.target).unwrap();
+        fs::write(
+            a.target.join(backup_dir::MARKER_NAME),
+            r#"{"id":"cccccccc33333333","name":"Windows-PC","os":"windows"}"#,
+        )
+        .unwrap();
+        // (The scan finds no folder of ours, then meets the planned name.)
+        let summary = pass(&a);
+        assert_eq!(summary.status, "error");
+        assert!(
+            summary.errors[0].message.contains("another computer"),
+            "{:?}",
+            summary.errors
+        );
+        assert_eq!(
+            names(&a.target),
+            vec!["agentkb-backup.json"],
+            "nothing was written"
+        );
+    }
+
+    #[test]
+    fn renaming_the_computer_keeps_the_same_folder() {
+        let a = rig();
+        put(&a, REL, b"x\n");
+        assert_eq!(pass(&a).status, "ok");
+        // The marker still carries the id; the folder name is whatever it was.
+        let mut marker = backup_dir::read_marker(&a.target).unwrap();
+        marker.name = "renamed-long-ago".into();
+        fs::write(
+            a.target.join(backup_dir::MARKER_NAME),
+            serde_json::to_string(&marker).unwrap(),
+        )
+        .unwrap();
+        let old = a.target.clone();
+        let renamed = a.disk.join("AgentKB-backup/Old-Name-aaaaaaaa");
+        fs::rename(&old, &renamed).unwrap();
+        put(&a, "claude/projects/p/t.jsonl", b"y\n");
+        assert_eq!(pass(&a).status, "ok");
+        assert_eq!(
+            names(&a.disk.join("AgentKB-backup")),
+            vec!["Old-Name-aaaaaaaa"]
+        );
+        assert!(renamed.join("raw/claude/projects/p/t.jsonl").is_file());
+    }
+
+    #[test]
+    fn the_folder_and_the_old_layout_are_reported_for_the_settings_page() {
+        let a = rig();
+        put(&a, REL, b"x\n");
+        let root = a.disk.join("AgentKB-backup");
+        fs::create_dir_all(root.join("raw")).unwrap();
+        fs::write(root.join("kb.db"), b"not ours, not readable").unwrap();
+        let summary = pass(&a);
+        assert_eq!(summary.status, "ok", "{:?}", summary.errors);
+        assert!(summary.old_backup_left && !summary.moved_old_backup);
+        assert_eq!(
+            summary.folder.as_deref(),
+            Some(a.target.to_string_lossy().as_ref())
+        );
+        let conn = db::open(&a.env.data.db()).unwrap();
+        assert_eq!(
+            db::get_meta(&conn, META_FOLDER).unwrap().as_deref(),
+            Some(a.target.to_string_lossy().as_ref())
+        );
+        assert_eq!(
+            db::get_meta(&conn, META_OLD_LAYOUT).unwrap().as_deref(),
+            Some("1")
+        );
     }
 
     #[test]

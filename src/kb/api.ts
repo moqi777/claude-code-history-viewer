@@ -18,6 +18,7 @@ import type {
   KbImportInspect,
   KbImportPrepared,
   KbImportReport,
+  KbBackupEntry,
   KbRestoreInspect,
   KbRestoreReport,
   KbFacets,
@@ -80,6 +81,7 @@ export const kbApi = {
   exportStart: (dest: string, overwrite: boolean, withVectors = true) =>
     api<KbExportReport>("kb_export_start", { dest, overwrite, withVectors }),
   transferCancel: () => api<void>("kb_transfer_cancel"),
+  restoreList: (folder: string) => api<KbBackupEntry[]>("kb_restore_list", { folder }),
   restoreInspect: (folder: string) => api<KbRestoreInspect>("kb_restore_inspect", { folder }),
   restoreStart: (folder: string) => api<KbRestoreReport>("kb_restore_start", { folder }),
   importInspect: (path: string, dataDir?: string) =>

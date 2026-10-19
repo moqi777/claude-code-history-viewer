@@ -7,6 +7,7 @@ use std::sync::Mutex;
 
 use tauri::Emitter;
 
+use super::backup_dir::{self, BackupEntry};
 use super::commands::PROGRESS_EVENT;
 use super::config::{self, ConfigState, KbConfig};
 use super::export::{self, ExportReport};
@@ -218,6 +219,19 @@ pub async fn kb_restore_start(folder: String, app: tauri::AppHandle) -> Res<Rest
         })();
         end();
         result
+    })
+    .await
+}
+
+/// The backups at `folder`: that folder itself, or one per computer inside it.
+#[tauri::command]
+pub async fn kb_restore_list(folder: String) -> Res<Vec<BackupEntry>> {
+    blocking(move || {
+        let id = backup_dir::existing_id(&backup_dir::id_file_path());
+        Ok(backup_dir::list(
+            &migrate_dir::expand(&folder),
+            id.as_deref(),
+        ))
     })
     .await
 }

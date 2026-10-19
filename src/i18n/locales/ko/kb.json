@@ -516,5 +516,12 @@
   "kb.restore.error.embed_running": "시맨틱 인덱스를 만드는 중입니다. 잠시 후 다시 시도하세요(또는 아래에서 중지하세요). 아무것도 변경되지 않았습니다.",
   "kb.restore.error.no_space": "디스크 여유 공간이 부족합니다. {{message}}",
   "kb.restore.error.cancelled": "취소했습니다. 데이터는 바뀌지 않았습니다.",
-  "kb.restore.error.generic": "복원에 실패했습니다. 아래에 따로 적혀 있지 않으면 현재 데이터는 바뀌지 않았습니다: {{message}}"
+  "kb.restore.error.generic": "복원에 실패했습니다. 아래에 따로 적혀 있지 않으면 현재 데이터는 바뀌지 않았습니다: {{message}}",
+  "kb.restore.pickComputer": "이 디스크에는 여러 컴퓨터의 백업이 있습니다. 어느 것을 복원할까요?",
+  "kb.restore.entry": "{{os}} · 마지막 백업 {{when}} · 세션 {{sessions}}개",
+  "kb.restore.thisComputer": "이 컴퓨터",
+  "kb.restore.oldLayout": "이전 형식의 백업(컴퓨터 기록 없음)",
+  "kb.backupFolder.line": "이 컴퓨터의 백업 위치: {{path}}",
+  "kb.backupFolder.notYet": "이 컴퓨터의 디스크 폴더는 첫 백업 때 만들어집니다.",
+  "kb.backupFolder.oldLayout": "어느 컴퓨터에도 속하지 않은 이전 백업도 디스크에 있습니다. 그대로 두었으며, 여기에서 복원할 수도 있습니다."
 }

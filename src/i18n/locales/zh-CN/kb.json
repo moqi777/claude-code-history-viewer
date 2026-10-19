@@ -516,5 +516,12 @@
   "kb.restore.error.embed_running": "正在建立语义索引，请稍后再试（或在下方先停止它）。没有做任何改动。",
   "kb.restore.error.no_space": "磁盘空间不足。{{message}}",
   "kb.restore.error.cancelled": "已取消，数据没有变化。",
-  "kb.restore.error.generic": "恢复失败，除非下面另有说明，现有数据没有变化：{{message}}"
+  "kb.restore.error.generic": "恢复失败，除非下面另有说明，现有数据没有变化：{{message}}",
+  "kb.restore.pickComputer": "这块硬盘里有多台电脑的备份，请选择要恢复哪一份。",
+  "kb.restore.entry": "{{os}} · 最近备份 {{when}} · {{sessions}} 个会话",
+  "kb.restore.thisComputer": "本机",
+  "kb.restore.oldLayout": "旧版备份（没有记录是哪台电脑）",
+  "kb.backupFolder.line": "本机备份到：{{path}}",
+  "kb.backupFolder.notYet": "本机在硬盘上的文件夹会在第一次备份时创建。",
+  "kb.backupFolder.oldLayout": "硬盘上还有一份没有归属于任何电脑的旧版备份。它保持原样没有动；仍然可以从它恢复。"
 }

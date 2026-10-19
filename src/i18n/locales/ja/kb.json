@@ -516,5 +516,12 @@
   "kb.restore.error.embed_running": "セマンティックインデックスを作成中です。しばらくしてからお試しください（または下で停止してください）。何も変更していません。",
   "kb.restore.error.no_space": "空き容量が足りません。{{message}}",
   "kb.restore.error.cancelled": "キャンセルしました。データは変更されていません。",
-  "kb.restore.error.generic": "復元に失敗しました。下に別途記載がない限り、現在のデータは変更されていません：{{message}}"
+  "kb.restore.error.generic": "復元に失敗しました。下に別途記載がない限り、現在のデータは変更されていません：{{message}}",
+  "kb.restore.pickComputer": "このディスクには複数のコンピュータのバックアップがあります。どれを復元しますか？",
+  "kb.restore.entry": "{{os}} · 最終バックアップ {{when}} · セッション {{sessions}} 件",
+  "kb.restore.thisComputer": "このコンピュータ",
+  "kb.restore.oldLayout": "古い形式のバックアップ（コンピュータの記録なし）",
+  "kb.backupFolder.line": "このコンピュータのバックアップ先：{{path}}",
+  "kb.backupFolder.notYet": "このコンピュータ用のフォルダは、最初のバックアップ時にディスク上に作成されます。",
+  "kb.backupFolder.oldLayout": "どのコンピュータにも割り当てられていない古いバックアップもディスクにあります。そのまま残してあり、ここから復元することもできます。"
 }

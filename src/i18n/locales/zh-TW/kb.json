@@ -516,5 +516,12 @@
   "kb.restore.error.embed_running": "正在建立語意索引，請稍後再試（或在下方先停止它）。沒有做任何變更。",
   "kb.restore.error.no_space": "磁碟空間不足。{{message}}",
   "kb.restore.error.cancelled": "已取消，資料沒有變化。",
-  "kb.restore.error.generic": "還原失敗，除非下方另有說明，現有資料沒有變化：{{message}}"
+  "kb.restore.error.generic": "還原失敗，除非下方另有說明，現有資料沒有變化：{{message}}",
+  "kb.restore.pickComputer": "這顆硬碟裡有多台電腦的備份，請選擇要還原哪一份。",
+  "kb.restore.entry": "{{os}} · 最近備份 {{when}} · {{sessions}} 個工作階段",
+  "kb.restore.thisComputer": "本機",
+  "kb.restore.oldLayout": "舊版備份（沒有記錄是哪台電腦）",
+  "kb.backupFolder.line": "本機備份到：{{path}}",
+  "kb.backupFolder.notYet": "本機在硬碟上的資料夾會在第一次備份時建立。",
+  "kb.backupFolder.oldLayout": "硬碟上還有一份沒有歸屬於任何電腦的舊版備份。它保持原樣沒有動；仍然可以從它還原。"
 }

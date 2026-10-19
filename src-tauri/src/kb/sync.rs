@@ -38,8 +38,11 @@ const HUGE_LINE_BYTES: u64 = 100 * 1024 * 1024;
 /// The external backup disk, as recorded when it was chosen.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MirrorTarget {
+    /// The configured folder on the disk; each computer has a subfolder in it.
     pub target_dir: PathBuf,
     pub volume_uuid: String,
+    /// Where this computer keeps the id that names its subfolder.
+    pub id_file: PathBuf,
 }
 
 #[derive(Debug, Clone)]
@@ -63,6 +66,7 @@ impl KbEnv {
             Some(MirrorTarget {
                 target_dir: config.mirror.target_dir.clone()?,
                 volume_uuid: config.mirror.volume_uuid.clone()?,
+                id_file: super::backup_dir::id_file_path(),
             })
         });
         let data = DataPaths::new(config.data_dir.clone());
@@ -3334,8 +3338,17 @@ mod tests {
         let target = MirrorTarget {
             target_dir: disk.join("AgentKB-backup"),
             volume_uuid: "DISK".into(),
+            id_file: sb.dir.path().join("cfg/backup-device.json"),
         };
         (disk, query, target)
+    }
+
+    /// This computer's folder inside the configured one.
+    fn own_dir(target: &MirrorTarget) -> PathBuf {
+        use super::super::backup_dir;
+        target.target_dir.join(backup_dir::folder_name(
+            &backup_dir::identity(&target.id_file).unwrap(),
+        ))
     }
 
     #[test]
@@ -3351,7 +3364,7 @@ mod tests {
         let rel = "claude/projects/-Users-me-proj/".to_string() + CLAUDE_ID + ".jsonl";
         assert_eq!(
             fs::read(sb.mirror_of(&rel)).unwrap(),
-            fs::read(target.target_dir.join("raw").join(&rel)).unwrap()
+            fs::read(own_dir(&target).join("raw").join(&rel)).unwrap()
         );
         // A later append to the source flows through collect then backup.
         append(&sb.claude_file(), "{\"type\":\"mode\",\"mode\":\"y\"}\n");
@@ -3359,7 +3372,7 @@ mod tests {
         assert_eq!(again.backup.unwrap().appended_files, 1);
         assert_eq!(
             fs::read(sb.mirror_of(&rel)).unwrap(),
-            fs::read(target.target_dir.join("raw").join(&rel)).unwrap()
+            fs::read(own_dir(&target).join("raw").join(&rel)).unwrap()
         );
     }
 

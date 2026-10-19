@@ -53,6 +53,10 @@ pub struct BackupMeta {
     pub last_bytes: Option<u64>,
     /// `bytes done / bytes total` of a running backup.
     pub progress: Option<(u64, u64)>,
+    /// This computer's folder on the backup disk, as of the last backup.
+    pub folder: Option<String>,
+    /// A backup in the old layout (0.7.3 and before) is still on the disk.
+    pub old_layout: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -135,6 +139,8 @@ pub fn collect(env: &KbEnv) -> Result<KbStatus, String> {
             let (done, total) = v.split_once('/')?;
             Some((done.parse().ok()?, total.parse().ok()?))
         }),
+        folder: meta(&conn, backup::META_FOLDER),
+        old_layout: meta(&conn, backup::META_OLD_LAYOUT).as_deref() == Some("1"),
     };
     // A process that died mid-backup leaves "running" behind; only believe it
     // while the lock holder is alive.
