@@ -1,0 +1,9 @@
+docs/agent-kb/P7.2-restore-drill.md
+  ai_agent 1-17
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.11",
+  "base_commit_sha": "66a6b5a8ad848afbef30b2d53015ece356bfc70d",
+  "prompts": {}
+}
