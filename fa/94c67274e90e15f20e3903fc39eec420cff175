@@ -1,0 +1,9 @@
+docs/agent-kb/P7.3-restore.md
+  ai_agent 1-31
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.11",
+  "base_commit_sha": "fa94c67274e90e15f20e3903fc39eec420cff175",
+  "prompts": {}
+}
