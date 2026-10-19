@@ -420,31 +420,57 @@ fn snapshot_db(
     ensure_on_disk(target_dir, mount)?;
     fs::create_dir_all(target_dir)
         .map_err(|e| format!("cannot create {}: {e}", target_dir.display()))?;
-    let tmp = target_dir.join(format!("{SNAPSHOT_NAME}.tmp-{}", std::process::id()));
-    let _ = fs::remove_file(&tmp);
-    let result = (|| -> Result<(), String> {
-        online_backup(conn, &tmp)?;
-        let check = Connection::open(&tmp).map_err(|e| format!("cannot open the snapshot: {e}"))?;
-        let verdict: String = check
-            .query_row("PRAGMA integrity_check", [], |r| r.get(0))
-            .map_err(|e| format!("integrity check failed to run: {e}"))?;
-        if verdict != "ok" {
-            return Err(format!("snapshot failed its integrity check: {verdict}"));
-        }
-        drop(check);
-        let live = target_dir.join(SNAPSHOT_NAME);
-        if live.exists() {
-            fs::rename(&live, target_dir.join(SNAPSHOT_PREV_NAME))
-                .map_err(|e| format!("cannot rotate the previous snapshot: {e}"))?;
-        }
-        fs::rename(&tmp, &live).map_err(|e| format!("cannot place the snapshot: {e}"))
-    })();
-    if result.is_err() {
-        let _ = fs::remove_file(&tmp);
-    }
+    // SQLite never opens a file on the disk: the snapshot is made and checked in
+    // the data directory, then copied whole (some exFAT mounts refuse the
+    // shared-memory file WAL needs).
+    let local = env
+        .data
+        .root()
+        .join(format!("{SNAPSHOT_NAME}.snapshot-{}", std::process::id()));
+    let staged = target_dir.join(format!("{SNAPSHOT_NAME}.new-{}", std::process::id()));
+    let result = place_snapshot(conn, &local, &staged, target_dir, |from, to| {
+        fsutil::copy_atomic(from, to).map(|_| ())
+    });
+    let _ = fs::remove_file(&local);
+    let _ = fs::remove_file(&staged);
     result?;
     db::set_meta(conn, META_SNAPSHOT_DAY, &today)?;
     Ok(true)
+}
+
+/// Make the snapshot at `local`, check it, copy it to `staged` on the disk,
+/// compare the two by SHA-256 and only then rotate `kb.db` to `kb.db.prev` and
+/// move the new one in. Any failure leaves the disk's snapshots as they were.
+fn place_snapshot(
+    conn: &Connection,
+    local: &Path,
+    staged: &Path,
+    target_dir: &Path,
+    copy: impl FnOnce(&Path, &Path) -> Result<(), String>,
+) -> Result<(), String> {
+    let _ = fs::remove_file(local);
+    online_backup(conn, local)?;
+    let check = Connection::open(local).map_err(|e| format!("cannot open the snapshot: {e}"))?;
+    let verdict: String = check
+        .query_row("PRAGMA integrity_check", [], |r| r.get(0))
+        .map_err(|e| format!("integrity check failed to run: {e}"))?;
+    if verdict != "ok" {
+        return Err(format!("snapshot failed its integrity check: {verdict}"));
+    }
+    drop(check);
+    copy(local, staged)?;
+    let (want, got) = (fsutil::sha256_file(local), fsutil::sha256_file(staged));
+    match (want, got) {
+        (Ok(a), Ok(b)) if a == b => {}
+        (Ok(_), Ok(_)) => return Err("the snapshot on the disk differs from the original".into()),
+        (Err(e), _) | (_, Err(e)) => return Err(format!("cannot verify the snapshot copy: {e}")),
+    }
+    let live = target_dir.join(SNAPSHOT_NAME);
+    if live.exists() {
+        fs::rename(&live, target_dir.join(SNAPSHOT_PREV_NAME))
+            .map_err(|e| format!("cannot rotate the previous snapshot: {e}"))?;
+    }
+    fs::rename(staged, &live).map_err(|e| format!("cannot place the snapshot: {e}"))
 }
 
 /// Write a consistent copy of the live database to `dest` (WAL included).
@@ -835,6 +861,131 @@ mod tests {
             vec!["kb.db", "kb.db.prev", "raw"],
             "no stray temp files or dated snapshots"
         );
+    }
+
+    fn snapshot_rig() -> (Rig, Connection) {
+        let rig = rig();
+        let conn = db::open(&rig.env.data.db()).unwrap();
+        db::set_meta(&conn, "marker", "old").unwrap();
+        fs::create_dir_all(&rig.target).unwrap();
+        let (live, prev) = (rig.target.join("kb.db"), rig.target.join("kb.db.prev"));
+        online_backup(&conn, &live).unwrap();
+        online_backup(&conn, &prev).unwrap();
+        db::set_meta(&conn, "marker", "new").unwrap();
+        (rig, conn)
+    }
+
+    fn marker(path: &Path) -> String {
+        let c = Connection::open(path).unwrap();
+        db::get_meta(&c, "marker").unwrap().unwrap()
+    }
+
+    #[test]
+    fn a_snapshot_is_built_locally_and_copied_whole() {
+        let (rig, conn) = snapshot_rig();
+        let local = rig.data.join("kb.db.snapshot-test");
+        let staged = rig.target.join("kb.db.new-test");
+        place_snapshot(&conn, &local, &staged, &rig.target, |a, b| {
+            fsutil::copy_atomic(a, b).map(|_| ())
+        })
+        .unwrap();
+        assert_eq!(marker(&rig.target.join("kb.db")), "new");
+        assert_eq!(marker(&rig.target.join("kb.db.prev")), "old");
+        assert!(!staged.exists());
+    }
+
+    #[test]
+    fn a_copy_that_fails_halfway_leaves_the_old_snapshots_and_no_litter() {
+        let (rig, conn) = snapshot_rig();
+        let local = rig.data.join("kb.db.snapshot-test");
+        let staged = rig.target.join("kb.db.new-test");
+        let err = place_snapshot(&conn, &local, &staged, &rig.target, |a, b| {
+            let bytes = fs::read(a).unwrap();
+            fs::write(b, &bytes[..bytes.len() / 2]).unwrap();
+            Err("disk went away".into())
+        })
+        .unwrap_err();
+        assert!(err.contains("disk went away"));
+        assert_eq!(marker(&rig.target.join("kb.db")), "old");
+        assert_eq!(marker(&rig.target.join("kb.db.prev")), "old");
+        let _ = fs::remove_file(&staged); // snapshot_db removes both on any error
+    }
+
+    #[test]
+    fn a_copy_that_does_not_match_is_never_placed() {
+        let (rig, conn) = snapshot_rig();
+        let local = rig.data.join("kb.db.snapshot-test");
+        let staged = rig.target.join("kb.db.new-test");
+        let err = place_snapshot(&conn, &local, &staged, &rig.target, |a, b| {
+            let mut bytes = fs::read(a).unwrap();
+            let last = bytes.len() - 1;
+            bytes[last] ^= 0xff;
+            fs::write(b, bytes).map_err(|e| e.to_string())
+        })
+        .unwrap_err();
+        assert!(err.contains("differs"), "{err}");
+        assert_eq!(marker(&rig.target.join("kb.db")), "old");
+        assert_eq!(marker(&rig.target.join("kb.db.prev")), "old");
+    }
+
+    #[test]
+    fn a_failed_snapshot_removes_the_local_and_staged_temp_files() {
+        let (rig, conn) = snapshot_rig();
+        // the target has no room for the staged file: its parent is a plain file
+        let blocker = rig.disk.join("blocker");
+        fs::write(&blocker, b"x").unwrap();
+        let local = rig.data.join("kb.db.snapshot-test");
+        let staged = blocker.join("kb.db.new-test");
+        assert!(place_snapshot(&conn, &local, &staged, &rig.target, |a, b| {
+            fsutil::copy_atomic(a, b).map(|_| ())
+        })
+        .is_err());
+        assert_eq!(marker(&rig.target.join("kb.db")), "old");
+    }
+
+    /// Real exFAT: needs macOS and `hdiutil`; run by hand with
+    /// `cargo test exfat_disk_image -- --ignored`.
+    #[cfg(target_os = "macos")]
+    #[test]
+    #[ignore = "creates and mounts an exFAT disk image"]
+    fn exfat_disk_image_takes_a_snapshot() {
+        use std::process::Command;
+        let work = tempfile::tempdir().unwrap();
+        let image = work.path().join("disk.dmg");
+        let ok = |c: &mut Command| c.output().unwrap();
+        let out = ok(Command::new("hdiutil")
+            .args([
+                "create", "-size", "64m", "-fs", "ExFAT", "-volname", "P72", "-attach",
+            ])
+            .arg(&image));
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let mount = PathBuf::from("/Volumes/P72");
+        let result = std::panic::catch_unwind(|| {
+            let rig = rig();
+            let conn = db::open(&rig.env.data.db()).unwrap();
+            db::set_meta(&conn, "marker", "exfat").unwrap();
+            let target = mount.join("AgentKB-backup");
+            fs::create_dir_all(&target).unwrap();
+            let local = rig.data.join("kb.db.snapshot-test");
+            let staged = target.join("kb.db.new-test");
+            place_snapshot(&conn, &local, &staged, &target, |a, b| {
+                fsutil::copy_atomic(a, b).map(|_| ())
+            })
+            .unwrap();
+            assert_eq!(marker(&target.join("kb.db")), "exfat");
+            // the old way, for the record: SQLite writing on the disk itself
+            let direct = online_backup(&conn, &target.join("direct.db"));
+            eprintln!("direct online_backup on exFAT: {direct:?}");
+        });
+        let _ = Command::new("hdiutil")
+            .args(["detach", "-force"])
+            .arg(&mount)
+            .output();
+        result.unwrap();
     }
 
     #[test]
