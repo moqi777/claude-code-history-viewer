@@ -73,3 +73,12 @@
 - `workspace routing discovery failed`：不是 AgentKB 的报错文字，像是 Claude Code 或 Codex 命令行自己报的
 
 Mac 上目前 36 条整理记录全部成功（Mac 只整理最近的会话，没做过全量）。修复任务见 `P7.1-digest-fixes.md`。
+
+## 8. Windows 合并到 0.7.4（`0107fde`）：通过，已合并
+
+- Windows 7 项全过；临时 HOME 下恢复、双机共用一块盘、旧布局迁移在 Windows 上通过
+- 发现并修了一处 Windows 差异：恢复时把 `vectors/.embed.lock.info`（Windows 的锁诊断文件）当成索引挪走了。只在 Windows 上排除这个文件名，Mac 不变
+- 新增 Windows 专属测试：用真实文件句柄占住 `kb.db`、笔记、索引文件，恢复失败后全部挪回，释放后能恢复成功
+- leader 在 Mac 上快进合并后重跑 Rust 三项：cargo test 库 1524 通过 0 失败，clippy、fmt 通过（前端没改）
+- 安装包：`D:\AgentKB-build\p74\AgentKB_0.7.4_x64-setup.exe`，SHA-256 `5D023FC7…4317F2`，未签名，未安装
+- 第 9 项旁证：零点临时验收 `passed`，正式收集任务 10-19 00:00 运行返回 0。用户真实数据的"第二天有笔记"仍要在界面上看
