@@ -1,0 +1,9 @@
+docs/agent-kb/P7.4-review.md
+  ai_agent 20-23
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.11",
+  "base_commit_sha": "d04ccf2ae3bb4295b65ac544901c253f958f97e6",
+  "prompts": {}
+}
