@@ -41,6 +41,8 @@ export const apiMocks = () => ({
   semanticBuildCancel: vi.fn(),
   semanticRebuild: vi.fn(),
   transferCancel: vi.fn(),
+  restoreInspect: vi.fn(),
+  restoreStart: vi.fn(),
   importInspect: vi.fn(),
   importPrepare: vi.fn(),
   importCommit: vi.fn(),

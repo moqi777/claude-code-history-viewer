@@ -676,6 +676,79 @@ pub(super) fn reindex_one(env: &KbEnv, conn: &Connection, row: &FileRow) -> Resu
     tx.commit().map_err(|e| format!("commit: {e}"))
 }
 
+/// Index what a plain mirror holds past its row's cursor, and move the cursor
+/// to the end of the last whole line. A restored library has this: the backup
+/// of `raw/` kept growing after the database snapshot was taken. The source
+/// may be gone (another computer), so the mirror itself is the input. The
+/// source columns are left alone, so a later pass over a source that still
+/// exists appends from the new cursor. Returns the bytes caught up.
+pub(super) fn index_mirror_tail(
+    env: &KbEnv,
+    conn: &Connection,
+    row: &FileRow,
+) -> Result<u64, String> {
+    use std::io::{Seek, SeekFrom};
+    if row.is_compressed {
+        return Ok(0);
+    }
+    let mirror_path = env.data.mirror_path(&row.mirror_rel)?;
+    let len = std::fs::metadata(&mirror_path)
+        .map_err(|e| format!("cannot stat mirror {}: {e}", mirror_path.display()))?
+        .len();
+    let from = u64::try_from(row.mirror_offset).unwrap_or(0);
+    if len <= from {
+        return Ok(0);
+    }
+    let meta = FileMeta::from_path(row.source, Path::new(&row.source_path));
+    let mut indexer = restore_indexer(conn, row.source, &meta, row, &mirror_path, from)?;
+    let mut file = std::fs::File::open(&mirror_path)
+        .map_err(|e| format!("cannot open mirror {}: {e}", mirror_path.display()))?;
+    file.seek(SeekFrom::Start(from))
+        .map_err(|e| format!("cannot seek mirror {}: {e}", mirror_path.display()))?;
+    let tail = super::index::for_each_line_chunk(std::io::Read::take(file, len - from), |chunk| {
+        indexer.feed(chunk);
+        Ok(())
+    })?;
+    if tail.consumed == 0 {
+        return Ok(0);
+    }
+    let (head_hash, head_len) = mirror::hash_head(&mirror_path, mirror::HEAD_BYTES)
+        .map_err(|e| format!("cannot hash mirror {}: {e}", mirror_path.display()))?;
+    let unknown = serde_json::to_string(indexer.unknown_types()).unwrap_or_else(|_| "{}".into());
+    let tx = conn
+        .unchecked_transaction()
+        .map_err(|e| format!("begin: {e}"))?;
+    let (replace_all, ops) = indexer.take_message_ops();
+    db::apply_message_ops(&tx, row.id, replace_all, &ops)?;
+    let record = indexer.record();
+    db::upsert_session(
+        &tx,
+        row.id,
+        row.source,
+        &record,
+        &indexer.state_json(),
+        &unknown,
+    )?;
+    db::apply_cwd_exclusion(
+        &tx,
+        row.id,
+        record.cwd.as_deref(),
+        &env.exclude_cwd_prefixes,
+    )?;
+    tx.execute(
+        "UPDATE files SET mirror_offset=?2, head_hash=?3, head_len=?4 WHERE id=?1",
+        rusqlite::params![
+            row.id,
+            i64::try_from(from + tail.consumed).unwrap_or(i64::MAX),
+            head_hash,
+            i64::try_from(head_len).unwrap_or(0),
+        ],
+    )
+    .map_err(|e| format!("update cursor: {e}"))?;
+    tx.commit().map_err(|e| format!("commit: {e}"))?;
+    Ok(tail.consumed)
+}
+
 // ---------------------------------------------------------------------------
 // One file
 // ---------------------------------------------------------------------------

@@ -192,7 +192,10 @@ pub fn clean_stale_work_dirs(data_root: &std::path::Path) {
     };
     for entry in entries.flatten() {
         let name = entry.file_name().to_string_lossy().into_owned();
-        if !(name.starts_with(".export-") || name.starts_with(".import-")) {
+        if !(name.starts_with(".export-")
+            || name.starts_with(".import-")
+            || name.starts_with(".restore-"))
+        {
             continue;
         }
         let old = entry

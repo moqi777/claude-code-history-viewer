@@ -13,6 +13,7 @@ use super::export::{self, ExportReport};
 use super::import::{self, ImportReport, InspectReport, Options, Prepared};
 use super::migrate_dir;
 use super::progress::ProgressSink;
+use super::restore::{self, Inspect, RestoreReport};
 use super::sync::KbEnv;
 use super::transfer::Cancel;
 
@@ -188,6 +189,35 @@ pub async fn kb_import_discard(path: String, data_dir: Option<String>) -> Res<()
     blocking(move || {
         let (_, env, _, _) = setup(data_dir.as_deref())?;
         import::discard(&env, &migrate_dir::expand(&path)).map_err(String::from)
+    })
+    .await
+}
+
+/// Look at a backup folder without changing anything.
+#[tauri::command]
+pub async fn kb_restore_inspect(folder: String) -> Res<Inspect> {
+    blocking(move || {
+        let config = KbConfig::load()?;
+        let env = KbEnv::from_config(&config);
+        restore::inspect(&env, &migrate_dir::expand(&folder)).map_err(String::from)
+    })
+    .await
+}
+
+/// Replace the library with the backup in `folder`. The library as it is now
+/// is set aside in `before-restore-<time>/`, not deleted.
+#[tauri::command]
+pub async fn kb_restore_start(folder: String, app: tauri::AppHandle) -> Res<RestoreReport> {
+    blocking(move || {
+        let cancel = begin()?;
+        let result = (|| {
+            let config = KbConfig::load()?;
+            let env = KbEnv::from_config(&config);
+            restore::restore(&env, &migrate_dir::expand(&folder), &cancel, &sink(&app))
+                .map_err(String::from)
+        })();
+        end();
+        result
     })
     .await
 }

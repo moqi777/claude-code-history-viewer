@@ -260,7 +260,7 @@ export interface KbMoveOutcome {
 }
 
 export interface KbProgress {
-  op: "sync" | "backup" | "migrate" | "export" | "import";
+  op: "sync" | "backup" | "migrate" | "export" | "import" | "restore";
   phase: string;
   done: number;
   total: number;
@@ -720,4 +720,35 @@ export interface KbDownloadProgress {
   file: string;
   done_bytes: number;
   total_bytes: number;
+}
+
+/** What a backup folder holds (`kb_restore_inspect`). */
+export interface KbRestoreInspect {
+  sessions: number;
+  notes: number;
+  raw_files: number;
+  raw_bytes: number;
+  note_files: number;
+  snapshot_at: string;
+  schema_version: number;
+  needs_upgrade: boolean;
+  free_bytes: number | null;
+  needed_bytes: number;
+  current_sessions: number;
+  current_notes: number;
+  current_empty: boolean;
+}
+
+export interface KbRestoreReport {
+  sessions: number;
+  notes: number;
+  raw_files: number;
+  raw_bytes: number;
+  set_aside: string | null;
+  caught_up_files: number;
+  caught_up_bytes: number;
+  missing_files: number;
+  rehomed_files: number;
+  warnings: string[];
+  duration_ms: number;
 }

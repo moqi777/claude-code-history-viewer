@@ -19,6 +19,14 @@ export const progressLabel = (p: KbProgress, t: TFunction): string => {
       percent: percentOf(p.bytes_done, p.bytes_total) ?? 0,
     });
   }
+  if (p.op === "restore") {
+    return t(`kb.restore.progress.${p.phase}` as const, {
+      done: p.done,
+      total: p.total,
+      bytes: formatBytes(p.bytes_done),
+      percent: percentOf(p.bytes_done, p.bytes_total) ?? 0,
+    });
+  }
   const key = p.phase === "verify" ? "kb.progress.verify" : "kb.progress.copy";
   return t(key, {
     done: p.done,

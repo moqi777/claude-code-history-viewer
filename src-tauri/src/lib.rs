@@ -224,6 +224,8 @@ fn run_tauri() {
             kb::transfer_commands::kb_export_start,
             kb::transfer_commands::kb_transfer_cancel,
             kb::transfer_commands::kb_import_inspect,
+            kb::transfer_commands::kb_restore_inspect,
+            kb::transfer_commands::kb_restore_start,
             kb::transfer_commands::kb_import_prepare,
             kb::transfer_commands::kb_import_commit,
             kb::transfer_commands::kb_import_discard,
