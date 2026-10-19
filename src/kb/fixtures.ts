@@ -20,7 +20,7 @@ export const overviewFixture = (patch: Partial<KbOverview> = {}): KbOverview => 
   data_bytes: 3_100_000_000,
   schedule_enabled: true,
   exe_stability: "stable",
-  agentkb_version: "0.7.4",
+  agentkb_version: "0.7.5",
   base_version: "1.32.0",
   mirror: { enabled: false, target_dir: null, volume_name: null },
   interval_secs: 600,

@@ -400,17 +400,41 @@ pub fn counts(conn: &Connection, round_id: &str) -> Result<Counts, String> {
     Ok(out)
 }
 
-/// Failed, still undigested sessions (an item that failed and was digested
-/// later, or whose session has since grown, no longer counts).
+/// The message kinds a digest reads. `input::load_items`, the candidate
+/// count and the failure checks all use this one list (kind/seq only).
+pub const INPUT_KINDS: &str = "'user','assistant','tool_use','tool_error'";
+
+/// Highest seq of a digest-readable message of the session (0 when none).
+pub fn newest_input_seq(conn: &Connection, source: &str, session_id: &str) -> Result<u64, String> {
+    conn.query_row(
+        &format!(
+            "SELECT COALESCE(MAX(m.seq),0) FROM messages m JOIN sessions s ON s.file_id=m.file_id \
+             WHERE s.source=?1 AND s.session_id=?2 AND m.kind IN ({INPUT_KINDS})"
+        ),
+        [source, session_id],
+        |r| r.get::<_, i64>(0),
+    )
+    .map(|n| u64::try_from(n).unwrap_or(0))
+    .map_err(|e| err("read newest input", e))
+}
+
+/// Failed sessions that are still unresolved. A failure is resolved when every
+/// digest-readable message inside its range (`seq <= seq_to`) is covered by the
+/// digest cursor, so a tail of `tool_result` rows never keeps it alive; it also
+/// stops counting once the session has grown readable messages past its range.
+/// Worked out at read time; history rows are never changed.
 pub fn failures(conn: &Connection) -> Result<Vec<Item>, String> {
     let mut stmt = conn
         .prepare(&format!(
             "SELECT {ITEM_COLUMNS} FROM digest_items i WHERE i.state='failed' \
-             AND COALESCE(i.seq_to,0) > COALESCE((SELECT digested_seq FROM digest_sessions d \
-                 WHERE d.source=i.source AND d.session_id=i.session_id),0) \
-             AND COALESCE(i.seq_to,0) >= COALESCE((SELECT MAX(m.seq) FROM messages m \
-                 JOIN sessions s ON s.file_id=m.file_id \
-                 WHERE s.source=i.source AND s.session_id=i.session_id),0) \
+             AND EXISTS (SELECT 1 FROM messages m JOIN sessions s ON s.file_id=m.file_id \
+                 WHERE s.source=i.source AND s.session_id=i.session_id \
+                 AND m.kind IN ({INPUT_KINDS}) AND m.seq<=COALESCE(i.seq_to,0) \
+                 AND m.seq>COALESCE((SELECT digested_seq FROM digest_sessions d \
+                     WHERE d.source=i.source AND d.session_id=i.session_id),0)) \
+             AND NOT EXISTS (SELECT 1 FROM messages m JOIN sessions s ON s.file_id=m.file_id \
+                 WHERE s.source=i.source AND s.session_id=i.session_id \
+                 AND m.kind IN ({INPUT_KINDS}) AND m.seq>COALESCE(i.seq_to,0)) \
              ORDER BY i.finished_at DESC"
         ))
         .map_err(|e| err("prepare failures", e))?;
@@ -429,11 +453,12 @@ pub fn failures(conn: &Connection) -> Result<Vec<Item>, String> {
 }
 
 /// A session that failed all its attempts and has nothing new since.
+/// `newest_input_seq` is the newest digest-readable message (not `tool_result`).
 pub fn is_held(
     conn: &Connection,
     source: &str,
     session_id: &str,
-    newest_seq: u64,
+    newest_input_seq: u64,
 ) -> Result<bool, String> {
     conn.query_row(
         "SELECT 1 FROM digest_items WHERE source=?1 AND session_id=?2 AND state='failed' \
@@ -441,7 +466,7 @@ pub fn is_held(
         params![
             source,
             session_id,
-            i64::try_from(newest_seq).unwrap_or(i64::MAX)
+            i64::try_from(newest_input_seq).unwrap_or(i64::MAX)
         ],
         |_| Ok(()),
     )

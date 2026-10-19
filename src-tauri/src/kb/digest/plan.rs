@@ -28,6 +28,7 @@ pub struct Candidate {
     /// The later of the session's and its sub-agents' last activity.
     pub activity: DateTime<Utc>,
     pub new_messages: usize,
+    /// Newest digest-readable message (not `tool_result`).
     pub newest_seq: u64,
 }
 
@@ -82,18 +83,21 @@ pub fn candidates(conn: &Connection, rules: &Rules<'_>) -> Result<Vec<Candidate>
     let quiet_from = rules.now - Duration::minutes(i64::from(rules.cfg.quiet_minutes));
 
     let mut stmt = conn
-        .prepare(
+        .prepare(&format!(
             "SELECT s.file_id, s.source, s.session_id, s.title, s.project_name, s.cwd, \
                     s.last_activity_at, \
-                    COALESCE((SELECT MAX(seq) FROM messages m WHERE m.file_id=s.file_id), 0) \
-             FROM sessions s WHERE s.is_subagent=0 AND s.cwd_excluded=0",
-        )
+                    COALESCE((SELECT MAX(seq) FROM messages m WHERE m.file_id=s.file_id \
+                              AND m.kind IN ({})), 0) \
+                 FROM sessions s WHERE s.is_subagent=0 AND s.cwd_excluded=0",
+            super::store::INPUT_KINDS
+        ))
         .map_err(|e| format!("prepare sessions: {e}"))?;
     let mut count = conn
-        .prepare(
+        .prepare(&format!(
             "SELECT kind, ts FROM messages WHERE file_id=?1 AND seq>?2 \
-             AND kind IN ('user','assistant','tool_use','tool_error') ORDER BY seq",
-        )
+             AND kind IN ({}) ORDER BY seq",
+            super::store::INPUT_KINDS
+        ))
         .map_err(|e| format!("prepare count: {e}"))?;
     let rows = stmt
         .query_map([], |r| {

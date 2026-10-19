@@ -4,6 +4,7 @@
 //! `FAKE_AI_DIR` is process-global, like `HOME` in the settings tests, so
 //! these run single-threaded (`cargo test -- --test-threads=1`).
 
+use rusqlite::params;
 use std::sync::Mutex;
 
 use super::testutil::{FakeAi, TestKb};
@@ -1069,4 +1070,166 @@ fn a_note_remembers_where_its_evidence_starts_even_without_a_message_key() {
     assert_eq!(plain.msg_key, None, "Codex has no message keys");
     assert_eq!(plain.kind.as_deref(), Some("user"));
     assert!(plain.at.as_deref().unwrap().starts_with("2026-10-15T13:00"));
+}
+
+// ---- P7.5: a failure is gone once the readable messages in its range are digested
+
+impl Rig {
+    /// A session of `inputs` readable messages followed by `tails` tool results,
+    /// with a failed item (old round) whose range is every message, like the
+    /// failure records of before 0.7.5.
+    fn failed_with_tail(&self, id: &str, inputs: usize, tails: usize) -> i64 {
+        let file = self.session(id, inputs, "2026-10-15T14:00:00Z");
+        let rows: Vec<(&str, &str, &str)> = (0..tails)
+            .map(|_| ("tool_result", "2026-10-15T14:01:00Z", "output"))
+            .collect();
+        self.kb
+            .messages(file, i64::try_from(inputs).unwrap() + 1, &rows);
+        let conn = &self.kb.conn;
+        conn.execute(
+            "INSERT OR IGNORE INTO digest_rounds VALUES ('old','manual','2026-10-15T00:00:00Z', \
+             '2026-10-15T00:00:00Z','2026-10-15T01:00:00Z','done','gui','codex','m')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO digest_items (round_id, source, session_id, state, attempts, last_error, \
+             seq_to, finished_at) VALUES ('old','claude',?1,'failed',3,'boom',?2,'2026-10-15T00:30:00Z')",
+            params![id, i64::try_from(inputs + tails).unwrap()],
+        )
+        .unwrap();
+        file
+    }
+
+    fn digested_to(&self, id: &str, seq: usize) {
+        self.kb
+            .conn
+            .execute(
+                "INSERT OR REPLACE INTO digest_sessions VALUES ('claude',?1,'notes',?2,'t','h')",
+                params![id, i64::try_from(seq).unwrap()],
+            )
+            .unwrap();
+    }
+
+    fn failing(&self) -> usize {
+        store::failures(&self.kb.conn).unwrap().len()
+    }
+
+    fn readable_left(&self, id: &str, digested: usize) -> bool {
+        let info = input::session_info(&self.kb.conn, "claude", id)
+            .unwrap()
+            .unwrap();
+        input::next_chunk(
+            &self.kb.conn,
+            &info,
+            digested as u64,
+            utc("2026-10-20T00:00:00Z"),
+            None,
+            input::CHUNK_CHARS,
+        )
+        .unwrap()
+        .is_some()
+    }
+}
+
+#[test]
+fn a_failure_whose_readable_messages_are_digested_is_resolved_whatever_trails_it() {
+    let rig = Rig::new();
+    // The boundaries of the three Windows sessions: 66/67, 150/151, 188/191.
+    for (id, inputs, tails) in [("a", 66, 1), ("b", 150, 1), ("c", 188, 3), ("d", 6, 1)] {
+        rig.failed_with_tail(id, inputs, tails);
+        assert_eq!(rig.failing(), 1, "{id}: not digested yet, still failing");
+        rig.kb
+            .conn
+            .execute("DELETE FROM digest_items WHERE session_id<>?1", [id])
+            .ok();
+        rig.digested_to(id, inputs);
+        assert_eq!(rig.failing(), 0, "{id}: resolved");
+        assert!(
+            !rig.readable_left(id, inputs),
+            "{id}: no model call would start"
+        );
+        // The history row stays.
+        let kept: i64 = rig
+            .kb
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM digest_items WHERE session_id=?1 AND state='failed'",
+                [id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(kept, 1);
+        rig.kb.conn.execute("DELETE FROM digest_items", []).unwrap();
+        rig.kb
+            .conn
+            .execute("DELETE FROM digest_sessions", [])
+            .unwrap();
+    }
+}
+
+#[test]
+fn a_failure_with_readable_messages_left_in_its_range_stays_and_can_be_retried() {
+    let rig = Rig::new();
+    rig.failed_with_tail("part", 20, 2);
+    rig.digested_to("part", 8); // only the first piece went through
+    assert_eq!(rig.failing(), 1);
+    assert!(rig.readable_left("part", 8));
+    // A failure that never had a note is no different.
+    rig.failed_with_tail("never", 6, 0);
+    assert_eq!(rig.failing(), 2);
+}
+
+#[test]
+fn a_session_that_only_gained_tool_results_is_neither_failing_nor_digested_again() {
+    let rig = Rig::new();
+    let file = rig.failed_with_tail("grow", 6, 1);
+    rig.digested_to("grow", 6);
+    assert_eq!(rig.failing(), 0);
+    rig.kb.messages(
+        file,
+        8,
+        &[("tool_result", "2026-10-15T14:05:00Z", "more output")],
+    );
+    assert_eq!(rig.failing(), 0);
+    rig.at("2026-10-16T00:30:00Z");
+    rig.ai.mode("ok");
+    let summary = rig.run();
+    assert_eq!(
+        rig.ai.calls(),
+        0,
+        "{summary:?}: tool results alone start no call"
+    );
+
+    // A real new message past the failure's range ends the old failure and is
+    // picked up by the normal incremental rules.
+    rig.kb.chat_more(file, 9);
+    assert_eq!(rig.failing(), 0);
+    assert!(rig.readable_left("grow", 6));
+}
+
+#[test]
+fn a_held_session_stays_held_until_a_readable_message_arrives() {
+    let rig = Rig::new();
+    let file = rig.failed_with_tail("held", 6, 1);
+    let newest = |rig: &Rig| store::newest_input_seq(&rig.kb.conn, "claude", "held").unwrap();
+    assert_eq!(newest(&rig), 6);
+    assert!(store::is_held(&rig.kb.conn, "claude", "held", newest(&rig)).unwrap());
+    rig.kb
+        .messages(file, 8, &[("tool_result", "2026-10-15T14:05:00Z", "x")]);
+    assert!(store::is_held(&rig.kb.conn, "claude", "held", newest(&rig)).unwrap());
+    rig.kb.chat_more(file, 9);
+    assert!(!store::is_held(&rig.kb.conn, "claude", "held", newest(&rig)).unwrap());
+}
+
+#[test]
+fn retrying_a_finished_session_says_why_with_a_code() {
+    let rig = Rig::new();
+    rig.failed_with_tail("done", 6, 1);
+    rig.digested_to("done", 6);
+    let config = rig_config(&rig);
+    let blocker = super::commands::session_blocker(&config, "claude", "done").unwrap();
+    assert_eq!(blocker.map(|b| b.0), Some("up_to_date"));
+    let missing = super::commands::session_blocker(&config, "claude", "nope").unwrap();
+    assert_eq!(missing.map(|b| b.0), Some("not_indexed"));
 }

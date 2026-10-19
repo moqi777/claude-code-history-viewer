@@ -141,11 +141,11 @@ fn load_items(
     cutoff: DateTime<Utc>,
 ) -> Result<Vec<Item>, String> {
     let mut stmt = conn
-        .prepare(
+        .prepare(&format!(
             "SELECT seq, kind, ts, text FROM messages \
-             WHERE file_id=?1 AND seq>?2 AND kind IN ('user','assistant','tool_use','tool_error') \
-             ORDER BY seq",
-        )
+             WHERE file_id=?1 AND seq>?2 AND kind IN ({}) ORDER BY seq",
+            super::store::INPUT_KINDS
+        ))
         .map_err(|e| format!("prepare messages: {e}"))?;
     let rows = stmt
         .query_map(

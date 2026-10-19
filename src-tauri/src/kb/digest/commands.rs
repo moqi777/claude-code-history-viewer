@@ -76,6 +76,8 @@ pub enum RunStarted {
     Busy,
     /// Nothing to do, with the reason.
     Nothing {
+        /// Stable code the page translates: `no_kb`, `not_indexed`, `up_to_date`.
+        reason: String,
         message: String,
     },
 }
@@ -98,8 +100,11 @@ pub async fn kb_digest_run(request: RunRequest) -> Res<RunStarted> {
                 {
                     return Err("not a session".into());
                 }
-                if let Some(message) = session_blocker(&config, source, session_id)? {
-                    return Ok(RunStarted::Nothing { message });
+                if let Some((reason, message)) = session_blocker(&config, source, session_id)? {
+                    return Ok(RunStarted::Nothing {
+                        reason: reason.into(),
+                        message: message.into(),
+                    });
                 }
                 vec![
                     "--kb-digest".into(),
@@ -122,13 +127,17 @@ pub async fn kb_digest_run(request: RunRequest) -> Res<RunStarted> {
 }
 
 /// Why "digest this one now" would do nothing, checked before a process is started.
-fn session_blocker(config: &KbConfig, source: &str, session_id: &str) -> Res<Option<String>> {
+pub(super) fn session_blocker(
+    config: &KbConfig,
+    source: &str,
+    session_id: &str,
+) -> Res<Option<(&'static str, &'static str)>> {
     let data = DataPaths::new(config.data_dir.clone());
     let Some(conn) = db::open_readonly(&data.db())? else {
-        return Ok(Some("there is no knowledge base yet".into()));
+        return Ok(Some(("no_kb", "there is no knowledge base yet")));
     };
     let Some(info) = super::input::session_info(&conn, source, session_id)? else {
-        return Ok(Some("this session is not in the index".into()));
+        return Ok(Some(("not_indexed", "this session is not in the index")));
     };
     let digested = notes::digested_seq(&conn, source, session_id)?.unwrap_or(0);
     let has_new = super::input::next_chunk(
@@ -140,7 +149,10 @@ fn session_blocker(config: &KbConfig, source: &str, session_id: &str) -> Res<Opt
         super::input::CHUNK_CHARS,
     )?
     .is_some();
-    Ok((!has_new).then(|| "nothing new in this session since its last note".to_string()))
+    Ok((!has_new).then_some((
+        "up_to_date",
+        "nothing new in this session since its last note",
+    )))
 }
 
 /// The "stop" button. True when a running digest was asked to stop.

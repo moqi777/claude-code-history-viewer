@@ -19,6 +19,7 @@ import { jumpToFocus } from "./openSession";
 import { focusOfNote } from "./searchHit";
 import type { KbNote, KbSessionNotes, KbSource } from "./types";
 import { useKbStore } from "./useKbStore";
+import { nothingText } from "./digestNothing";
 
 /**
  * In the viewer's header while a backed-up session is open: "Notes (n)", a
@@ -66,7 +67,7 @@ export const KbSessionNotesButton = () => {
     setStarting(false);
     if (error != null) toast.error(t("kb.digest.toast.failed", { message: error }));
     else if (started?.state === "busy") toast.info(t("kb.digest.toast.busy"));
-    else if (started?.state === "nothing") toast.info(started.message);
+    else if (started?.state === "nothing") toast.info(nothingText(t, started));
     else toast.success(t("kb.digest.toast.sessionStarted"));
   };
 

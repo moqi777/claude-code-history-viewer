@@ -16,6 +16,7 @@ import { kbApi } from "./api";
 import { formatMinutes, formatTokens, pausedText } from "./digestFormat";
 import type { KbDigestEstimate, KbDigestFailure, KbDigestStatus } from "./types";
 import { useKbStore } from "./useKbStore";
+import { nothingText } from "./digestNothing";
 
 const errorText = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 
@@ -283,7 +284,7 @@ const FailuresDialog = ({
       .runDigest({ kind: "session", source: f.source, session_id: f.session_id });
     if (error != null) toast.error(t("kb.digest.toast.failed", { message: error }));
     else if (started?.state === "busy") toast.info(t("kb.digest.toast.busy"));
-    else if (started?.state === "nothing") toast.info(started.message);
+    else if (started?.state === "nothing") toast.info(nothingText(t, started));
     else {
       toast.success(t("kb.digest.toast.started"));
       onClose();

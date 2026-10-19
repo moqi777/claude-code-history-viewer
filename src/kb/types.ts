@@ -567,7 +567,7 @@ export type KbDigestRunRequest =
 export type KbDigestRunStarted =
   | { state: "started" }
   | { state: "busy" }
-  | { state: "nothing"; message: string };
+  | { state: "nothing"; reason: "up_to_date" | "not_indexed" | "no_kb"; message: string };
 
 export interface KbDigestTestReport {
   ok: boolean;

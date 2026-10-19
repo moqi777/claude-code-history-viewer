@@ -150,4 +150,19 @@ describe("KbDigestCard", () => {
       expect(mocks.api.digestRun).toHaveBeenCalledWith({ kind: "session", source: "claude", session_id: "abc" }),
     );
   });
+
+  it("retrying a finished session shows a translated reason, not the backend's English", async () => {
+    mocks.api.digestRun.mockResolvedValue({
+      state: "nothing",
+      reason: "up_to_date",
+      message: "nothing new in this session since its last note",
+    });
+    show({
+      failures: [{ source: "claude", session_id: "abc", title: "Old one", attempts: 3, error: "boom" }],
+    });
+    fireEvent.click(screen.getByRole("button", { name: "kb.digest.viewFailures" }));
+    await screen.findByText("Old one");
+    fireEvent.click(screen.getByRole("button", { name: "kb.digest.retry" }));
+    await waitFor(() => expect(mocks.toast.info).toHaveBeenCalledWith("kb.digest.toast.nothing.up_to_date"));
+  });
 });

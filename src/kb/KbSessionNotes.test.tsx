@@ -70,14 +70,14 @@ describe("KbSessionNotesButton", () => {
   });
 
   it("digests this session now, or says why it will not", async () => {
-    mocks.api.digestRun.mockResolvedValueOnce({ state: "nothing", message: "nothing new in this session since its last note" });
+    mocks.api.digestRun.mockResolvedValueOnce({ state: "nothing", reason: "up_to_date", message: "nothing new in this session since its last note" });
     mocks.api.digestRun.mockResolvedValueOnce({ state: "started" });
     render(<KbSessionNotesButton />);
     fireEvent.click(await screen.findByRole("button", { name: /kb\.sessionNotes\.button/ }));
     const now = await screen.findByRole("button", { name: "kb.sessionNotes.digestNow" });
     fireEvent.click(now);
     await waitFor(() =>
-      expect(mocks.toast.info).toHaveBeenCalledWith("nothing new in this session since its last note"),
+      expect(mocks.toast.info).toHaveBeenCalledWith("kb.digest.toast.nothing.up_to_date"),
     );
     fireEvent.click(now);
     await waitFor(() => expect(mocks.toast.success).toHaveBeenCalledWith("kb.digest.toast.sessionStarted"));
