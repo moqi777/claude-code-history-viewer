@@ -1,0 +1,32 @@
+src/kb/KbHome.test.tsx
+  s_cca7c29607588b::t_091f1e8140c20c 75
+docs/agent-kb/P7.2-report.md
+  ai_agent 1-37
+src/kb/branding.test.ts
+  s_cca7c29607588b::t_ea968331069541 1-10
+src/kb/fixtures.ts
+  s_cca7c29607588b::t_de98f3c1121e91 23
+src-tauri/src/kb/backup.rs
+  s_cca7c29607588b::t_765ea019a993d9 423-430,434-435,441-448,450-460,462-473
+  s_cca7c29607588b::t_017aa6224a4472 431-433,449,461,866-988
+src/kb/branding.ts
+  s_cca7c29607588b::t_de98f3c1121e91 5
+src-tauri/src/kb/mod.rs
+  s_cca7c29607588b::t_de98f3c1121e91 46
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.11",
+  "base_commit_sha": "cc703cfc51ece1a2b8dc9789daacbb7c7c99d963",
+  "prompts": {},
+  "sessions": {
+    "s_cca7c29607588b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ef228e77-8d37-45df-ab42-2d4c28a0387d",
+        "model": "claude-sonnet-5-5"
+      },
+      "human_author": "moqing <moqing@tsign.cn>"
+    }
+  }
+}
