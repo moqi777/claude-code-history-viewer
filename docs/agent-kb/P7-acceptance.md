@@ -88,3 +88,10 @@ Mac 上目前 36 条整理记录全部成功（Mac 只整理最近的会话，�
 - Windows 设置页列出 Share（F 盘），"测试"显示可写；首页显示 13:58:50 备份成功
 - leader 在 Mac 上看盘：`F:\PC-20250506UOLZ-cff74fa7\` 有 `kb.db`（41 MB）、`raw/`、`notes/`、`agentkb-backup.json`（300 会话，windows）；Mac 那份 `AgentKB-backup/mo7deMacBook-Pro.local-bc70cf56/` 没被碰
 - 问题：Windows 目标是盘根，子文件夹落在盘根；盘名显示 `?\Volume`；"已有 109 GB 备份"算错；恢复别的电脑的备份提醒不醒目（用户差点在 Windows 上恢复了 Mac 那份）。见 `P7.6-backup-polish.md`
+
+## 10. Windows 合并到 0.7.6（`ff25145`）：通过，已合并
+
+- Windows 7 项全过；只改了 3 处测试断言写法（本机 clippy 要求），运行逻辑没动
+- leader 在 Mac 上快进合并后跑 fmt、clippy、`backup_dir` 测试，通过
+- 安装包：`D:\AgentKB-build\p76\AgentKB_0.7.6_x64-setup.exe`，SHA-256 `B4F863AF…B099`，未签名，未安装
+- 待用户装后确认：盘根旧文件夹挪进 `AgentKB-backup\`、3 条旧失败消失、盘名不再显示 `?\Volume`
