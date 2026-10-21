@@ -857,12 +857,15 @@ mod tests {
         assert!(theirs.exists(), "another computer's folder is not touched");
         assert!(!root.join(folder_name(&other)).exists());
         // Nothing left to move the second time; a taken name is never replaced.
-        assert!(adopt_strays(&root, &me).is_empty());
+        assert_eq!(adopt_strays(&root, &me), Vec::<PathBuf>::new());
         let again = folder_of(disk.path(), &me, false);
-        assert!(adopt_strays(&root, &me).is_empty());
+        assert_eq!(adopt_strays(&root, &me), Vec::<PathBuf>::new());
         assert!(again.exists());
         // Only `AgentKB-backup` adopts, a folder of any other name does not.
-        assert!(adopt_strays(&disk.path().join("elsewhere"), &me).is_empty());
+        assert_eq!(
+            adopt_strays(&disk.path().join("elsewhere"), &me),
+            Vec::<PathBuf>::new()
+        );
     }
 
     #[test]
