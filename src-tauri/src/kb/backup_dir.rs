@@ -23,6 +23,8 @@ use super::config::SourceRoots;
 use super::fsutil;
 use super::log::SyncLog;
 
+/// The folder backups live in on a disk.
+pub const ROOT_FOLDER: &str = "AgentKB-backup";
 pub const MARKER_NAME: &str = "agentkb-backup.json";
 const ID_FILE_NAME: &str = "backup-device.json";
 const LEGACY_ITEMS: [&str; 4] = ["kb.db", "kb.db.prev", "raw", "notes"];
@@ -391,7 +393,8 @@ pub struct BackupEntry {
 
 /// The backups at `folder`: the folder itself when it is one (it has a
 /// database), else the computers' subfolders, plus an old-layout backup next
-/// to them.
+/// to them. Chosen at a disk's root, `AgentKB-backup` is read as well; chosen
+/// as `AgentKB-backup`, the computer folders left at the root beside it are.
 pub fn list(folder: &Path, local_id: Option<&str>) -> Vec<BackupEntry> {
     let entry_of = |dir: &Path| {
         let marker = read_marker(dir);
@@ -409,21 +412,143 @@ pub fn list(folder: &Path, local_id: Option<&str>) -> Vec<BackupEntry> {
             old_layout: marker.is_none(),
         }
     };
-    let mut out = Vec::new();
-    if let Ok(entries) = fs::read_dir(folder) {
-        let mut dirs: Vec<PathBuf> = entries
-            .flatten()
-            .filter(|e| e.file_type().is_ok_and(|t| t.is_dir()))
-            .map(|e| e.path())
-            .filter(|p| read_marker(p).is_some() && p.join("kb.db").is_file())
-            .collect();
-        dirs.sort();
-        out.extend(dirs.iter().map(|d| entry_of(d)));
+    // (place, whether a database right in it is a backup too)
+    let mut places = vec![(folder.to_path_buf(), true)];
+    let inner = folder.join(ROOT_FOLDER);
+    if inner.is_dir() {
+        places.push((inner, true));
     }
-    if folder.join("kb.db").is_file() {
-        out.insert(0, entry_of(folder));
+    if folder
+        .file_name()
+        .is_some_and(|n| n.to_string_lossy() == ROOT_FOLDER)
+    {
+        places.extend(folder.parent().map(|p| (p.to_path_buf(), false)));
+    }
+    let mut out: Vec<BackupEntry> = Vec::new();
+    for (place, own_db) in &places {
+        let mut found = Vec::new();
+        if let Ok(entries) = fs::read_dir(place) {
+            let mut dirs: Vec<PathBuf> = entries
+                .flatten()
+                .filter(|e| e.file_type().is_ok_and(|t| t.is_dir()))
+                .map(|e| e.path())
+                .filter(|p| read_marker(p).is_some() && p.join("kb.db").is_file())
+                .collect();
+            dirs.sort();
+            found.extend(dirs.iter().map(|d| entry_of(d)));
+        }
+        if *own_db && place.join("kb.db").is_file() {
+            found.insert(0, entry_of(place));
+        }
+        for entry in found {
+            if !out.iter().any(|e| e.folder == entry.folder) {
+                out.push(entry);
+            }
+        }
     }
     out
+}
+
+/// Whose backup a folder is, for the restore page.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct Owner {
+    pub name: String,
+    pub os: String,
+    pub this_computer: bool,
+}
+
+/// The owner recorded in `folder`; `None` for an old-layout backup.
+pub fn owner(folder: &Path, local_id: Option<&str>) -> Option<Owner> {
+    read_marker(folder).map(|m| Owner {
+        this_computer: local_id.is_some_and(|id| id == m.id),
+        name: m.name,
+        os: m.os,
+    })
+}
+
+/// The folder backups really go to: a disk's root becomes `<root>/AgentKB-backup`.
+pub fn effective_root(target: &Path, mount: &Path) -> PathBuf {
+    if normal(&target.to_string_lossy()) == normal(&mount.to_string_lossy()) {
+        target.join(ROOT_FOLDER)
+    } else {
+        target.to_path_buf()
+    }
+}
+
+/// Computer folders of this computer left at the disk's root by 0.7.4 move into
+/// `root` (same disk, a rename). Another computer's, or a name already taken
+/// in `root`, stay where they are. Returns what was moved.
+pub fn adopt_strays(root: &Path, who: &Identity) -> Vec<PathBuf> {
+    let Some(parent) = root.parent() else {
+        return Vec::new();
+    };
+    if root
+        .file_name()
+        .map_or(true, |n| n.to_string_lossy() != ROOT_FOLDER)
+    {
+        return Vec::new();
+    }
+    let Ok(entries) = fs::read_dir(parent) else {
+        return Vec::new();
+    };
+    let mut moved = Vec::new();
+    for dir in entries
+        .flatten()
+        .filter(|e| e.file_type().is_ok_and(|t| t.is_dir()))
+        .map(|e| e.path())
+    {
+        if dir == root || !read_marker(&dir).is_some_and(|m| m.id == who.id) {
+            continue;
+        }
+        let Some(name) = dir.file_name() else {
+            continue;
+        };
+        let dest = root.join(name);
+        // `root` already holding a folder of ours means it is the live one.
+        if dest.exists() || fs::create_dir_all(root).is_err() {
+            continue;
+        }
+        if fs::rename(&dir, &dest).is_ok() {
+            moved.push(dest);
+        }
+    }
+    moved
+}
+
+/// Bytes of `AgentKB`'s own backup content at `root`: the computer folders (those
+/// with a marker) and an old-layout backup, or `root` itself when it is one.
+/// Whatever else lives on the disk is not counted.
+pub fn backup_bytes(root: &Path) -> u64 {
+    if read_marker(root).is_some() {
+        return fsutil::dir_size(root);
+    }
+    let Ok(entries) = fs::read_dir(root) else {
+        return 0;
+    };
+    entries
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| {
+            if p.is_dir() {
+                read_marker(p).is_some() || LEGACY_ITEMS.contains(&name_of(p).as_str())
+            } else {
+                LEGACY_ITEMS.contains(&name_of(p).as_str())
+            }
+        })
+        .map(|p| {
+            if p.is_dir() {
+                fsutil::dir_size(&p)
+            } else {
+                fs::metadata(&p).map_or(0, |m| m.len())
+            }
+        })
+        .sum()
+}
+
+fn name_of(p: &Path) -> String {
+    p.file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default()
 }
 
 #[cfg(test)]
@@ -683,5 +808,97 @@ mod tests {
         let one = list(Path::new(&entries[1].folder), None);
         assert_eq!(one.len(), 1);
         assert_eq!(one[0].folder, entries[1].folder);
+    }
+
+    fn folder_of(parent: &Path, w: &Identity, with_db: bool) -> PathBuf {
+        let dir = parent.join(folder_name(w));
+        fs::create_dir_all(&dir).unwrap();
+        write_marker(
+            &dir,
+            &Marker {
+                id: w.id.clone(),
+                name: w.name.clone(),
+                os: w.os.clone(),
+                ..Marker::default()
+            },
+        )
+        .unwrap();
+        if with_db {
+            fs::write(dir.join("kb.db"), b"db").unwrap();
+        }
+        dir
+    }
+
+    #[test]
+    fn a_disks_root_becomes_the_backup_folder_and_anything_else_is_kept() {
+        let mount = Path::new("/Volumes/Share");
+        assert_eq!(effective_root(mount, mount), mount.join("AgentKB-backup"));
+        assert_eq!(
+            effective_root(Path::new("/Volumes/Share/"), mount),
+            mount.join("AgentKB-backup")
+        );
+        let inner = mount.join("AgentKB-backup");
+        assert_eq!(effective_root(&inner, mount), inner);
+        let other = mount.join("my/backups");
+        assert_eq!(effective_root(&other, mount), other);
+    }
+
+    #[test]
+    fn own_folders_at_the_root_move_in_and_other_computers_stay() {
+        let disk = tempfile::tempdir().unwrap();
+        let me = who("aaaaaaaa11111111aaaaaaaa11111111", "PC");
+        let other = who("bbbbbbbb22222222bbbbbbbb22222222", "Mac");
+        let mine = folder_of(disk.path(), &me, true);
+        let theirs = folder_of(disk.path(), &other, true);
+        let root = disk.path().join("AgentKB-backup");
+        let moved = adopt_strays(&root, &me);
+        assert_eq!(moved, vec![root.join(folder_name(&me))]);
+        assert!(!mine.exists() && root.join(folder_name(&me)).join("kb.db").is_file());
+        assert!(theirs.exists(), "another computer's folder is not touched");
+        assert!(!root.join(folder_name(&other)).exists());
+        // Nothing left to move the second time; a taken name is never replaced.
+        assert!(adopt_strays(&root, &me).is_empty());
+        let again = folder_of(disk.path(), &me, false);
+        assert!(adopt_strays(&root, &me).is_empty());
+        assert!(again.exists());
+        // Only `AgentKB-backup` adopts, a folder of any other name does not.
+        assert!(adopt_strays(&disk.path().join("elsewhere"), &me).is_empty());
+    }
+
+    #[test]
+    fn the_list_at_a_root_or_at_the_backup_folder_has_both_places() {
+        let disk = tempfile::tempdir().unwrap();
+        let win = who("bbbbbbbb22222222bbbbbbbb22222222", "PC");
+        let mac = who("aaaaaaaa11111111aaaaaaaa11111111", "Mac");
+        folder_of(disk.path(), &win, true); // left at the root
+        let root = disk.path().join("AgentKB-backup");
+        folder_of(&root, &mac, true);
+        for chosen in [disk.path().to_path_buf(), root.clone()] {
+            let names: Vec<String> = list(&chosen, Some(&mac.id))
+                .into_iter()
+                .map(|e| e.name)
+                .collect();
+            assert_eq!(names.len(), 2, "{chosen:?}: {names:?}");
+            assert!(names.contains(&"PC".to_string()) && names.contains(&"Mac".to_string()));
+        }
+        assert!(list(&root, Some(&mac.id)).iter().any(|e| e.this_computer));
+    }
+
+    #[test]
+    fn only_backup_content_is_counted() {
+        let disk = tempfile::tempdir().unwrap();
+        fs::write(disk.path().join("movie.mkv"), vec![0u8; 5000]).unwrap();
+        fs::create_dir_all(disk.path().join("Photos")).unwrap();
+        fs::write(disk.path().join("Photos/a.jpg"), vec![0u8; 7000]).unwrap();
+        let root = disk.path().join("AgentKB-backup");
+        let dir = folder_of(&root, &who("aaaaaaaa11111111aaaaaaaa11111111", "Mac"), true);
+        fs::write(dir.join("raw.bin"), vec![0u8; 100]).unwrap();
+        fs::write(root.join("kb.db"), vec![0u8; 40]).unwrap(); // an old-layout backup
+        let counted = backup_bytes(&root);
+        assert!((142..1000).contains(&counted), "{counted}");
+        // At the disk's root, files that are not AgentKB's stay out.
+        assert_eq!(backup_bytes(disk.path()), 0);
+        // A computer folder asked for by itself is counted whole.
+        assert!(backup_bytes(&dir) >= 102);
     }
 }

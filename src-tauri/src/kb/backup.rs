@@ -288,9 +288,14 @@ fn own_folder(
     mount: &Path,
     log: &SyncLog,
 ) -> Result<(backup_dir::Identity, backup_dir::Resolved), String> {
-    ensure_on_disk(&target.target_dir, mount)?;
+    // A disk's root is never the backup folder itself (a setting saved before 0.7.6).
+    let root = backup_dir::effective_root(&target.target_dir, mount);
+    ensure_on_disk(&root, mount)?;
     let who = backup_dir::identity(&target.id_file)?;
-    let resolved = backup_dir::resolve(&target.target_dir, &who, &env.roots, env.data.root(), log)?;
+    for moved in backup_dir::adopt_strays(&root, &who) {
+        log.line(&format!("moved own backup folder to {}", moved.display()));
+    }
+    let resolved = backup_dir::resolve(&root, &who, &env.roots, env.data.root(), log)?;
     Ok((who, resolved))
 }
 
@@ -1147,6 +1152,34 @@ mod tests {
             vec!["Old-Name-aaaaaaaa"]
         );
         assert!(renamed.join("raw/claude/projects/p/t.jsonl").is_file());
+    }
+
+    #[test]
+    fn a_disks_root_as_target_backs_up_into_the_backup_folder_and_adopts_own_strays() {
+        let mut a = rig();
+        put(&a, REL, b"x\n");
+        assert_eq!(pass(&a).status, "ok");
+        // 0.7.4 on a disk-root target left the folder at the root.
+        let stray = a.disk.join(a.target.file_name().unwrap());
+        fs::rename(&a.target, &stray).unwrap();
+        let other = a.disk.join("Mac-bbbbbbbb");
+        fs::create_dir_all(&other).unwrap();
+        fs::write(
+            other.join(backup_dir::MARKER_NAME),
+            r#"{"id":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","name":"Mac","os":"macos"}"#,
+        )
+        .unwrap();
+        a.env.mirror.as_mut().unwrap().target_dir = a.disk.clone();
+        put(&a, "claude/projects/p/t.jsonl", b"y\n");
+        let summary = pass(&a);
+        assert_eq!(summary.status, "ok", "{:?}", summary.errors);
+        assert!(!stray.exists(), "own folder moved into AgentKB-backup");
+        assert!(a.target.join("raw/claude/projects/p/t.jsonl").is_file());
+        assert!(other.exists(), "another computer's folder is not touched");
+        assert_eq!(
+            summary.folder.as_deref(),
+            Some(a.target.to_string_lossy().as_ref())
+        );
     }
 
     #[test]

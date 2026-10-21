@@ -23,6 +23,7 @@ import type {
   KbSourceProbe,
   KbVolume,
 } from "./types";
+import { shortVolumeId } from "./volumeLabel";
 
 const errorText = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 
@@ -420,7 +421,7 @@ export const MirrorField = ({
                     aria-pressed={mirror.volume_uuid === v.uuid}
                     onClick={() => chooseVolume(v)}
                   >
-                    {v.name ?? v.mount_point} · {v.uuid.slice(0, 8)}
+                    {v.name ?? v.mount_point} · {shortVolumeId(v.uuid)}
                   </Button>
                 </li>
               ))}

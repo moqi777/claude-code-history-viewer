@@ -200,7 +200,11 @@ pub async fn kb_restore_inspect(folder: String) -> Res<Inspect> {
     blocking(move || {
         let config = KbConfig::load()?;
         let env = KbEnv::from_config(&config);
-        restore::inspect(&env, &migrate_dir::expand(&folder)).map_err(String::from)
+        let folder = migrate_dir::expand(&folder);
+        let mut info = restore::inspect(&env, &folder).map_err(String::from)?;
+        let id = backup_dir::existing_id(&backup_dir::id_file_path());
+        info.owner = backup_dir::owner(&folder, id.as_deref());
+        Ok(info)
     })
     .await
 }

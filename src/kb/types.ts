@@ -741,6 +741,8 @@ export interface KbRestoreInspect {
   current_sessions: number;
   current_notes: number;
   current_empty: boolean;
+  /** Whose backup this is; null for an old-layout one. */
+  owner: { name: string; os: string; this_computer: boolean } | null;
 }
 
 export interface KbRestoreReport {

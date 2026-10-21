@@ -60,6 +60,8 @@ pub struct Inspect {
     pub current_sessions: u64,
     pub current_notes: u64,
     pub current_empty: bool,
+    /// Whose backup this is; filled in by the command, `None` for an old-layout one.
+    pub owner: Option<crate::kb::backup_dir::Owner>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq, Default)]
@@ -241,6 +243,7 @@ pub fn inspect(env: &KbEnv, folder: &Path) -> TResult<Inspect> {
         current_sessions: current.sessions,
         current_notes: current.notes,
         current_empty: current.empty,
+        owner: None,
     })
 }
 

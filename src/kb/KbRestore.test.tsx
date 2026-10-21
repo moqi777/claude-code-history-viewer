@@ -41,6 +41,7 @@ const info = (patch: Partial<KbRestoreInspect> = {}): KbRestoreInspect => ({
   current_sessions: 5,
   current_notes: 1,
   current_empty: false,
+  owner: null,
   ...patch,
 });
 
@@ -92,6 +93,29 @@ describe("RestoreDialog", () => {
     expect(mocks.api.restoreInspect).toHaveBeenCalledWith(FOLDER);
     expect(mocks.api.restoreStart).not.toHaveBeenCalled();
     expect(screen.getByText(/kb\.restore\.willSetAside /).textContent).toContain('"sessions":5');
+  });
+
+  it("warns prominently that it is another computer's backup, even when it is the only one", async () => {
+    mocks.api.restoreInspect.mockResolvedValue(
+      info({ owner: { name: "mo7deMacBook-Pro.local", os: "macos", this_computer: false } }),
+    );
+    open();
+    fireEvent.click(screen.getByText(/kb\.restore\.useConfigured/));
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toContain("kb.restore.owner.otherTitle");
+    expect(alert.textContent).toContain("mo7deMacBook-Pro.local");
+    expect(alert.textContent).toContain("kb.restore.owner.otherBody");
+    expect(mocks.api.restoreStart).not.toHaveBeenCalled();
+  });
+
+  it("marks this computer's own backup and does not alarm", async () => {
+    mocks.api.restoreInspect.mockResolvedValue(
+      info({ owner: { name: "PC", os: "windows", this_computer: true } }),
+    );
+    open();
+    fireEvent.click(screen.getByText(/kb\.restore\.useConfigured/));
+    await screen.findByText(/kb\.restore\.owner\.own/);
+    expect(screen.queryByRole("alert")).toBeNull();
   });
 
   it("starts only after the confirm button, on the folder that was looked at", async () => {

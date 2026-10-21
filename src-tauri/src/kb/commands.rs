@@ -8,6 +8,7 @@ use serde::Serialize;
 use tauri::Emitter;
 
 use super::backup::{self, BackupSummary};
+use super::backup_dir;
 use super::config::{self, ConfigState, KbConfig, SourceRoots};
 use super::migrate_dir::{self, MigrateCheck, MigrationReport};
 use super::paths::DataPaths;
@@ -287,6 +288,15 @@ pub fn save_config(
         next.semantic = old.semantic.clone();
     }
     next.validate()?;
+    // A disk's root is saved as `<root>/AgentKB-backup`.
+    if next.mirror.enabled {
+        if let Some(target) = next.mirror.target_dir.clone() {
+            if let volume::Probe::External { volume } = volume::probe(&target, query) {
+                next.mirror.target_dir =
+                    Some(backup_dir::effective_root(&target, &volume.mount_point));
+            }
+        }
+    }
     // Enabling (or re-pointing) the backup disk requires the test to pass.
     let mirror_changed = previous.as_ref().map_or(true, |old| {
         !old.mirror.enabled
@@ -794,6 +804,28 @@ mod tests {
         assert!(save_config(&rig.file, config, &FakeQuery::default(), &sched).is_err());
         // The saved file is untouched by the rejected attempts.
         assert!(!KbConfig::load_from(&rig.file).unwrap().mirror.enabled);
+    }
+
+    #[test]
+    fn a_disks_root_is_saved_as_the_backup_folder_inside_it() {
+        let rig = rig();
+        let disk = rig.tmp.path().join("disk");
+        std::fs::create_dir_all(&disk).unwrap();
+        let query = FakeQuery::with([VolumeInfo {
+            mount_point: disk.clone(),
+            ..fake_volume("DISK", "/x", false, "exfat")
+        }]);
+        let mut config = draft(&rig);
+        config.save_to(&rig.file).unwrap();
+        config.mirror.enabled = true;
+        config.mirror.target_dir = Some(disk.clone());
+        config.mirror.volume_uuid = Some("DISK".into());
+        let out = save_config(&rig.file, config, &query, &FakeSchedule::new(false)).unwrap();
+        let saved = KbConfig::load_from(&rig.file).unwrap();
+        assert_eq!(saved.mirror.target_dir, Some(disk.join("AgentKB-backup")));
+        assert_eq!(out.config.mirror.target_dir, saved.mirror.target_dir);
+        assert!(disk.join("AgentKB-backup").is_dir());
+        assert!(!disk.join("kb.db").exists());
     }
 
     #[test]

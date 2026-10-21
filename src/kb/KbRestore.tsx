@@ -198,6 +198,7 @@ export const RestoreDialog = ({
 
         {(stage.kind === "ready" || stage.kind === "restoring") && (
           <div className="space-y-3">
+            <OwnerNotice owner={stage.info.owner} />
             <p className="break-all font-mono text-xs text-muted-foreground">{stage.folder}</p>
             <div className="space-y-1 rounded-md border p-3 text-sm">
               <p>
@@ -282,6 +283,21 @@ export const RestoreDialog = ({
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+};
+
+/** Whose backup this is. Another computer's gets a prominent warning, even when it is the only one. */
+export const OwnerNotice = ({ owner }: { owner: KbRestoreInspect["owner"] }) => {
+  const { t } = useTranslation();
+  if (owner == null) return <p className="text-sm text-muted-foreground">{t("kb.restore.owner.unknown")}</p>;
+  if (owner.this_computer) {
+    return <p className="text-sm font-medium">{t("kb.restore.owner.own", { name: owner.name })}</p>;
+  }
+  return (
+    <div role="alert" className="rounded-md border border-destructive/50 bg-destructive/10 p-3 text-sm">
+      <p className="font-semibold">{t("kb.restore.owner.otherTitle", { name: owner.name, os: owner.os })}</p>
+      <p>{t("kb.restore.owner.otherBody")}</p>
+    </div>
   );
 };
 

@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 use rusqlite::Connection;
 use serde::Serialize;
 
+use super::backup_dir;
 use super::config::{KbConfig, SourceRoots};
 use super::schedule::{self, ExeStability};
 use super::volume::{self, Probe, SystemQuery, Unsupported, VolumeInfo};
@@ -247,6 +248,8 @@ pub fn test_mirror(
             };
         }
     }
+    // A disk's root is never the backup folder itself.
+    let target_dir = &backup_dir::effective_root(target_dir, &volume.mount_point);
     // Create only below the confirmed mount point, never the `/Volumes/<name>` level.
     let anchor = fsutil::nearest_existing(target_dir).unwrap_or_else(|| volume.mount_point.clone());
     if !volume::same_device(&anchor, &volume.mount_point) {
@@ -267,7 +270,7 @@ pub fn test_mirror(
     }
     MirrorReport::Connected {
         free_bytes: fsutil::free_space(target_dir),
-        existing_bytes: fsutil::dir_size(target_dir),
+        existing_bytes: backup_dir::backup_bytes(target_dir),
         volume,
     }
 }
@@ -368,6 +371,20 @@ mod tests {
         );
         assert!(target.is_dir());
         assert!(fsutil::walk_files(&target).is_empty(), "probe file removed");
+    }
+
+    #[test]
+    fn at_a_disks_root_only_the_backups_are_counted() {
+        let (_g, mount, q) = disk_world();
+        std::fs::write(mount.join("movie.mkv"), vec![0u8; 50_000]).unwrap();
+        let dir = mount.join("AgentKB-backup/Mac-aaaaaaaa");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("agentkb-backup.json"), r#"{"id":"a"}"#).unwrap();
+        std::fs::write(dir.join("kb.db"), vec![0u8; 300]).unwrap();
+        let MirrorReport::Connected { existing_bytes, .. } = test_mirror(&mount, None, &q) else {
+            panic!("not connected");
+        };
+        assert!((300..2000).contains(&existing_bytes), "{existing_bytes}");
     }
 
     #[test]
