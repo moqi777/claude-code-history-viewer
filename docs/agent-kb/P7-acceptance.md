@@ -82,3 +82,9 @@ Mac 上目前 36 条整理记录全部成功（Mac 只整理最近的会话，�
 - leader 在 Mac 上快进合并后重跑 Rust 三项：cargo test 库 1524 通过 0 失败，clippy、fmt 通过（前端没改）
 - 安装包：`D:\AgentKB-build\p74\AgentKB_0.7.4_x64-setup.exe`，SHA-256 `5D023FC7…4317F2`，未签名，未安装
 - 第 9 项旁证：零点临时验收 `passed`，正式收集任务 10-19 00:00 运行返回 0。用户真实数据的"第二天有笔记"仍要在界面上看
+
+## 9. 第 8 项移动硬盘（Windows，10-21）：✅ 备份成功，有 4 处收尾
+
+- Windows 设置页列出 Share（F 盘），"测试"显示可写；首页显示 13:58:50 备份成功
+- leader 在 Mac 上看盘：`F:\PC-20250506UOLZ-cff74fa7\` 有 `kb.db`（41 MB）、`raw/`、`notes/`、`agentkb-backup.json`（300 会话，windows）；Mac 那份 `AgentKB-backup/mo7deMacBook-Pro.local-bc70cf56/` 没被碰
+- 问题：Windows 目标是盘根，子文件夹落在盘根；盘名显示 `?\Volume`；"已有 109 GB 备份"算错；恢复别的电脑的备份提醒不醒目（用户差点在 Windows 上恢复了 Mac 那份）。见 `P7.6-backup-polish.md`
