@@ -1,0 +1,11 @@
+docs/agent-kb/P7.6-backup-polish.md
+  ai_agent 1-28
+docs/agent-kb/P7-acceptance.md
+  ai_agent 85-90
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.11",
+  "base_commit_sha": "c02bcb626fcd633b789b8706506ba64f74e58177",
+  "prompts": {}
+}
