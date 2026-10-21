@@ -1,0 +1,73 @@
+src-tauri/src/kb/transfer_commands.rs
+  s_cca7c29607588b::t_cce6c82267aae0 203-207
+src/kb/fixtures.ts
+  s_cca7c29607588b::t_7422df95d295ff 23
+src/kb/volumeLabel.test.ts
+  s_cca7c29607588b::t_d86e405a7ff20a 1-12
+src/kb/fields.tsx
+  s_cca7c29607588b::t_7422df95d295ff 26,424
+src/kb/KbRestore.tsx
+  s_cca7c29607588b::t_7422df95d295ff 201,289-300
+src/i18n/locales/zh-TW/kb.json
+  s_cca7c29607588b::t_7422df95d295ff 525-528
+src/i18n/locales/en/kb.json
+  s_cca7c29607588b::t_7422df95d295ff 525-528
+src/i18n/locales/ko/kb.json
+  s_cca7c29607588b::t_7422df95d295ff 525-528
+src-tauri/src/kb/probe.rs
+  s_cca7c29607588b::t_e7dab0c2f5a2a5 11
+  s_cca7c29607588b::t_14cc730b5855e2 251-252,273
+  s_cca7c29607588b::t_cc181c1436953c 377-389
+src/kb/KbRestore.test.tsx
+  s_cca7c29607588b::t_d86e405a7ff20a 98-120
+  s_cca7c29607588b::t_7422df95d295ff 44
+src/kb/types.ts
+  s_cca7c29607588b::t_7422df95d295ff 744-745
+src/kb/volumeLabel.ts
+  s_cca7c29607588b::t_7422df95d295ff 1-5
+src/i18n/locales/zh-CN/kb.json
+  s_cca7c29607588b::t_7422df95d295ff 525-528
+src-tauri/src/kb/restore.rs
+  s_cca7c29607588b::t_94eb8caed3e13d 246
+  s_cca7c29607588b::t_cce6c82267aae0 63-64
+src-tauri/src/kb/mod.rs
+  s_cca7c29607588b::t_7422df95d295ff 48
+src-tauri/src/kb/commands.rs
+  s_cca7c29607588b::t_e7dab0c2f5a2a5 11,295-296
+  s_cca7c29607588b::t_14cc730b5855e2 291-294,297-299
+  s_cca7c29607588b::t_2bec42e943b5c4 810-830
+src/i18n/types.generated.ts
+  ai_agent 8
+docs/agent-kb/P7.6-report.md
+  ai_agent 1-38
+src/kb/branding.ts
+  s_cca7c29607588b::t_7422df95d295ff 5
+src/i18n/locales/ja/kb.json
+  s_cca7c29607588b::t_7422df95d295ff 525-528
+src-tauri/src/kb/backup.rs
+  s_cca7c29607588b::t_2bec42e943b5c4 1179-1182
+  s_cca7c29607588b::t_14cc730b5855e2 291-293,295-298
+  s_cca7c29607588b::t_147af0289bf82e 1158-1178,1183-1184
+src-tauri/src/kb/backup_dir.rs
+  s_cca7c29607588b::t_14cc730b5855e2 26-27,396-397,417-418,420-424,427,429-439,441-447,469-484,489-502,506-517,519-551
+  s_cca7c29607588b::t_3430bd12a0cb33 487,518,898
+  s_cca7c29607588b::t_e7dab0c2f5a2a5 415-416,419,425,428,440,485-486,488,503-505
+  s_cca7c29607588b::t_cce6c82267aae0 452-468
+  s_cca7c29607588b::t_dc25868a278161 812-897,899-903
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.11",
+  "base_commit_sha": "83f49f35480a892491f4b9a4ae5d9b2d2bc91bfc",
+  "prompts": {},
+  "sessions": {
+    "s_cca7c29607588b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ef228e77-8d37-45df-ab42-2d4c28a0387d",
+        "model": "claude-sonnet-5-5"
+      },
+      "human_author": "moqing <moqing@tsign.cn>"
+    }
+  }
+}
