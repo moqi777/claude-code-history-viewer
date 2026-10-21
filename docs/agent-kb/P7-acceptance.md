@@ -95,3 +95,12 @@ Mac 上目前 36 条整理记录全部成功（Mac 只整理最近的会话，�
 - leader 在 Mac 上快进合并后跑 fmt、clippy、`backup_dir` 测试，通过
 - 安装包：`D:\AgentKB-build\p76\AgentKB_0.7.6_x64-setup.exe`，SHA-256 `B4F863AF…B099`，未签名，未安装
 - 待用户装后确认：盘根旧文件夹挪进 `AgentKB-backup\`、3 条旧失败消失、盘名不再显示 `?\Volume`
+
+## 11. Windows 装 0.7.6 后确认（10-21）：✅
+
+- 左下角 0.7.6；"3 个会话整理失败"消失（P7.5 生效）
+- 盘名显示 `Share · 7fe41f68`，不再是 `?\Volume`
+- 设置页显示"本机备份到：F:\AgentKB-backup\PC-20250506UOLZ-cff74fa7"（设置里仍存 `F:\`，备份时兜底改写）
+- leader 在 Mac 上看盘：盘根的 Windows 文件夹已挪进 `AgentKB-backup\`，和 Mac 的并列，两份 json 各自正确，Mac 那份没被碰
+- 第 9 项：10-21 的截图里每日整理 03:00:42 自动完结、整理了 1 个会话，真实数据隔天整理正常 ✅
+- 剩第 10 项：重启后定时收集自动恢复
