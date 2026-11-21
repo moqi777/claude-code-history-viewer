@@ -1,0 +1,31 @@
+src/kb/types.ts
+  s_671b822990bcae::t_1d2ec210c60e04 758
+src/kb/KbRestore.test.tsx
+  s_671b822990bcae::t_1d2ec210c60e04 69
+src-tauri/src/kb/dedupe.rs
+  s_671b822990bcae::t_77bc3a5ce34bd0 53-59
+src-tauri/src/kb/restore.rs
+  s_671b822990bcae::t_81c9d6efe334a2 471-529
+  s_671b822990bcae::t_6553226267381e 1324-1419,1425-1432
+  s_671b822990bcae::t_da98dc557e01e3 83-86
+  s_671b822990bcae::t_fd9d553c94467d 698,703,709
+  s_671b822990bcae::t_1d2ec210c60e04 1420-1424
+  s_671b822990bcae::t_4bccdd0c3240f7 415
+  s_671b822990bcae::t_9937b61c4b33c9 433,438-439,443-453,455
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.11",
+  "base_commit_sha": "c207709462ba432aaca2f3fec93138f92ab40c2b",
+  "prompts": {},
+  "sessions": {
+    "s_671b822990bcae": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e710b70a-de2e-4c86-a60f-e568a4b56ca7",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "moqing <moqing@tsign.cn>"
+    }
+  }
+}
