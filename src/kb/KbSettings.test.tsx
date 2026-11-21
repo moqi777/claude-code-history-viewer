@@ -36,6 +36,15 @@ const openSettings = async (config = configFixture()) => {
 };
 const save = () => screen.getByRole("button", { name: "kb.settings.save" }) as HTMLButtonElement;
 
+const shrinkStats = {
+  files: 12,
+  plain_bytes: 50_000_000,
+  packed_bytes: 20_000_000,
+  last_at: "2026-11-21T07:30:00Z",
+  last_ms: 300,
+  last_files: 2,
+};
+
 describe("KbSettings", () => {
   beforeEach(() => {
     useKbStore.setState({ ...useKbStore.getInitialState(), overview: overviewFixture() });
@@ -48,6 +57,7 @@ describe("KbSettings", () => {
     mocks.api.listSessions.mockResolvedValue([]);
     mocks.api.getBackupPresence.mockResolvedValue({ state: "disabled" });
     mocks.api.listExternalVolumes.mockResolvedValue([volumeFixture]);
+    mocks.api.shrinkStats.mockResolvedValue(shrinkStats);
   });
 
   it("test buttons give a clear sentence for every setting", async () => {
@@ -277,5 +287,51 @@ describe("KbSettings", () => {
       fireEvent.change(screen.getByLabelText("kb.digest.field.cap"), { target: { value: "20" } });
       expect(save().disabled).toBe(false);
     });
+  });
+  it("old backup compression: shows what is compressed, saves the days, refuses bad ones", async () => {
+    await openSettings();
+    expect(
+      await screen.findByText(/kb\.shrink\.stats/),
+    ).toBeTruthy();
+    expect(screen.getByText(/kb\.shrink\.stats/).textContent).toContain('"files":12');
+    expect(screen.getByText(/kb\.shrink\.stats/).textContent).toContain('"saved":"30.0 MB"');
+
+    const days = screen.getByLabelText("kb.shrink.afterDays") as HTMLInputElement;
+    expect(days.value).toBe("30");
+    fireEvent.change(days, { target: { value: "0" } });
+    expect(screen.getByRole("alert").textContent).toContain("kb.shrink.daysInvalid");
+    expect(save().disabled).toBe(true);
+
+    fireEvent.change(days, { target: { value: "90" } });
+    fireEvent.click(screen.getByLabelText("kb.shrink.enable"));
+    expect(save().disabled).toBe(false);
+    mocks.api.saveConfig.mockImplementation(async (config) => ({ config, schedule: {}, schedule_error: null }));
+    fireEvent.click(save());
+    await waitFor(() => expect(mocks.api.saveConfig).toHaveBeenCalled());
+    expect(mocks.api.saveConfig.mock.calls[0]?.[0].pack).toEqual({ enabled: false, after_days: 90 });
+  });
+
+  it("compress now reports what it did, or that a collection is running", async () => {
+    await openSettings();
+    mocks.api.shrinkNow.mockResolvedValueOnce({
+      status: "ok", packed_files: 3, plain_bytes: 9_000_000, packed_bytes: 4_000_000,
+      failed_files: 0, left_behind: 0, remaining: 0, temp_files_removed: 0, duration_ms: 800,
+      duplicates_removed: 0,
+    });
+    fireEvent.click(screen.getByRole("button", { name: "kb.shrink.now" }));
+    await waitFor(() => expect(mocks.toast.success).toHaveBeenCalled());
+    expect(String(mocks.toast.success.mock.calls[0]?.[0])).toContain("kb.shrink.nowDone");
+    expect(mocks.api.shrinkStats).toHaveBeenCalledTimes(2);
+
+    mocks.api.shrinkNow.mockResolvedValueOnce({ status: "skipped", packed_files: 0, plain_bytes: 0,
+      packed_bytes: 0, failed_files: 0, left_behind: 0, remaining: 0, temp_files_removed: 0,
+      duration_ms: 0, duplicates_removed: 0 });
+    fireEvent.click(screen.getByRole("button", { name: "kb.shrink.now" }));
+    await waitFor(() => expect(mocks.toast.info).toHaveBeenCalled());
+
+    mocks.api.shrinkNow.mockRejectedValueOnce(new Error("disk full"));
+    fireEvent.click(screen.getByRole("button", { name: "kb.shrink.now" }));
+    await waitFor(() => expect(mocks.toast.error).toHaveBeenCalled());
+    expect(String(mocks.toast.error.mock.calls.at(-1)?.[0])).toContain("disk full");
   });
 });

@@ -15,10 +15,11 @@ import {
 import { kbApi } from "./api";
 import { Field, IntervalField, MirrorField, SourcesField, VerdictLine } from "./fields";
 import { DigestField } from "./KbDigestField";
-import { digestValid, excludesValid, parseExcludes } from "./logic";
+import { digestValid, excludesValid, packOf, packValid, parseExcludes } from "./logic";
 import { BackupFolderLine, RestoreField } from "./KbRestore";
 import { SkillField } from "./SkillField";
 import { SemanticField } from "./KbSemantic";
+import { ShrinkField } from "./KbShrinkField";
 import { TransferSection } from "./KbTransfer";
 import { useTest } from "./useTest";
 import { describeMigrateCheck } from "./messages";
@@ -84,6 +85,7 @@ export const KbSettings = () => {
     excludesValid(excludeCwds) &&
     candidate.interval_secs >= 60 &&
     digestValid(candidate.digest) &&
+    packValid(packOf(candidate)) &&
     (candidate.sources.claude.enabled || candidate.sources.codex.enabled) &&
     (!mirrorChanged || mirrorOk);
 
@@ -166,6 +168,8 @@ export const KbSettings = () => {
             />
 
             <BackupFolderLine />
+
+            <ShrinkField draft={draft} onChange={setDraft} />
 
             <RestoreField
               configuredFolder={saved.mirror.enabled ? saved.mirror.target_dir : null}

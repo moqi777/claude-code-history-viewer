@@ -199,6 +199,8 @@ fn run_tauri() {
             kb::commands::kb_get_backup_presence,
             kb::commands::kb_sync_now,
             kb::commands::kb_backup_now,
+            kb::commands::kb_shrink_stats,
+            kb::commands::kb_shrink_now,
             kb::commands::kb_list_sessions,
             kb::commands::kb_search,
             kb::commands::kb_skill_status,

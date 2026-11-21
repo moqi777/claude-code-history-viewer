@@ -377,6 +377,7 @@ mod tests {
             is_compressed: seen.compressed,
             deleted: false,
             origin: None,
+            packed: false,
         }
     }
 

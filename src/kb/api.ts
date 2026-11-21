@@ -39,6 +39,8 @@ import type {
   KbSkillTest,
   KbSession,
   KbSessionQuery,
+  KbShrinkNow,
+  KbShrinkStats,
   KbSourceProbe,
   KbVolume,
   KbWizardResult,
@@ -49,6 +51,8 @@ export const kbApi = {
   getBackupPresence: () => api<KbBackupPresence>("kb_get_backup_presence"),
   syncNow: () => api<KbRunSummary>("kb_sync_now"),
   backupNow: () => api<KbBackupSummary>("kb_backup_now"),
+  shrinkStats: () => api<KbShrinkStats>("kb_shrink_stats"),
+  shrinkNow: () => api<KbShrinkNow>("kb_shrink_now"),
   listSessions: (filter: KbSessionQuery) =>
     api<KbSession[]>("kb_list_sessions", { filter }),
   search: (params: KbSearchParams) => api<KbSearchOutcome>("kb_search", { params }),

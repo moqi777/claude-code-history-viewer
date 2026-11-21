@@ -507,12 +507,12 @@ fn a_database_from_an_older_schema_is_upgraded_and_a_newer_one_refused() {
     });
     assert_eq!(b.import(&lying).unwrap_err().code, "too_new");
 
-    // one version older (before `origin` existed): upgraded on the way in
+    // one version older (before `packed` existed): upgraded on the way in
     let older = root.path().join("older.agentkb");
     repack(&package, &older, db::latest_version() - 1, |db_path| {
         let conn = Connection::open(db_path).unwrap();
         conn.execute_batch(&format!(
-            "ALTER TABLE files DROP COLUMN origin; PRAGMA user_version = {}",
+            "ALTER TABLE files DROP COLUMN packed; PRAGMA user_version = {}",
             db::latest_version() - 1
         ))
         .unwrap();
@@ -1138,4 +1138,70 @@ fn an_import_does_not_start_while_the_vector_builder_runs() {
     let err = b.import(&package).unwrap_err();
     assert_eq!(err.code, "embed_running", "{err}");
     assert!(!b.env().data.raw().exists(), "nothing was applied");
+}
+
+/// The plain text of the backup of `id`, its row's cursor, and whether we
+/// compressed it.
+fn backup_of(lib: &Lib, id: &str) -> (Vec<u8>, i64, bool) {
+    let env = lib.env();
+    let conn = lib.conn();
+    let (rel, offset, packed): (String, i64, bool) = conn
+        .query_row(
+            "SELECT f.mirror_rel, f.mirror_offset, f.packed FROM files f \
+             JOIN sessions s ON s.file_id = f.id WHERE s.session_id = ?1",
+            [id],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get::<_, i64>(2)? != 0)),
+        )
+        .unwrap();
+    let mut text = Vec::new();
+    std::io::Read::read_to_end(
+        &mut super::shrink::open_plain(&env.data.mirror_path(&rel).unwrap()).unwrap(),
+        &mut text,
+    )
+    .unwrap();
+    (text, offset, packed)
+}
+
+#[test]
+fn compressed_backups_travel_through_export_and_import() {
+    let root = tempfile::tempdir().unwrap();
+    let a = Lib::new(root.path(), "alice");
+    a.write_session(S1, 40, "alpha");
+    a.write_session(S2, 40, "beta");
+    // S1 has not been touched for two months: compressed by the collection.
+    fs::OpenOptions::new()
+        .write(true)
+        .open(a.session_file(S1))
+        .unwrap()
+        .set_modified(std::time::SystemTime::now() - std::time::Duration::from_secs(60 * 86_400))
+        .unwrap();
+    assert_eq!(a.sync().status, "ok");
+    let (text, offset, packed) = backup_of(&a, S1);
+    assert!(packed);
+    assert!(!backup_of(&a, S2).2);
+    let package = root.path().join("a.agentkb");
+    a.export(&package);
+    let before = ids(&a, "deadlock");
+
+    // Into an empty library.
+    let b = Lib::new(root.path(), "bob");
+    let report = b.import(&package).unwrap();
+    assert!(report.all_match, "{:?}", report.checks);
+    assert_eq!(ids(&b, "deadlock"), before);
+    assert_eq!(backup_of(&b, S1), (text.clone(), offset, true));
+
+    // Into a library that has sessions of its own (a merge).
+    let c = Lib::new(root.path(), "carol");
+    c.write_session(S3, 2, "gamma");
+    assert_eq!(c.sync().status, "ok");
+    let report = c.import(&package).unwrap();
+    assert_eq!(report.mode, Mode::Merge);
+    assert!(report.all_match, "{:?}", report.checks);
+    assert_eq!(
+        backup_of(&c, S1),
+        (text, offset, true),
+        "the cursor still counts plain-text bytes"
+    );
+    assert!(ids(&c, "deadlock").contains(&S1.to_string()));
+    assert_eq!(c.sync().status, "ok");
 }

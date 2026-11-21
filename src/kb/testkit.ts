@@ -7,6 +7,8 @@ export const apiMocks = () => ({
   getBackupPresence: vi.fn(),
   syncNow: vi.fn(),
   backupNow: vi.fn(),
+  shrinkStats: vi.fn(),
+  shrinkNow: vi.fn(),
   listSessions: vi.fn(),
   getFacets: vi.fn(),
   search: vi.fn(),

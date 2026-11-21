@@ -807,7 +807,10 @@ fn apply_merge_db(
             _ if item.insert_row => {
                 let mut row = row.clone();
                 row.mirror_rel.clone_from(&item.target_rel);
-                row.mirror_offset = i64::try_from(item.len).unwrap_or(i64::MAX);
+                // A backup we compressed keeps counting plain-text bytes.
+                if !row.packed {
+                    row.mirror_offset = i64::try_from(item.len).unwrap_or(i64::MAX);
+                }
                 if matches!(item.action, Action::KeepBoth { .. }) {
                     row.source_path = merge::imported_name(&row.source_path, tag);
                     row.origin = Some(device.to_string());

@@ -1015,6 +1015,7 @@ fn a_collection_is_not_held_up_by_a_digest_that_is_working() {
         mirror: None,
         progress: ProgressSink::default(),
         force_reindex: false,
+        pack: crate::kb::config::PackConfig::default(),
     };
 
     let mut slow = rig.env();

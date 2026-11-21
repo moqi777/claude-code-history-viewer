@@ -87,6 +87,8 @@ unsafe extern "system" {
     fn CloseHandle(handle: *mut c_void) -> i32;
     fn GetCurrentProcess() -> *mut c_void;
     fn SetPriorityClass(process: *mut c_void, class: u32) -> i32;
+    fn GetCurrentThread() -> *mut c_void;
+    fn SetThreadPriority(thread: *mut c_void, priority: i32) -> i32;
     fn GlobalMemoryStatusEx(status: *mut MemoryStatus) -> i32;
     fn GetVolumeInformationW(
         root: *const u16,
@@ -234,6 +236,15 @@ pub fn available_memory() -> Option<u64> {
             avail_extended: 0,
         };
         (GlobalMemoryStatusEx(&mut status) != 0).then_some(status.avail_phys)
+    }
+}
+
+/// Background mode for the calling thread only (lower CPU and I/O priority).
+pub fn lower_thread_priority() {
+    const THREAD_MODE_BACKGROUND_BEGIN: i32 = 0x0001_0000;
+    #[allow(unsafe_code)]
+    unsafe {
+        let _ = SetThreadPriority(GetCurrentThread(), THREAD_MODE_BACKGROUND_BEGIN);
     }
 }
 

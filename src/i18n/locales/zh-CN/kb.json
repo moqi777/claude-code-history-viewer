@@ -530,5 +530,21 @@
   "kb.restore.oldLayout": "旧版备份（没有记录是哪台电脑）",
   "kb.backupFolder.line": "本机备份到：{{path}}",
   "kb.backupFolder.notYet": "本机在硬盘上的文件夹会在第一次备份时创建。",
-  "kb.backupFolder.oldLayout": "硬盘上还有一份没有归属于任何电脑的旧版备份。它保持原样没有动；仍然可以从它恢复。"
+  "kb.backupFolder.oldLayout": "硬盘上还有一份没有归属于任何电脑的旧版备份。它保持原样没有动；仍然可以从它恢复。",
+  "kb.shrink.title": "旧备份压缩",
+  "kb.shrink.hint": "超过下面天数没有新消息的会话，备份自动压缩存放。搜索结果不变；打开旧会话看原文多等不到 1 秒。随时可以关闭：已压缩的照常可读，有新消息的会话会自动恢复成普通文本。",
+  "kb.shrink.enable": "自动压缩旧备份",
+  "kb.shrink.afterDays": "没有新消息超过",
+  "kb.shrink.daysUnit": "天",
+  "kb.shrink.daysInvalid": "请填 1 到 {{max}} 之间的整数",
+  "kb.shrink.stats": "已压缩 {{files}} 个会话：{{plain}} → {{packed}}，省下 {{saved}}",
+  "kb.shrink.none": "还没有压缩过的会话",
+  "kb.shrink.last": "上次压缩：{{at}}，用时 {{seconds}} 秒，压了 {{files}} 个",
+  "kb.shrink.now": "现在压缩一遍",
+  "kb.shrink.nowHint": "按已保存的天数，把该压的一次压完",
+  "kb.shrink.nowDone": "压缩了 {{files}} 个会话，省下 {{saved}}",
+  "kb.shrink.nowPartial": "压缩了 {{files}} 个会话（省下 {{saved}}），{{failed}} 个没压成功，详见日志",
+  "kb.shrink.nowSkipped": "正在收集，稍后再试",
+  "kb.shrink.nowFailed": "压缩失败：{{message}}",
+  "kb.shrink.statsFailed": "读不到压缩统计：{{message}}"
 }

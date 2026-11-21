@@ -14,7 +14,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::fs;
-use std::io::{BufRead, BufReader};
+use std::io::BufRead;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::SystemTime;
@@ -24,10 +24,12 @@ use rayon::prelude::*;
 
 use crate::utils::is_symlink;
 
-/// A regular `.jsonl` file in the project directory. Symlinks are skipped so a
-/// planted link can't pull a file outside the project root into chain scans.
+/// A regular `.jsonl` file in the project directory (or a backup of one that
+/// `AgentKB` compressed). Symlinks are skipped so a planted link can't pull a
+/// file outside the project root into chain scans.
 fn is_regular_jsonl(path: &Path) -> bool {
-    path.extension().and_then(|s| s.to_str()) == Some("jsonl") && !is_symlink(path)
+    (path.extension().and_then(|s| s.to_str()) == Some("jsonl") || super::stored::is_packed(path))
+        && !is_symlink(path)
 }
 
 /// Hard cap on how many hops `resolve_session_chain` will follow. Guards
@@ -98,15 +100,12 @@ struct BoundaryClassifier {
 /// `logicalParentUuid` is NOT among this file's own message uuids. That
 /// absence is exactly what marks "this file's history starts abruptly here;
 /// the messages before it live in a different file."
-#[allow(unsafe_code)]
 fn find_dangling_parent_uuid(path: &Path) -> Option<String> {
     {
-        let file = fs::File::open(path).ok()?;
-        let map = unsafe { memmap2::Mmap::map(&file) }.ok()?;
-        memchr::memmem::find(&map, b"compact_boundary")?;
+        let bytes = super::stored::session_bytes(path).ok()?;
+        memchr::memmem::find(&bytes, b"compact_boundary")?;
     }
-    let file = fs::File::open(path).ok()?;
-    let reader = BufReader::new(file);
+    let reader = super::stored::open_lines(path).ok()?;
 
     let mut own_uuids: HashSet<String> = HashSet::new();
     let mut boundary_parents: Vec<String> = Vec::new();
@@ -140,7 +139,7 @@ fn find_dangling_parent_uuid(path: &Path) -> Option<String> {
 /// v4 strings, so an accidental match elsewhere in the file is not a realistic
 /// concern, and this avoids parsing every line of every candidate file.
 fn file_contains_uuid(path: &Path, target_uuid: &str) -> bool {
-    let Ok(content) = fs::read(path) else {
+    let Ok(content) = super::stored::read_all(path) else {
         return false;
     };
     let needle = format!("\"uuid\":\"{target_uuid}\"");
@@ -176,10 +175,9 @@ fn find_file_containing_uuid(
 /// UUID referenced by a continuation boundary. A true result means the newer
 /// file is a branch from the predecessor, not a replacement for it.
 fn has_main_conversation_after_uuid(path: &Path, target_uuid: &str) -> bool {
-    let Ok(file) = fs::File::open(path) else {
+    let Ok(reader) = super::stored::open_lines(path) else {
         return false;
     };
-    let reader = BufReader::new(file);
     let mut found_target = false;
 
     for line in reader.lines() {
@@ -374,6 +372,39 @@ mod tests {
 
         let chain = resolve_session_chain(&newer);
         assert_eq!(chain, vec![older, newer]);
+    }
+
+    /// `AgentKB` compresses old backups; the earlier half of a continued
+    /// conversation is the older file and so the likelier one to be compressed.
+    #[test]
+    fn a_compressed_backup_can_be_either_half_of_a_chain() {
+        let dir = TempDir::new().unwrap();
+        let older_text =
+            "{\"uuid\":\"tail-uuid\",\"type\":\"assistant\",\"message\":{\"role\":\"assistant\",\"content\":[]}}\n";
+        let older = dir.path().join("older.jsonl.packed.zst");
+        fs::write(&older, zstd::encode_all(older_text.as_bytes(), 9).unwrap()).unwrap();
+        let newer_text = concat!(
+            "{\"type\":\"system\",\"subtype\":\"compact_boundary\",\"uuid\":\"boundary-1\",",
+            "\"logicalParentUuid\":\"tail-uuid\"}\n",
+            "{\"uuid\":\"u2\",\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"continuing\"}}\n",
+        );
+        let newer = write_file(&dir, "newer.jsonl", newer_text);
+        assert_eq!(
+            resolve_session_chain(&newer),
+            vec![older.clone(), newer.clone()]
+        );
+
+        let packed_newer = dir.path().join("newer.jsonl.packed.zst");
+        fs::write(
+            &packed_newer,
+            zstd::encode_all(newer_text.as_bytes(), 9).unwrap(),
+        )
+        .unwrap();
+        fs::remove_file(&newer).unwrap();
+        assert_eq!(
+            resolve_session_chain(&packed_newer),
+            vec![older, packed_newer]
+        );
     }
 
     #[test]

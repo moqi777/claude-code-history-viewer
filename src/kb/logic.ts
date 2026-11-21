@@ -1,4 +1,4 @@
-import type { KbDataDirReport } from "./types";
+import { KB_PACK_DEFAULT, KB_PACK_MAX_DAYS, type KbConfig, type KbDataDirReport, type KbPackConfig } from "./types";
 
 /** Exclude paths, one absolute path per line. */
 export const parseExcludes = (text: string): string[] =>
@@ -26,3 +26,9 @@ export const digestValid = (d: { time: string; max_sessions_per_round: number })
   Number.isInteger(d.max_sessions_per_round) &&
   d.max_sessions_per_round >= 1 &&
   d.max_sessions_per_round <= 500;
+
+/** Old backup compression settings; configs from before 0.8.0 have none. */
+export const packOf = (config: KbConfig): KbPackConfig => config.pack ?? KB_PACK_DEFAULT;
+
+export const packValid = (pack: KbPackConfig): boolean =>
+  Number.isInteger(pack.after_days) && pack.after_days >= 1 && pack.after_days <= KB_PACK_MAX_DAYS;

@@ -471,34 +471,40 @@ fn catch_up(
 /// The snapshot is taken at most once a day, while the duplicate cleanup on
 /// the disk runs with every backup: a file the snapshot names may since have
 /// been removed in favour of the same content under another name (Codex
-/// compressed the source: `X.jsonl` -> `X.jsonl.zst`). Point the row there,
-/// but only when that file provably holds what the row vouches for: the same
-/// first `head_len` bytes and at least `mirror_offset` bytes in all.
+/// compressed the source, `X.jsonl` -> `X.jsonl.zst`; we compressed or
+/// unpacked the backup, `X.jsonl` <-> `X.jsonl.packed.zst`). Point the row
+/// there, but only when that file provably holds what the row vouches for:
+/// the same first `head_len` bytes and at least `mirror_offset` bytes in all.
 fn repoint_to_replacement(
     env: &KbEnv,
     conn: &Connection,
     row: &db::FileRow,
 ) -> Result<Option<db::FileRow>, String> {
+    use super::dedupe::Storage;
     if row.is_compressed {
         return Ok(None);
     }
-    for (rel, compressed) in super::dedupe::replacements_of(&row.mirror_rel) {
+    for (rel, storage) in super::dedupe::replacements_of(&row.mirror_rel) {
         let Ok(path) = env.data.mirror_path(&rel) else {
             continue;
         };
-        if !path.is_file() || !holds_row_content(&path, compressed, row)? {
+        if !path.is_file() || !holds_row_content(&path, storage.is_zst(), row)? {
             continue;
         }
-        let source_path = format!("{}{}", row.source_path, &rel[row.mirror_rel.len()..]);
+        let mut moved = row.clone();
         let tx = conn
             .unchecked_transaction()
             .map_err(|e| format!("begin: {e}"))?;
-        db::convert_file(&tx, row.id, &source_path, &rel, compressed)?;
+        if storage == Storage::Codex {
+            moved.source_path = format!("{}.zst", row.source_path);
+            db::convert_file(&tx, row.id, &moved.source_path, &rel, true)?;
+        } else {
+            db::set_packed(&tx, row.id, &rel, storage == Storage::Packed)?;
+        }
         tx.commit().map_err(|e| format!("commit: {e}"))?;
-        let mut moved = row.clone();
-        moved.source_path = source_path;
         moved.mirror_rel = rel;
-        moved.is_compressed = compressed;
+        moved.is_compressed = storage == Storage::Codex;
+        moved.packed = storage == Storage::Packed;
         return Ok(Some(moved));
     }
     Ok(None)
@@ -530,6 +536,8 @@ fn holds_row_content(path: &Path, compressed: bool, row: &db::FileRow) -> Result
 /// Where a file of the backup lives on this computer: its place in `raw/`
 /// mirrors its place under the source folder (see `discover.rs`).
 fn local_source_path(roots: &SourceRoots, mirror_rel: &str) -> Option<PathBuf> {
+    // A backup we compressed stands for the plain source file.
+    let mirror_rel = super::shrink::plain_rel(mirror_rel).unwrap_or(mirror_rel);
     let (root, rest) = if let Some(rest) = mirror_rel.strip_prefix("claude/") {
         (roots.claude.as_ref()?, rest)
     } else {
@@ -752,6 +760,7 @@ mod tests {
                 mirror: None,
                 progress: ProgressSink::default(),
                 force_reindex: false,
+                pack: crate::kb::config::PackConfig::default(),
             };
             Self { env, claude }
         }

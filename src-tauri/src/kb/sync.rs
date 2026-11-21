@@ -58,6 +58,8 @@ pub struct KbEnv {
     /// Rebuild every derived row from the mirror even if the indexer version
     /// matches (`--kb-reindex`).
     pub force_reindex: bool,
+    /// Old backups stored compressed.
+    pub pack: super::config::PackConfig,
 }
 
 impl KbEnv {
@@ -83,6 +85,7 @@ impl KbEnv {
             mirror: mirror.flatten(),
             progress: ProgressSink::default(),
             force_reindex: false,
+            pack: config.pack,
         }
     }
 
@@ -129,6 +132,12 @@ pub struct Summary {
     /// their content (see `dedupe`), and the bytes that freed.
     pub duplicates_removed: u64,
     pub duplicate_bytes_freed: u64,
+    /// Compressed backups turned back into plain text because the session got
+    /// new messages.
+    pub unpacked_files: u64,
+    /// The pass that compresses old backups (absent when it is switched off).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub shrink: Option<super::shrink::PassSummary>,
     pub errors: Vec<SyncError>,
     pub unknown_types: BTreeMap<String, u64>,
     pub bad_lines: u64,
@@ -274,8 +283,30 @@ fn collect(
         }
     }
 
-    // After the files were mirrored: the replacement of a plain backup has to
-    // exist before the plain one can be shown to be redundant.
+    if env.pack.enabled {
+        match super::shrink::run_pass_politely(
+            &env.data,
+            &env.pack,
+            log,
+            Some(super::shrink::BUDGET),
+            &ProgressSink::default(),
+        ) {
+            Ok(pass) => summary.shrink = Some(pass),
+            Err(message) => {
+                log.line(&format!("ERROR compressing old backups: {message}"));
+                summary.errors.push(SyncError {
+                    path: env.data.raw().display().to_string(),
+                    stage: "shrink".into(),
+                    message,
+                });
+            }
+        }
+    } else {
+        super::shrink::remove_temp_files(&env.data, log);
+    }
+
+    // After the files were mirrored and compressed: the replacement of a
+    // backup has to exist before the old one can be shown to be redundant.
     match super::dedupe::clean_raw(conn, &env.data, log) {
         Ok(removed) => {
             summary.duplicates_removed += removed.files;
@@ -432,7 +463,7 @@ fn reconcile_sources(
             super::mirror::content_continues(
                 (
                     &mirror,
-                    row.is_compressed,
+                    row.mirror_is_zst(),
                     Some(u64::try_from(row.mirror_offset).unwrap_or(0)),
                 ),
                 (Path::new(&item.new_path), item.compressed),
@@ -523,10 +554,10 @@ fn join_twin_rows(
         match super::mirror::content_continues(
             (
                 &old,
-                gone.is_compressed,
+                gone.mirror_is_zst(),
                 Some(u64::try_from(gone.mirror_offset).unwrap_or(0)),
             ),
-            (&new, alive.is_compressed),
+            (&new, alive.mirror_is_zst()),
         ) {
             Ok(true) => pairs.push((gone, alive)),
             Ok(false) => {}
@@ -641,7 +672,7 @@ pub(super) fn reindex_one(env: &KbEnv, conn: &Connection, row: &FileRow) -> Resu
         FileMeta::from_path(row.source, Path::new(&row.source_path)),
     );
     // `Indexer::new` starts from byte 0, so its message rows replace the stored ones.
-    if row.is_compressed {
+    if row.mirror_is_zst() {
         let reader = zstd::stream::Decoder::new(file)
             .map_err(|e| format!("cannot decompress mirror: {e}"))?;
         let tail = super::index::for_each_line_chunk(reader, |chunk| {
@@ -692,7 +723,7 @@ pub(super) fn index_mirror_tail(
     row: &FileRow,
 ) -> Result<u64, String> {
     use std::io::{Seek, SeekFrom};
-    if row.is_compressed {
+    if row.mirror_is_zst() {
         return Ok(0);
     }
     let mirror_path = env.data.mirror_path(&row.mirror_rel)?;
@@ -765,6 +796,29 @@ fn process_file(
     log: &SyncLog,
     summary: &mut Summary,
 ) -> Result<(), String> {
+    // A backup we compressed cannot be appended to: when the source changed,
+    // turn it back into plain text first, then decide as for any backup.
+    let unpacked;
+    let prior = match prior {
+        Some(row)
+            if row.packed
+                && !(u64::try_from(row.src_size).ok() == Some(file.size)
+                    && row.src_mtime_ns == file.mtime_ns) =>
+        {
+            let (now, done) = super::shrink::unpack(conn, &env.data, row)?;
+            summary.unpacked_files += 1;
+            log.line(&format!(
+                "{}: new content, compressed backup turned back into {}",
+                file.path_str, now.mirror_rel
+            ));
+            if let Some(old) = done.left_behind {
+                log.line(&format!("{old}: cannot remove it yet, next time again"));
+            }
+            unpacked = now;
+            Some(&unpacked)
+        }
+        other => other,
+    };
     let mirror_path = env
         .data
         .mirror_path(prior.map_or(file.mirror_rel.as_str(), |r| r.mirror_rel.as_str()))?;
@@ -1001,6 +1055,7 @@ mod tests {
                 mirror: None,
                 progress: ProgressSink::default(),
                 force_reindex: false,
+                pack: crate::kb::config::PackConfig::default(),
             };
             Self {
                 dir,

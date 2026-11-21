@@ -84,7 +84,9 @@ pub(crate) fn is_rollout_jsonl(path: &Path) -> bool {
         .and_then(|name| name.to_str())
         .is_some_and(|name| {
             name.starts_with("rollout-")
-                && (name.ends_with(".jsonl") || name.ends_with(".jsonl.zst"))
+                && (name.ends_with(".jsonl")
+                    || name.ends_with(".jsonl.zst")
+                    || name.ends_with(".jsonl.packed.zst"))
         })
 }
 
@@ -128,13 +130,34 @@ impl std::ops::Deref for RolloutBytes {
     }
 }
 
+/// A rollout that is gone may be stored under another name by now: Codex
+/// compressed it (`.jsonl.zst`), or `AgentKB` compressed or unpacked its
+/// backup (`.jsonl.packed.zst`).
+#[allow(clippy::case_sensitive_file_extension_comparisons)] // exact names Codex writes
+fn existing_rollout(path: &Path) -> std::path::PathBuf {
+    if path.exists() {
+        return path.to_path_buf();
+    }
+    let codex = path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .filter(|n| n.ends_with(".jsonl"))
+        .map(|n| path.with_file_name(format!("{n}.zst")));
+    crate::commands::session::twin_path(path)
+        .into_iter()
+        .chain(codex)
+        .find(|p| p.exists())
+        .unwrap_or_else(|| path.to_path_buf())
+}
+
 #[allow(unsafe_code)] // Required for mmap performance optimization
 fn read_rollout_bytes(path: &Path) -> Result<RolloutBytes, String> {
+    let path = &existing_rollout(path);
     let file = File::open(path).map_err(|e| e.to_string())?;
     let is_compressed = path
         .file_name()
         .and_then(|name| name.to_str())
-        .is_some_and(|name| name.ends_with(".jsonl.zst"));
+        .is_some_and(|name| name.ends_with(".jsonl.zst") || name.ends_with(".jsonl.packed.zst"));
     if is_compressed {
         return zstd::decode_all(std::io::BufReader::new(file))
             .map(RolloutBytes::Owned)
@@ -1964,6 +1987,27 @@ fn build_codex_message(
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn a_backup_agentkb_compressed_reads_as_plain_text_under_either_name() {
+        let dir = tempfile::tempdir().unwrap();
+        let plain = dir
+            .path()
+            .join("rollout-2026-01-02T10-00-00-019e0000-cccc-7000-8000-000000000001.jsonl");
+        let packed = dir.path().join(format!(
+            "{}.packed.zst",
+            plain.file_name().unwrap().to_string_lossy()
+        ));
+        let text = b"{\"type\":\"session_meta\"}\n";
+        std::fs::write(&packed, zstd::encode_all(&text[..], 9).unwrap()).unwrap();
+        assert!(is_rollout_jsonl(&packed));
+        assert_eq!(&*read_rollout_bytes(&packed).unwrap(), text);
+        assert_eq!(
+            &*read_rollout_bytes(&plain).unwrap(),
+            text,
+            "the old name still opens"
+        );
+    }
     use super::*;
     use serde_json::json;
     use serial_test::serial;

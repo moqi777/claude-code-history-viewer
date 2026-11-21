@@ -530,5 +530,21 @@
   "kb.restore.oldLayout": "이전 형식의 백업(컴퓨터 기록 없음)",
   "kb.backupFolder.line": "이 컴퓨터의 백업 위치: {{path}}",
   "kb.backupFolder.notYet": "이 컴퓨터의 디스크 폴더는 첫 백업 때 만들어집니다.",
-  "kb.backupFolder.oldLayout": "어느 컴퓨터에도 속하지 않은 이전 백업도 디스크에 있습니다. 그대로 두었으며, 여기에서 복원할 수도 있습니다."
+  "kb.backupFolder.oldLayout": "어느 컴퓨터에도 속하지 않은 이전 백업도 디스크에 있습니다. 그대로 두었으며, 여기에서 복원할 수도 있습니다.",
+  "kb.shrink.title": "Compress old backups",
+  "kb.shrink.hint": "Backups of sessions with no new message for the number of days below are stored compressed. Search results stay the same; opening an old session takes under a second longer. You can switch it off at any time: compressed backups stay readable, and a session that gets new messages turns back into plain text by itself.",
+  "kb.shrink.enable": "Compress old backups automatically",
+  "kb.shrink.afterDays": "No new message for",
+  "kb.shrink.daysUnit": "days",
+  "kb.shrink.daysInvalid": "Enter a whole number from 1 to {{max}}",
+  "kb.shrink.stats": "{{files}} sessions compressed: {{plain}} → {{packed}}, {{saved}} saved",
+  "kb.shrink.none": "No session is compressed yet",
+  "kb.shrink.last": "Last compressed: {{at}}, took {{seconds}} s, {{files}} sessions",
+  "kb.shrink.now": "Compress now",
+  "kb.shrink.nowHint": "Compresses everything due at once, using the saved number of days",
+  "kb.shrink.nowDone": "Compressed {{files}} sessions, {{saved}} saved",
+  "kb.shrink.nowPartial": "Compressed {{files}} sessions ({{saved}} saved); {{failed}} could not be compressed, see the log",
+  "kb.shrink.nowSkipped": "A collection is running; try again in a moment",
+  "kb.shrink.nowFailed": "Compressing failed: {{message}}",
+  "kb.shrink.statsFailed": "Cannot read the compression figures: {{message}}"
 }

@@ -196,7 +196,41 @@ export interface KbConfig {
   mirror: KbMirrorConfig;
   digest: KbDigestConfig;
   semantic: { enabled: boolean; source: string };
+  /** Old backups stored compressed (missing in configs written before 0.8.0). */
+  pack?: KbPackConfig;
   [extra: string]: unknown;
+}
+
+export interface KbPackConfig {
+  enabled: boolean;
+  after_days: number;
+}
+
+export const KB_PACK_DEFAULT: KbPackConfig = { enabled: true, after_days: 30 };
+export const KB_PACK_MAX_DAYS = 3650;
+
+/** What is compressed so far (`kb_shrink_stats`). */
+export interface KbShrinkStats {
+  files: number;
+  plain_bytes: number;
+  packed_bytes: number;
+  last_at: string | null;
+  last_ms: number | null;
+  last_files: number | null;
+}
+
+/** "Compress now" (`kb_shrink_now`). */
+export interface KbShrinkNow {
+  status: "ok" | "partial" | "skipped";
+  packed_files: number;
+  plain_bytes: number;
+  packed_bytes: number;
+  failed_files: number;
+  left_behind: number;
+  remaining: number;
+  temp_files_removed: number;
+  duration_ms: number;
+  duplicates_removed: number;
 }
 
 export type KbConfigState =

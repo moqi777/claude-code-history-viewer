@@ -178,6 +178,25 @@ pub async fn kb_backup_now(app: tauri::AppHandle) -> Res<BackupSummary> {
     .await
 }
 
+/// What is compressed so far (settings page).
+#[tauri::command]
+pub async fn kb_shrink_stats() -> Res<super::shrink::Stats> {
+    blocking(|| {
+        let env = env()?;
+        match db::open_readonly(&env.data.db())? {
+            Some(conn) => super::shrink::stats(&conn, &env.data),
+            None => Ok(super::shrink::Stats::default()),
+        }
+    })
+    .await
+}
+
+/// "Compress now": everything due, no time limit.
+#[tauri::command]
+pub async fn kb_shrink_now(app: tauri::AppHandle) -> Res<super::shrink::NowSummary> {
+    blocking(move || super::shrink::run_now(&env()?.with_progress(sink(&app)))).await
+}
+
 // ---------------------------------------------------------------------------
 // Schedule
 // ---------------------------------------------------------------------------

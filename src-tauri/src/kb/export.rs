@@ -218,7 +218,10 @@ pub fn export(
         .map(|r| {
             (
                 r.mirror_rel.as_str(),
-                (r.is_compressed, u64::try_from(r.mirror_offset).unwrap_or(0)),
+                (
+                    r.mirror_is_zst(),
+                    u64::try_from(r.mirror_offset).unwrap_or(0),
+                ),
             )
         })
         .collect();

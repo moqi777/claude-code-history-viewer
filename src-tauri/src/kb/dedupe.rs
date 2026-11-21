@@ -1,12 +1,21 @@
-//! Duplicate backups left behind when Codex compresses a rollout in place.
+//! Duplicate backups: the same content stored under two names in `raw/`.
 //!
-//! Codex turns `X.jsonl` into `X.jsonl.zst`. The collector follows the session
-//! to the new file and mirrors it as `X.jsonl.zst`, and the database row now
-//! points there; the earlier plain mirror `X.jsonl` stays in `raw/` with
-//! nothing referring to it. It holds nothing the `.zst` does not: this module
-//! removes it, but only after proving that every byte of it is the start of
-//! (or all of) what the `.zst` decompresses to. If the proof fails or cannot
-//! be made (different content, a damaged `.zst`, a read error) both files stay.
+//! A backup changes its name when it is stored another way, and the old name
+//! can stay behind with nothing referring to it:
+//!
+//! | left behind (no row) | where the row points | how |
+//! |---|---|---|
+//! | `X.jsonl` | `X.jsonl.zst` | Codex compressed the source in place |
+//! | `X.jsonl` | `X.jsonl.packed.zst` | we compressed the backup, removing the plain one failed or was cut short |
+//! | `X.jsonl.packed.zst` | `X.jsonl` | we unpacked it for new messages, same |
+//! | `X.jsonl.packed.zst` | `X.jsonl.zst` | Codex compressed the source after we had compressed the backup |
+//!
+//! The one left behind holds nothing the other does not: this module removes
+//! it, but only after proving that every byte of it is the start of (or all
+//! of) what the other holds, each read as plain text. If the proof fails or
+//! cannot be made (different content, a damaged file, a read error) both stay.
+//! A file that cannot be removed (Windows: someone has it open) stays too and
+//! is tried again with the next collection.
 //!
 //! Removal is the last step and nothing is written before it, so being killed
 //! at any point leaves every piece of content on disk.
@@ -22,6 +31,7 @@ use super::fsutil;
 use super::log::SyncLog;
 use super::mirror::content_continues;
 use super::paths::DataPaths;
+use super::shrink::PACKED_SUFFIX;
 
 /// One pass stops starting new proofs after this long; the next pass goes on.
 pub const BUDGET: Duration = Duration::from_secs(60);
@@ -37,28 +47,90 @@ pub struct Removed {
     pub bytes: u64,
 }
 
+/// How a backup file is stored, told by its name.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Storage {
+    /// `X.jsonl`
+    Plain,
+    /// `X.jsonl.packed.zst`: compressed by us, the source is plain
+    Packed,
+    /// `X.jsonl.zst`: the source itself is compressed (Codex)
+    Codex,
+}
+
+impl Storage {
+    pub fn is_zst(self) -> bool {
+        self != Self::Plain
+    }
+}
+
+/// The plain name a backup name stands for, and how it is stored. `None` for
+/// anything else (`.prev-*` and `.conflict-*` files are kept sets of older
+/// content, temp files are not content).
+#[allow(clippy::case_sensitive_file_extension_comparisons)] // exact names: the agents write `.jsonl`
+pub fn storage_of(rel: &str) -> Option<(&str, Storage)> {
+    if let Some(plain) = rel.strip_suffix(PACKED_SUFFIX) {
+        return plain
+            .ends_with(".jsonl")
+            .then_some((plain, Storage::Packed));
+    }
+    if let Some(plain) = rel.strip_suffix(".zst") {
+        return plain.ends_with(".jsonl").then_some((plain, Storage::Codex));
+    }
+    rel.ends_with(".jsonl").then_some((rel, Storage::Plain))
+}
+
+fn name_for(plain: &str, storage: Storage) -> String {
+    match storage {
+        Storage::Plain => plain.to_string(),
+        Storage::Packed => format!("{plain}{PACKED_SUFFIX}"),
+        Storage::Codex => format!("{plain}.zst"),
+    }
+}
+
+/// The names that may hold all of what the left-behind `rel` holds (the
+/// table above, read from the left column).
+fn twins_of(rel: &str) -> Vec<(String, Storage)> {
+    let wanted: &[Storage] = match storage_of(rel) {
+        Some((_, Storage::Plain)) => &[Storage::Codex, Storage::Packed],
+        Some((_, Storage::Packed)) => &[Storage::Plain, Storage::Codex],
+        _ => &[],
+    };
+    let Some((plain, _)) = storage_of(rel) else {
+        return Vec::new();
+    };
+    wanted.iter().map(|s| (name_for(plain, *s), *s)).collect()
+}
+
+/// The other names under which the content of the backup `rel` may be stored
+/// after the cleanup removed `rel` itself. A database snapshot taken before
+/// that still points to `rel`.
+pub fn replacements_of(rel: &str) -> Vec<(String, Storage)> {
+    let wanted: &[Storage] = match storage_of(rel) {
+        Some((_, Storage::Plain)) => &[Storage::Packed, Storage::Codex],
+        Some((_, Storage::Packed)) => &[Storage::Plain, Storage::Codex],
+        _ => &[],
+    };
+    let Some((plain, _)) = storage_of(rel) else {
+        return Vec::new();
+    };
+    wanted.iter().map(|s| (name_for(plain, *s), *s)).collect()
+}
+
 /// Whether `plain` (as stored) is the beginning of, or all of, what `zst`
 /// decompresses to. An empty `plain` proves nothing and is kept.
 pub fn is_redundant(plain: &Path, zst: &Path) -> Result<bool, String> {
     content_continues((plain, false, None), (zst, true))
 }
 
-/// The twin of `X.jsonl` is `X.jsonl.zst`; anything else is left alone
-/// (`.prev-*` and `.conflict-*` files are kept sets of older content).
-#[allow(clippy::case_sensitive_file_extension_comparisons)] // exact names: Codex writes `.jsonl`
-fn twin_of(rel: &str) -> Option<String> {
-    rel.ends_with(".jsonl").then(|| format!("{rel}.zst"))
+/// Whether the left-behind `a` holds nothing that its twin `b` does not.
+fn is_contained(a: &Path, a_rel: &str, b: &Path, b_storage: Storage) -> Result<bool, String> {
+    let a_zst = storage_of(a_rel).is_some_and(|(_, s)| s.is_zst());
+    content_continues((a, a_zst, None), (b, b_storage.is_zst()))
 }
 
-/// The other names under which the content of the backup `rel` may be stored
-/// after the cleanup above removed `rel` itself (as `(name, compressed)`).
-/// A database snapshot taken before that still points to `rel`.
-pub fn replacements_of(rel: &str) -> Vec<(String, bool)> {
-    twin_of(rel).map(|twin| (twin, true)).into_iter().collect()
-}
-
-/// Remove the plain mirrors in `raw/` that no database row points to and whose
-/// `.zst` twin is referenced and proves to hold all of their content.
+/// Remove the backups in `raw/` that no database row points to and whose
+/// twin is referenced and proves to hold all of their content.
 pub fn clean_raw(conn: &Connection, data: &DataPaths, log: &SyncLog) -> Result<Removed, String> {
     let started = Instant::now();
     let referenced: HashSet<String> = db::load_files(conn)?
@@ -67,45 +139,49 @@ pub fn clean_raw(conn: &Connection, data: &DataPaths, log: &SyncLog) -> Result<R
         .collect();
     let raw = data.raw();
     let mut removed = Removed::default();
-    for (rel, size) in fsutil::walk_files(&raw) {
+    'files: for (rel, size) in fsutil::walk_files(&raw) {
         if referenced.contains(&rel) {
             continue;
         }
-        let Some(twin) = twin_of(&rel) else { continue };
-        if !referenced.contains(&twin) {
-            continue;
-        }
-        if started.elapsed() >= BUDGET {
-            log.line("duplicate backups: time is up, the rest next time");
-            break;
-        }
-        match is_redundant(&raw.join(&rel), &raw.join(&twin)) {
-            Ok(true) => {
-                if let Err(message) = remove(&raw.join(&rel)) {
-                    log.line(&format!("duplicate backup {rel}: cannot remove: {message}"));
-                    continue;
-                }
-                log.line(&format!(
-                    "removed duplicate backup {rel} ({size} bytes): identical to the start of {twin}"
-                ));
-                removed.files += 1;
-                removed.bytes += size;
+        for (twin, storage) in twins_of(&rel) {
+            if !referenced.contains(&twin) {
+                continue;
             }
-            Ok(false) => log.line(&format!(
-                "kept {rel}: it is not contained in {twin}, so both stay"
-            )),
-            Err(message) => log.line(&format!(
-                "kept {rel}: cannot compare with {twin}: {message}"
-            )),
+            if started.elapsed() >= BUDGET {
+                log.line("duplicate backups: time is up, the rest next time");
+                break 'files;
+            }
+            match is_contained(&raw.join(&rel), &rel, &raw.join(&twin), storage) {
+                Ok(true) => {
+                    if let Err(message) = remove(&raw.join(&rel)) {
+                        log.line(&format!(
+                            "duplicate backup {rel}: cannot remove, next time again: {message}"
+                        ));
+                        continue 'files;
+                    }
+                    log.line(&format!(
+                        "removed duplicate backup {rel} ({size} bytes): contained in {twin}"
+                    ));
+                    removed.files += 1;
+                    removed.bytes += size;
+                    continue 'files;
+                }
+                Ok(false) => log.line(&format!(
+                    "kept {rel}: it is not contained in {twin}, so both stay"
+                )),
+                Err(message) => log.line(&format!(
+                    "kept {rel}: cannot compare with {twin}: {message}"
+                )),
+            }
         }
     }
     Ok(removed)
 }
 
 /// The same on the backup disk. The disk keeps every file the main directory
-/// once had, so a plain copy remains there after the main one was removed.
-/// It goes only when the main directory no longer has it, has the `.zst`
-/// twin, and the disk's own twin is complete (same size) and holds all of it.
+/// once had, so a copy under the old name remains there after the main one
+/// was removed. It goes only when the main directory no longer has it, has
+/// the twin, and the disk's own twin is complete (same size) and holds all of it.
 pub fn clean_disk(
     data: &DataPaths,
     disk_raw: &Path,
@@ -115,63 +191,60 @@ pub fn clean_disk(
     let started = Instant::now();
     let local = data.raw();
     let mut removed = Removed::default();
-    for (rel, size) in fsutil::walk_files(disk_raw) {
-        let Some(twin) = twin_of(&rel) else { continue };
-        let (disk_plain, disk_twin) = (disk_raw.join(&rel), disk_raw.join(&twin));
-        let (local_plain, local_twin) = (local.join(&rel), local.join(&twin));
-        if local_plain.exists() {
+    'files: for (rel, size) in fsutil::walk_files(disk_raw) {
+        if local.join(&rel).exists() {
             continue;
         }
-        let same_size = match (
-            std::fs::metadata(&local_twin),
-            std::fs::metadata(&disk_twin),
-        ) {
-            (Ok(a), Ok(b)) => a.is_file() && b.is_file() && a.len() == b.len(),
-            _ => false,
-        };
-        if !same_size {
-            continue;
-        }
-        if started.elapsed() >= BUDGET {
-            log.line("duplicate backups on the disk: time is up, the rest next time");
-            break;
-        }
-        if let Err(message) = ensure_on_disk(&disk_plain) {
-            log.line(&format!("duplicate backup {rel} on the disk: {message}"));
-            break;
-        }
-        match is_redundant(&disk_plain, &disk_twin) {
-            Ok(true) => match remove(&disk_plain) {
-                Ok(()) => {
-                    log.line(&format!(
-                        "removed duplicate backup {rel} ({size} bytes) from the disk: contained in {twin}"
-                    ));
-                    removed.files += 1;
-                    removed.bytes += size;
+        for (twin, storage) in twins_of(&rel) {
+            let (disk_old, disk_twin) = (disk_raw.join(&rel), disk_raw.join(&twin));
+            let same_size = match (
+                std::fs::metadata(local.join(&twin)),
+                std::fs::metadata(&disk_twin),
+            ) {
+                (Ok(a), Ok(b)) => a.is_file() && b.is_file() && a.len() == b.len(),
+                _ => false,
+            };
+            if !same_size {
+                continue;
+            }
+            if started.elapsed() >= BUDGET {
+                log.line("duplicate backups on the disk: time is up, the rest next time");
+                break 'files;
+            }
+            if let Err(message) = ensure_on_disk(&disk_old) {
+                log.line(&format!("duplicate backup {rel} on the disk: {message}"));
+                break 'files;
+            }
+            match is_contained(&disk_old, &rel, &disk_twin, storage) {
+                Ok(true) => {
+                    match remove(&disk_old) {
+                        Ok(()) => {
+                            log.line(&format!(
+                                "removed duplicate backup {rel} ({size} bytes) from the disk: contained in {twin}"
+                            ));
+                            removed.files += 1;
+                            removed.bytes += size;
+                        }
+                        Err(message) => log.line(&format!(
+                            "duplicate backup {rel} on the disk: cannot remove: {message}"
+                        )),
+                    }
+                    continue 'files;
                 }
-                Err(message) => {
-                    log.line(&format!(
-                        "duplicate backup {rel} on the disk: cannot remove: {message}"
-                    ));
-                }
-            },
-            Ok(false) => log.line(&format!(
-                "kept {rel} on the disk: it is not contained in {twin}, so both stay"
-            )),
-            Err(message) => log.line(&format!(
-                "kept {rel} on the disk: cannot compare with {twin}: {message}"
-            )),
+                Ok(false) => log.line(&format!(
+                    "kept {rel} on the disk: it is not contained in {twin}, so both stay"
+                )),
+                Err(message) => log.line(&format!(
+                    "kept {rel} on the disk: cannot compare with {twin}: {message}"
+                )),
+            }
         }
     }
     removed
 }
 
 fn remove(path: &Path) -> Result<(), String> {
-    std::fs::remove_file(path).map_err(|e| e.to_string())?;
-    if let Some(parent) = path.parent() {
-        fsutil::fsync_dir(parent);
-    }
-    Ok(())
+    fsutil::remove_synced(path)
 }
 
 /// Add to the running totals and to what the user has not been told about yet.
@@ -267,11 +340,24 @@ mod tests {
     }
 
     #[test]
-    fn only_the_jsonl_with_a_zst_twin_is_a_candidate() {
-        assert_eq!(twin_of("a/b.jsonl").as_deref(), Some("a/b.jsonl.zst"));
-        assert_eq!(twin_of("a/b.jsonl.zst"), None);
-        assert_eq!(twin_of("a/b.jsonl.prev-20260101T000000Z"), None);
-        assert_eq!(twin_of("a/b.jsonl.conflict-20260101T000000Z"), None);
+    fn the_twins_of_each_left_behind_name() {
+        let names = |rel: &str| -> Vec<String> { twins_of(rel).into_iter().map(|t| t.0).collect() };
+        assert_eq!(
+            names("a/b.jsonl"),
+            ["a/b.jsonl.zst", "a/b.jsonl.packed.zst"]
+        );
+        assert_eq!(
+            names("a/b.jsonl.packed.zst"),
+            ["a/b.jsonl", "a/b.jsonl.zst"]
+        );
+        assert!(
+            names("a/b.jsonl.zst").is_empty(),
+            "the source's own storage is never left behind"
+        );
+        assert!(names("a/b.jsonl.prev-20260101T000000Z").is_empty());
+        assert!(names("a/b.jsonl.conflict-20260101T000000Z").is_empty());
+        assert!(names("a/b.jsonl.packed.zst.tmp-123").is_empty());
+        assert!(names("a/b.txt.packed.zst").is_empty());
     }
 
     #[test]

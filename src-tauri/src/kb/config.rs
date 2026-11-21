@@ -182,6 +182,35 @@ impl SemanticConfig {
     }
 }
 
+/// Old backups stored compressed (phase 8b).
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct PackConfig {
+    pub enabled: bool,
+    /// A session with no new message for this many days is compressed.
+    pub after_days: u32,
+}
+
+pub const PACK_MAX_DAYS: u32 = 3650;
+
+impl Default for PackConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            after_days: 30,
+        }
+    }
+}
+
+impl PackConfig {
+    fn validate(self) -> Result<(), String> {
+        if !(1..=PACK_MAX_DAYS).contains(&self.after_days) {
+            return Err(format!("pack.after_days must be 1 to {PACK_MAX_DAYS}"));
+        }
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
 pub struct KbConfig {
@@ -202,6 +231,7 @@ pub struct KbConfig {
     pub mirror: MirrorConfig,
     pub digest: DigestConfig,
     pub semantic: SemanticConfig,
+    pub pack: PackConfig,
     /// Keys this version does not know, kept so a newer/older sibling program
     /// does not lose them when we save.
     #[serde(flatten)]
@@ -221,6 +251,7 @@ impl Default for KbConfig {
             mirror: MirrorConfig::default(),
             digest: DigestConfig::default(),
             semantic: SemanticConfig::default(),
+            pack: PackConfig::default(),
             extra: Map::new(),
         }
     }
@@ -432,6 +463,7 @@ impl KbConfig {
         }
         self.digest.validate()?;
         self.semantic.validate()?;
+        self.pack.validate()?;
         let roots = SourceRoots::resolve(self);
         for root in [&roots.claude, &roots.codex].into_iter().flatten() {
             if self.data_dir.starts_with(root) || root.starts_with(&self.data_dir) {

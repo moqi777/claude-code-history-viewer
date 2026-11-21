@@ -1791,6 +1791,12 @@ fn cut_chars(text: &str, max: usize) -> (String, bool) {
     (text.chars().take(max).collect::<String>() + "…", true)
 }
 
+/// Runs between reading a row and opening its backup (tests only).
+#[cfg(test)]
+#[allow(clippy::type_complexity)]
+pub static BEFORE_READ: std::sync::Mutex<Option<Box<dyn Fn() + Send>>> =
+    std::sync::Mutex::new(None);
+
 /// The untruncated text of a stored message, re-read from the mirror line.
 fn full_text(
     index: &Index,
@@ -1802,7 +1808,26 @@ fn full_text(
 ) -> Option<String> {
     let path = index.data.mirror_path(&row.mirror_rel).ok()?;
     let source = Source::parse(&row.info.source)?;
-    let line = read_line_at(&path, byte_off)?;
+    #[cfg(test)]
+    if let Some(hook) = BEFORE_READ
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .as_ref()
+    {
+        hook();
+    }
+    let line = read_line_at(&path, byte_off).or_else(|| {
+        // The collection may have compressed or unpacked the backup since the
+        // row was read: read the row again and try once more.
+        let now: String = index
+            .conn
+            .query_row("SELECT mirror_rel FROM files WHERE id=?1", [file_id], |r| {
+                r.get(0)
+            })
+            .ok()?;
+        (now != row.mirror_rel).then_some(())?;
+        read_line_at(&index.data.mirror_path(&now).ok()?, byte_off)
+    })?;
     let mut extractor = Extractor::uncapped();
     extractor.feed(source, &line);
     let rows: Vec<_> = extractor

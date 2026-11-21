@@ -3,7 +3,6 @@
 use crate::models::{ClaudeMessage, ClaudeSession, MessagePage, RawLogEntry};
 use crate::utils::{extract_project_name, find_line_ranges, find_line_starts};
 use chrono::{DateTime, Utc};
-use memmap2::Mmap;
 use rayon::prelude::*;
 use std::cmp::Reverse;
 use std::collections::HashMap;
@@ -2050,15 +2049,8 @@ pub async fn load_session_messages(session_path: String) -> Result<Vec<ClaudeMes
 /// in a resolved continuation chain.
 #[allow(unsafe_code)] // Required for mmap performance optimization
 fn load_all_messages_from_file(session_path: &Path) -> Result<Vec<ClaudeMessage>, String> {
-    // Use memory-mapped file for faster I/O
-    let file =
-        fs::File::open(session_path).map_err(|e| format!("Failed to open session file: {e}"))?;
-
-    // SAFETY: We're only reading the file, and the file handle is kept open
-    // for the duration of the mmap's lifetime. No concurrent modifications expected
-    // as session files are append-only by Claude.
-    let mmap = unsafe { Mmap::map(&file) }
-        .map_err(|e| format!("Failed to memory-map session file: {e}"))?;
+    // Plain text mapped, or a compressed backup decompressed (see `stored.rs`).
+    let mmap = super::stored::session_bytes(session_path)?;
 
     // Find line boundaries efficiently using SIMD-accelerated memchr
     let line_starts = find_line_starts(&mmap);
@@ -2442,14 +2434,8 @@ pub fn get_session_message_offset(
     message_uuid: String,
     exclude_sidechain: Option<bool>,
 ) -> Result<Option<usize>, String> {
-    let file =
-        fs::File::open(&session_path).map_err(|e| format!("Failed to open session file: {e}"))?;
-
-    // SAFETY: We're only reading the file, and the file handle is kept open
-    // for the duration of the mmap's lifetime. No concurrent modifications expected
-    // as session files are append-only by Claude.
-    let mmap = unsafe { Mmap::map(&file) }
-        .map_err(|e| format!("Failed to memory-map session file: {e}"))?;
+    // Plain text mapped, or a compressed backup decompressed (see `stored.rs`).
+    let mmap = super::stored::session_bytes(Path::new(&session_path))?;
 
     let exclude = exclude_sidechain.unwrap_or(false);
     let line_ranges = find_line_ranges(&mmap);
@@ -2502,14 +2488,8 @@ fn load_message_window_from_file(
     limit: usize,
     exclude: bool,
 ) -> Result<(Vec<ClaudeMessage>, usize, bool), String> {
-    let file =
-        fs::File::open(session_path).map_err(|e| format!("Failed to open session file: {e}"))?;
-
-    // SAFETY: We're only reading the file, and the file handle is kept open
-    // for the duration of the mmap's lifetime. No concurrent modifications expected
-    // as session files are append-only by Claude.
-    let mmap = unsafe { Mmap::map(&file) }
-        .map_err(|e| format!("Failed to memory-map session file: {e}"))?;
+    // Plain text mapped, or a compressed backup decompressed (see `stored.rs`).
+    let mmap = super::stored::session_bytes(session_path)?;
 
     let line_ranges = find_line_ranges(&mmap);
 
@@ -2550,14 +2530,8 @@ fn load_message_window_from_file(
 /// Count viewer-visible messages in a single file (the pre-chain algorithm).
 #[allow(unsafe_code)] // Required for mmap performance optimization
 fn count_valid_messages_in_file(session_path: &Path, exclude: bool) -> Result<usize, String> {
-    let file =
-        fs::File::open(session_path).map_err(|e| format!("Failed to open session file: {e}"))?;
-
-    // SAFETY: We're only reading the file, and the file handle is kept open
-    // for the duration of the mmap's lifetime. No concurrent modifications expected
-    // as session files are append-only by Claude.
-    let mmap = unsafe { Mmap::map(&file) }
-        .map_err(|e| format!("Failed to memory-map session file: {e}"))?;
+    // Plain text mapped, or a compressed backup decompressed (see `stored.rs`).
+    let mmap = super::stored::session_bytes(session_path)?;
 
     let line_ranges = find_line_ranges(&mmap);
     Ok(line_ranges

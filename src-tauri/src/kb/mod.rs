@@ -36,6 +36,7 @@ pub mod restore;
 pub mod schedule;
 pub mod search;
 pub mod semantic;
+pub mod shrink;
 pub mod skill;
 pub mod status;
 pub mod sync;
@@ -45,7 +46,7 @@ pub mod volume;
 
 /// `AgentKB`'s own version, independent of the base viewer's `package.json`
 /// version (which stays in step with upstream). Phase N ships `0.N.0`.
-pub const AGENTKB_VERSION: &str = "0.7.6";
+pub const AGENTKB_VERSION: &str = "0.8.0";
 
 /// Where a session file came from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -73,3 +74,5 @@ impl Source {
 
 #[cfg(test)]
 mod import_tests;
+#[cfg(test)]
+mod shrink_tests;

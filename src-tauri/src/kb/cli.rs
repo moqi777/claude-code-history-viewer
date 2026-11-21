@@ -16,7 +16,7 @@ const USAGE: &str = "usage: --kb-sync | --kb-reindex | --kb-backup | --kb-move-d
 | --kb-schedule install|uninstall|status|ensure | --kb-search \"<words>\" [options] \
 | --kb-show <source:session-id> [--around <seq>] [options] | --kb-skill-print claude|codex \
 | --kb-digest --auto|--all|--session <source:session-id> [--once]|--test \
-| --kb-embed --auto|--all|--status|--test \
+| --kb-embed --auto|--all|--status|--test | --kb-shrink --all|--status \
 | --kb-export <file.agentkb> [--overwrite] [--no-vectors] \
 | --kb-import <file.agentkb> [--inspect|--plan] [--no-sync] [--no-settings] [--adopt-settings]";
 
@@ -37,6 +37,7 @@ pub fn try_run(args: &[String]) -> Option<i32> {
         "--kb-digest" => run_digest_command(&args[2..]),
         "--kb-embed" => run_embed_command(&args[2..]),
         "--kb-backup" => run_backup_command(),
+        "--kb-shrink" => run_shrink_command(args.get(2).map(String::as_str)),
         "--kb-export" => run_export_command(&args[2..]),
         "--kb-import" => run_import_command(&args[2..]),
         "--kb-move-data" => run_move_data_command(args.get(2).map(String::as_str)),
@@ -574,6 +575,35 @@ fn run_backup_command() -> i32 {
             1
         }
     }
+}
+
+/// Compress old backups now (`--all`), or show what is compressed (`--status`).
+fn run_shrink_command(mode: Option<&str>) -> i32 {
+    let config = match load_config() {
+        Ok(config) => config,
+        Err(code) => return code,
+    };
+    let env = KbEnv::from_config(&config);
+    let result = match mode {
+        Some("--all") => super::shrink::run_now(&env).map(|summary| {
+            print_json(&summary);
+            i32::from(summary.status != "ok")
+        }),
+        Some("--status") => super::db::open(&env.data.db())
+            .and_then(|conn| super::shrink::stats(&conn, &env.data))
+            .map(|stats| {
+                print_json(&stats);
+                0
+            }),
+        _ => {
+            eprintln!("{USAGE}");
+            return 2;
+        }
+    };
+    result.unwrap_or_else(|e| {
+        eprintln!("{e}");
+        1
+    })
 }
 
 /// Move the data directory (copy, verify byte for byte, then switch the config).

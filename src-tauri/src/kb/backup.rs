@@ -117,9 +117,12 @@ fn plan_file(src: &Path, dst: &Path, size: u64) -> Result<Option<Action>, String
     let head = have.min(size).min(HEAD_BYTES);
     let agree =
         same_head(src, dst, head).map_err(|e| format!("cannot compare {}: {e}", dst.display()))?;
+    // A compressed file is written whole, never appended to: a shorter copy
+    // of it on the disk is another file, not the start of this one.
+    let appendable = src.extension().map_or(true, |e| e != "zst");
     Ok(match (agree, have.cmp(&size)) {
         (true, std::cmp::Ordering::Equal) => None,
-        (true, std::cmp::Ordering::Less) => Some(Action::Append { from: have }),
+        (true, std::cmp::Ordering::Less) if appendable => Some(Action::Append { from: have }),
         _ => Some(Action::SetAside),
     })
 }
@@ -615,6 +618,7 @@ mod tests {
             }),
             progress: ProgressSink::default(),
             force_reindex: false,
+            pack: crate::kb::config::PackConfig::default(),
         };
         let query = FakeQuery::with([VolumeInfo {
             mount_point: disk.clone(),

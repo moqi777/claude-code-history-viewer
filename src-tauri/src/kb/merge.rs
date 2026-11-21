@@ -151,8 +151,11 @@ pub fn imported_name(path: &str, tag: &str) -> String {
         Some((d, f)) => (Some(d), f),
         None => (None, path),
     };
-    let ext_len = if file.ends_with(".jsonl.zst") {
-        ".jsonl.zst".len()
+    let ext_len = if let Some(ext) = [".jsonl.packed.zst", ".jsonl.zst"]
+        .into_iter()
+        .find(|ext| file.ends_with(ext))
+    {
+        ext.len()
     } else {
         file.rfind('.').map_or(0, |i| file.len() - i)
     };
@@ -182,7 +185,7 @@ fn classify(
     let compressed = std::path::Path::new(rel)
         .extension()
         .is_some_and(|e| e.eq_ignore_ascii_case("zst"))
-        || row.is_some_and(|r| r.is_compressed);
+        || row.is_some_and(FileRow::mirror_is_zst);
     if compressed {
         let same = size == incoming_len && same_prefix(local, incoming, size)?;
         return Ok(if same {
@@ -444,6 +447,10 @@ mod tests {
             imported_name("codex/sessions/2026/x.jsonl.zst", "ab12cd34"),
             "codex/sessions/2026/x.imported-ab12cd34.jsonl.zst"
         );
+        assert_eq!(
+            imported_name("claude/projects/p/x.jsonl.packed.zst", "ab12cd34"),
+            "claude/projects/p/x.imported-ab12cd34.jsonl.packed.zst"
+        );
         assert_eq!(imported_name("noext", "t"), "noext.imported-t");
         assert_eq!(tag_of("x").len(), 8);
         assert_eq!(tag_of("x"), tag_of("x"));
@@ -476,6 +483,7 @@ mod tests {
             is_compressed: false,
             deleted,
             origin: origin.map(str::to_string),
+            packed: false,
         }
     }
 

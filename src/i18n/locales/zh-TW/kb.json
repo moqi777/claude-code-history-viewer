@@ -530,5 +530,21 @@
   "kb.restore.oldLayout": "舊版備份（沒有記錄是哪台電腦）",
   "kb.backupFolder.line": "本機備份到：{{path}}",
   "kb.backupFolder.notYet": "本機在硬碟上的資料夾會在第一次備份時建立。",
-  "kb.backupFolder.oldLayout": "硬碟上還有一份沒有歸屬於任何電腦的舊版備份。它保持原樣沒有動；仍然可以從它還原。"
+  "kb.backupFolder.oldLayout": "硬碟上還有一份沒有歸屬於任何電腦的舊版備份。它保持原樣沒有動；仍然可以從它還原。",
+  "kb.shrink.title": "Compress old backups",
+  "kb.shrink.hint": "Backups of sessions with no new message for the number of days below are stored compressed. Search results stay the same; opening an old session takes under a second longer. You can switch it off at any time: compressed backups stay readable, and a session that gets new messages turns back into plain text by itself.",
+  "kb.shrink.enable": "Compress old backups automatically",
+  "kb.shrink.afterDays": "No new message for",
+  "kb.shrink.daysUnit": "days",
+  "kb.shrink.daysInvalid": "Enter a whole number from 1 to {{max}}",
+  "kb.shrink.stats": "{{files}} sessions compressed: {{plain}} → {{packed}}, {{saved}} saved",
+  "kb.shrink.none": "No session is compressed yet",
+  "kb.shrink.last": "Last compressed: {{at}}, took {{seconds}} s, {{files}} sessions",
+  "kb.shrink.now": "Compress now",
+  "kb.shrink.nowHint": "Compresses everything due at once, using the saved number of days",
+  "kb.shrink.nowDone": "Compressed {{files}} sessions, {{saved}} saved",
+  "kb.shrink.nowPartial": "Compressed {{files}} sessions ({{saved}} saved); {{failed}} could not be compressed, see the log",
+  "kb.shrink.nowSkipped": "A collection is running; try again in a moment",
+  "kb.shrink.nowFailed": "Compressing failed: {{message}}",
+  "kb.shrink.statsFailed": "Cannot read the compression figures: {{message}}"
 }

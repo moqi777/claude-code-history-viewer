@@ -14,6 +14,7 @@ mod load;
 mod rename;
 mod resume;
 mod search;
+mod stored;
 
 // Re-export all commands
 pub use chain::{resolve_session_chain, superseded_chain_paths};
@@ -23,6 +24,7 @@ pub use load::*;
 pub use rename::*;
 pub use resume::*;
 pub use search::*;
+pub use stored::{is_packed, session_bytes, twin_path};
 
 /// Split a provider URI into its scheme and remainder, or `None` if the value
 /// is an ordinary path.

@@ -74,6 +74,74 @@ pub fn copy_atomic(src: &Path, dst: &Path) -> Result<u64, String> {
     Ok(copied)
 }
 
+/// Write a new version of `dst` beside it as `<dst>.tmp-<pid>`, fsynced, and
+/// return that path; `dst` is not touched. The caller checks the result and
+/// then puts it in place with [`install_tmp`]. On a write error the temp file
+/// is removed. Creates missing parent directories.
+pub fn write_tmp(
+    dst: &Path,
+    write: impl FnOnce(&mut File) -> std::io::Result<()>,
+) -> Result<PathBuf, String> {
+    if let Some(parent) = dst.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|e| format!("cannot create {}: {e}", parent.display()))?;
+    }
+    let tmp = tmp_sibling(dst);
+    let run = || -> std::io::Result<()> {
+        let mut file = File::create(&tmp)?;
+        write(&mut file)?;
+        file.sync_all()
+    };
+    run().map_err(|e| {
+        let _ = fs::remove_file(&tmp);
+        format!("cannot write {}: {e}", tmp.display())
+    })?;
+    Ok(tmp)
+}
+
+/// Rename a checked temp file onto `dst` and flush the directory entry. The
+/// caller has cleared `dst` first: Windows refuses to replace a file that
+/// someone has open.
+pub fn install_tmp(tmp: &Path, dst: &Path) -> Result<(), String> {
+    fs::rename(tmp, dst).map_err(|e| format!("cannot move {} into place: {e}", tmp.display()))?;
+    if let Some(parent) = dst.parent() {
+        fsync_dir(parent);
+    }
+    Ok(())
+}
+
+/// Names of files a test wants [`remove_synced`] to refuse, as Windows does
+/// for a file someone has open.
+#[cfg(test)]
+pub static REFUSE_REMOVE: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+
+/// Remove a file and flush the directory entry.
+pub fn remove_synced(path: &Path) -> Result<(), String> {
+    #[cfg(test)]
+    {
+        let name = path.to_string_lossy();
+        if REFUSE_REMOVE
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .iter()
+            .any(|n| name.ends_with(n.as_str()))
+        {
+            return Err(format!("cannot remove {}: in use (test)", path.display()));
+        }
+    }
+    fs::remove_file(path).map_err(|e| format!("cannot remove {}: {e}", path.display()))?;
+    if let Some(parent) = path.parent() {
+        fsync_dir(parent);
+    }
+    Ok(())
+}
+
+/// Whether `name` is a temp file of [`write_tmp`] or [`copy_atomic`].
+pub fn is_tmp_name(name: &str) -> bool {
+    name.rsplit_once(".tmp-")
+        .is_some_and(|(_, pid)| !pid.is_empty() && pid.bytes().all(|b| b.is_ascii_digit()))
+}
+
 /// Append `src[from..]` to the end of `dst` (which must already be exactly
 /// `from` bytes long) and fsync. Returns bytes appended.
 pub fn append_tail(src: &Path, dst: &Path, from: u64) -> Result<u64, String> {

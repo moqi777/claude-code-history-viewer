@@ -166,6 +166,11 @@ const MIGRATIONS: &[&str] = &[
     // collected on this machine; otherwise the name of the device. Such a
     // file has no source on this machine, which is not the same as deleted.
     "ALTER TABLE files ADD COLUMN origin TEXT;",
+    // v6: the backup was compressed by us (`X.jsonl.packed.zst`, one zstd
+    // stream) while the source stays plain text. `mirror_offset`, `head_*`
+    // and every `byte_off` keep meaning positions in the plain text.
+    // `is_compressed` keeps meaning "the source is `.zst`" (Codex).
+    "ALTER TABLE files ADD COLUMN packed INTEGER NOT NULL DEFAULT 0;",
 ];
 
 /// Same definition as in migration v2, for [`reset_message_index`].
@@ -303,10 +308,33 @@ pub struct FileRow {
     pub deleted: bool,
     /// The device an imported file came from; `None` for files collected here.
     pub origin: Option<String>,
+    /// We compressed the backup (see migration v6).
+    pub packed: bool,
+}
+
+impl FileRow {
+    /// Whether the backup file is a zstd stream, whoever compressed it.
+    pub fn mirror_is_zst(&self) -> bool {
+        self.is_compressed || self.packed
+    }
 }
 
 const FILE_COLUMNS: &str = "id, source, source_path, mirror_rel, src_size, src_mtime_ns, \
      head_hash, head_len, mirror_offset, is_compressed, source_status, origin";
+
+/// `packed` when `files` has the column, `0` for a database that has not been
+/// migrated to v6 yet (read-only queries never migrate).
+fn packed_column(conn: &Connection) -> &'static str {
+    let has = conn
+        .prepare("SELECT 1 FROM pragma_table_info('files') WHERE name='packed'")
+        .and_then(|mut stmt| stmt.exists([]))
+        .unwrap_or(false);
+    if has {
+        "packed"
+    } else {
+        "0"
+    }
+}
 
 fn file_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<FileRow> {
     let source: String = row.get(1)?;
@@ -324,12 +352,14 @@ fn file_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<FileRow> {
         is_compressed: row.get::<_, i64>(9)? != 0,
         deleted: status == "deleted",
         origin: row.get(11)?,
+        packed: row.get::<_, i64>(12)? != 0,
     })
 }
 
 pub fn load_files(conn: &Connection) -> Result<Vec<FileRow>, String> {
+    let packed = packed_column(conn);
     let mut stmt = conn
-        .prepare(&format!("SELECT {FILE_COLUMNS} FROM files"))
+        .prepare(&format!("SELECT {FILE_COLUMNS}, {packed} FROM files"))
         .map_err(|e| err("prepare files", e))?;
     let rows = stmt
         .query_map([], file_from_row)
@@ -399,15 +429,17 @@ pub struct ImportedFile {
     pub first_seen_at: String,
     pub last_synced_at: String,
     pub origin: Option<String>,
+    pub packed: bool,
 }
 
 pub fn load_imported_files(conn: &Connection) -> Result<Vec<ImportedFile>, String> {
+    let packed = packed_column(conn);
     let mut stmt = conn
-        .prepare(
+        .prepare(&format!(
             "SELECT source, source_path, mirror_rel, src_size, src_mtime_ns, head_hash, \
              head_len, mirror_offset, is_compressed, source_status, deleted_at, \
-             first_seen_at, last_synced_at, origin FROM files ORDER BY id",
-        )
+             first_seen_at, last_synced_at, origin, {packed} FROM files ORDER BY id"
+        ))
         .map_err(|e| err("prepare files", e))?;
     let rows = stmt
         .query_map([], |r| {
@@ -427,6 +459,7 @@ pub fn load_imported_files(conn: &Connection) -> Result<Vec<ImportedFile>, Strin
                 first_seen_at: r.get(11)?,
                 last_synced_at: r.get(12)?,
                 origin: r.get(13)?,
+                packed: r.get::<_, i64>(14)? != 0,
             })
         })
         .map_err(|e| err("query files", e))?;
@@ -438,7 +471,8 @@ pub fn insert_imported_file(tx: &Transaction<'_>, f: &ImportedFile) -> Result<i6
     tx.execute(
         "INSERT INTO files (source, source_path, mirror_rel, src_size, src_mtime_ns, head_hash, \
          head_len, mirror_offset, is_compressed, source_status, deleted_at, first_seen_at, \
-         last_synced_at, origin) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)",
+         last_synced_at, origin, packed) \
+         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15)",
         params![
             f.source.as_str(),
             f.source_path,
@@ -453,7 +487,8 @@ pub fn insert_imported_file(tx: &Transaction<'_>, f: &ImportedFile) -> Result<i6
             f.deleted_at,
             f.first_seen_at,
             f.last_synced_at,
-            f.origin
+            f.origin,
+            i64::from(f.packed)
         ],
     )
     .map_err(|e| err("insert imported file", e))?;
@@ -534,7 +569,8 @@ pub fn set_source_path(tx: &Transaction<'_>, file_id: i64, new_path: &str) -> Re
 
 /// The same source file now stored another way (plain <-> `.zst`): follow it
 /// to its new path and mirror, and treat it as present. Its content is read
-/// again by the next pass over the file.
+/// again by the next pass over the file. A backup we had compressed is left
+/// behind (the duplicate cleanup proves and removes it).
 pub fn convert_file(
     tx: &Transaction<'_>,
     file_id: i64,
@@ -543,11 +579,27 @@ pub fn convert_file(
     compressed: bool,
 ) -> Result<(), String> {
     tx.execute(
-        "UPDATE files SET source_path=?2, mirror_rel=?3, is_compressed=?4, \
+        "UPDATE files SET source_path=?2, mirror_rel=?3, is_compressed=?4, packed=0, \
          source_status='present', deleted_at=NULL, origin=NULL WHERE id=?1",
         params![file_id, new_path, new_mirror_rel, i64::from(compressed)],
     )
     .map_err(|e| err("convert file", e))?;
+    Ok(())
+}
+
+/// The backup of a file now lives in `mirror_rel`, compressed by us or not.
+/// Nothing else changes: positions keep meaning the plain text.
+pub fn set_packed(
+    tx: &Transaction<'_>,
+    file_id: i64,
+    mirror_rel: &str,
+    packed: bool,
+) -> Result<(), String> {
+    tx.execute(
+        "UPDATE files SET mirror_rel=?2, packed=?3 WHERE id=?1",
+        params![file_id, mirror_rel, i64::from(packed)],
+    )
+    .map_err(|e| err("set packed", e))?;
     Ok(())
 }
 
