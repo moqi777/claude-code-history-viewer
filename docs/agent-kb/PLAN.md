@@ -56,14 +56,14 @@
 |---|---|---|
 | 0 | 底座评估 | ✅ 已完成，见第 2 节 |
 | 1 | 后台收集 + 原样备份 + 会话索引 | ✅ 已验收，见 `P1-acceptance.md` |
-| 2 | 设置向导 + 配置 + 知识库主页 + 移动硬盘备份 + 正式打包（AgentKB） | ✅ 已验收，见 `P2-acceptance.md`（注销重登一项待补） |
+| 2 | 设置向导 + 配置 + 知识库主页 + 移动硬盘备份 + 正式打包（AgentKB） | ✅ 已验收，见 `P2-acceptance.md`（注销重登按配置核对关闭） |
 | 3 | 全文搜索（中文分词）+ `--kb-search` 命令 + skill 一键安装到 Claude 和 Codex | ✅ 已验收，见 `P3-acceptance.md`、`P3.1-acceptance.md` |
 | 4 | 每日整理成笔记 + 完结标识 + 补跑 + 手动总结按钮 | ✅ 已验收，见 `P4-acceptance.md`、`P4.1-acceptance.md` |
 | 5 | 一键导出 / 导入迁移 | ✅ 已验收，见 `P5-acceptance.md` |
 | 6 | 语义搜索（本地向量） | ✅ 已验收，见 `P6-acceptance.md` |
 | 6.1 | 口语长句的排序小修 | ✅ 已验收并安装，见 `P6.1-acceptance.md` |
 | 6.2 | 搜索框打字被打断 | ✅ 已验收并安装 0.6.3，见 `P6.2-acceptance.md` |
-| **7** | **Windows 版** | 见下方"第 7 期约定"、`P7-windows.md`（和 6.1 同时进行） |
+| 7 | Windows 版 | ✅ 已验收（Mac/Windows 均 0.7.6），见 `P7-acceptance.md`；重启一项按配置核对通过 |
 | **8** | **旧备份压缩存放** | 见下方"第 8 期约定"、`P8-compressed-backups.md`（先只做设计，和第 7 期同时进行） |
 
 ### 第 4 期整理规则（已和用户确认，先记在这里）

@@ -37,7 +37,7 @@
 ## 4. 用户真机确认（2026-10-15）
 
 - [x] 9 向导：自动弹出，5 步顺利走完，每个测试都给出了明确结果（Claude 43 个、331MB；Codex 231 个、2.45GB；数据目录可写，剩余 134GB，识别出已有的 268 个会话；后台任务指向 `/Applications/AgentKB.app`）。完成后 leader 核对过：config.json 内容正确，plist 指向正式路径，launchd 立即补跑了一次（`sync_runs` 第 15 行 `trigger=schedule`，状态 ok）。旧的 11 个 `[Image` 标题已经随这次同步修正
-- [ ] 10 注销重登：**暂缓**，用户内存里有正在进行的工作，不方便注销。替代证据：leader 在隔离 HOME 里，以及向导安装后在本机，都看到 launchd 加载时立即补跑（RunAtLoad，和登录时走的是同一套机制）。等用户下次正常重启后，leader 查一下 `sync_runs` 补上这一项
+- [x] 10 注销重登：**11-21 按配置核对关闭，未实测**（见 `P7-acceptance.md` 第 12 节）。原记录：暂缓，用户内存里有正在进行的工作，不方便注销。替代证据：leader 在隔离 HOME 里，以及向导安装后在本机，都看到 launchd 加载时立即补跑（RunAtLoad，和登录时走的是同一套机制）。等用户下次正常重启后，leader 查一下 `sync_runs` 补上这一项
 - [x] 11 打开 Codex 会话：顶部显示 `AgentKB / basicbs-billingcenter_2.0`，中间栏是 Codex 的会话列表，带"Codex CLI"标签；有"返回知识库"按钮，没有删除、重命名入口
 
 ## 5. P2.1 小修清单（用户真机确认时发现）
