@@ -101,17 +101,18 @@ struct BoundaryClassifier {
 /// absence is exactly what marks "this file's history starts abruptly here;
 /// the messages before it live in a different file."
 fn find_dangling_parent_uuid(path: &Path) -> Option<String> {
-    {
-        let bytes = super::stored::session_bytes(path).ok()?;
-        memchr::memmem::find(&bytes, b"compact_boundary")?;
-    }
-    let reader = super::stored::open_lines(path).ok()?;
+    // Mapped, or decompressed once and kept (a compressed backup is then
+    // not decompressed a second time to be parsed).
+    let bytes = super::stored::session_bytes(path).ok()?;
+    memchr::memmem::find(&bytes, b"compact_boundary")?;
 
     let mut own_uuids: HashSet<String> = HashSet::new();
     let mut boundary_parents: Vec<String> = Vec::new();
 
-    for line in reader.lines() {
-        let Ok(line) = line else { continue };
+    for line in bytes.split(|b| *b == b'\n') {
+        let Ok(line) = std::str::from_utf8(line) else {
+            continue;
+        };
         let trimmed = line.trim();
         if trimmed.is_empty() {
             continue;

@@ -160,4 +160,35 @@ mod tests {
         assert_eq!(twin_path(Path::new("/a/s.json")), None);
         assert!(!is_packed(Path::new("/a/s.txt.packed.zst")));
     }
+
+    /// What opening a session in the App costs, for a real file named by
+    /// `P8B_OPEN` (plain or compressed): the same calls the viewer makes —
+    /// the first page of 100 messages, then the next page, then the count.
+    /// `cargo test --lib stored::tests::open_a_real_session -- --ignored --nocapture`
+    #[tokio::test]
+    #[ignore = "needs a real session file in P8B_OPEN"]
+    async fn open_a_real_session() {
+        use crate::commands::session::{
+            get_session_message_count, load_session_messages_paginated,
+        };
+        let path = std::env::var("P8B_OPEN").expect("P8B_OPEN");
+        let started = std::time::Instant::now();
+        let first = load_session_messages_paginated(path.clone(), 0, 100, None)
+            .await
+            .unwrap();
+        let first_ms = started.elapsed().as_millis();
+        let started = std::time::Instant::now();
+        let second = load_session_messages_paginated(path.clone(), 100, 100, None)
+            .await
+            .unwrap();
+        let second_ms = started.elapsed().as_millis();
+        let started = std::time::Instant::now();
+        let count = get_session_message_count(path.clone(), None).await.unwrap();
+        let count_ms = started.elapsed().as_millis();
+        eprintln!(
+            "P8B_OPEN {path}: first page {} msgs {first_ms} ms; second page {} msgs {second_ms} ms; count {count} in {count_ms} ms",
+            first.messages.len(),
+            second.messages.len()
+        );
+    }
 }
