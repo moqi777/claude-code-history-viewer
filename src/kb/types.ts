@@ -755,6 +755,7 @@ export interface KbRestoreReport {
   caught_up_bytes: number;
   missing_files: number;
   rehomed_files: number;
+  repointed_files: number;
   warnings: string[];
   duration_ms: number;
 }

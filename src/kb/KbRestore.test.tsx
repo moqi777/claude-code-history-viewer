@@ -66,6 +66,7 @@ const report = (patch: Partial<KbRestoreReport> = {}): KbRestoreReport => ({
   caught_up_bytes: 1000,
   missing_files: 0,
   rehomed_files: 0,
+  repointed_files: 0,
   warnings: [],
   duration_ms: 1000,
   ...patch,

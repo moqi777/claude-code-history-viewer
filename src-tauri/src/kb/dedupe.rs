@@ -50,6 +50,13 @@ fn twin_of(rel: &str) -> Option<String> {
     rel.ends_with(".jsonl").then(|| format!("{rel}.zst"))
 }
 
+/// The other names under which the content of the backup `rel` may be stored
+/// after the cleanup above removed `rel` itself (as `(name, compressed)`).
+/// A database snapshot taken before that still points to `rel`.
+pub fn replacements_of(rel: &str) -> Vec<(String, bool)> {
+    twin_of(rel).map(|twin| (twin, true)).into_iter().collect()
+}
+
 /// Remove the plain mirrors in `raw/` that no database row points to and whose
 /// `.zst` twin is referenced and proves to hold all of their content.
 pub fn clean_raw(conn: &Connection, data: &DataPaths, log: &SyncLog) -> Result<Removed, String> {

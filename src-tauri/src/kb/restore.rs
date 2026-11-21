@@ -80,6 +80,10 @@ pub struct RestoreReport {
     /// Sessions whose source file was recorded under another folder (another
     /// computer, another user name) and now point to where this computer keeps it.
     pub rehomed_files: u64,
+    /// Files the snapshot names that the backup holds under another name (the
+    /// duplicate cleanup replaced them after the snapshot was taken), proven
+    /// to hold the same content and now pointed to.
+    pub repointed_files: u64,
     pub warnings: Vec<String>,
     pub duration_ms: u64,
 }
@@ -408,6 +412,7 @@ struct CaughtUp {
     files: u64,
     bytes: u64,
     missing: u64,
+    repointed: u64,
     warnings: Vec<String>,
 }
 
@@ -425,16 +430,29 @@ fn catch_up(
         files: 0,
         bytes: 0,
         missing: 0,
+        repointed: 0,
         warnings: Vec::new(),
     };
     for row in &rows {
         cancel.check()?;
-        let present = staged_env
+        let mut row = row.clone();
+        let mut present = staged_env
             .data
             .mirror_path(&row.mirror_rel)
             .is_ok_and(|p| p.is_file());
+        if !present {
+            match repoint_to_replacement(staged_env, conn, &row) {
+                Ok(Some(moved)) => {
+                    row = moved;
+                    present = true;
+                    out.repointed += 1;
+                }
+                Ok(None) => {}
+                Err(message) => out.warnings.push(format!("{}: {message}", row.mirror_rel)),
+            }
+        }
         if present {
-            match sync::index_mirror_tail(staged_env, conn, row) {
+            match sync::index_mirror_tail(staged_env, conn, &row) {
                 Ok(0) => {}
                 Ok(bytes) => {
                     out.files += 1;
@@ -448,6 +466,65 @@ fn catch_up(
         meter.file_done();
     }
     Ok(out)
+}
+
+/// The snapshot is taken at most once a day, while the duplicate cleanup on
+/// the disk runs with every backup: a file the snapshot names may since have
+/// been removed in favour of the same content under another name (Codex
+/// compressed the source: `X.jsonl` -> `X.jsonl.zst`). Point the row there,
+/// but only when that file provably holds what the row vouches for: the same
+/// first `head_len` bytes and at least `mirror_offset` bytes in all.
+fn repoint_to_replacement(
+    env: &KbEnv,
+    conn: &Connection,
+    row: &db::FileRow,
+) -> Result<Option<db::FileRow>, String> {
+    if row.is_compressed {
+        return Ok(None);
+    }
+    for (rel, compressed) in super::dedupe::replacements_of(&row.mirror_rel) {
+        let Ok(path) = env.data.mirror_path(&rel) else {
+            continue;
+        };
+        if !path.is_file() || !holds_row_content(&path, compressed, row)? {
+            continue;
+        }
+        let source_path = format!("{}{}", row.source_path, &rel[row.mirror_rel.len()..]);
+        let tx = conn
+            .unchecked_transaction()
+            .map_err(|e| format!("begin: {e}"))?;
+        db::convert_file(&tx, row.id, &source_path, &rel, compressed)?;
+        tx.commit().map_err(|e| format!("commit: {e}"))?;
+        let mut moved = row.clone();
+        moved.source_path = source_path;
+        moved.mirror_rel = rel;
+        moved.is_compressed = compressed;
+        return Ok(Some(moved));
+    }
+    Ok(None)
+}
+
+/// Whether `path` (decompressed when `compressed`) starts with the bytes the
+/// row fingerprinted and is at least as long as the row's cursor.
+fn holds_row_content(path: &Path, compressed: bool, row: &db::FileRow) -> Result<bool, String> {
+    let open_err = |e: std::io::Error| format!("cannot read {}: {e}", path.display());
+    let file = File::open(path).map_err(open_err)?;
+    let mut reader: Box<dyn Read> = if compressed {
+        Box::new(zstd::stream::Decoder::new(file).map_err(open_err)?)
+    } else {
+        Box::new(file)
+    };
+    let head_len = u64::try_from(row.head_len).unwrap_or(0);
+    let mut head = Vec::new();
+    (&mut reader)
+        .take(head_len)
+        .read_to_end(&mut head)
+        .map_err(open_err)?;
+    if head.len() as u64 != head_len || Sha256::digest(&head).as_slice() != row.head_hash {
+        return Ok(false);
+    }
+    let rest = std::io::copy(&mut reader, &mut std::io::sink()).map_err(open_err)?;
+    Ok(head_len + rest >= u64::try_from(row.mirror_offset).unwrap_or(0))
 }
 
 /// Where a file of the backup lives on this computer: its place in `raw/`
@@ -618,16 +695,18 @@ pub fn restore(
         caught_up_bytes: caught.bytes,
         missing_files: caught.missing,
         rehomed_files: rehomed,
+        repointed_files: caught.repointed,
         warnings,
         duration_ms: u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
     };
     log.line(&format!(
-        "restore done: {} sessions, {} raw files, {} caught up ({} bytes), {} missing, set aside: {}",
+        "restore done: {} sessions, {} raw files, {} caught up ({} bytes), {} missing, {} repointed, set aside: {}",
         report.sessions,
         report.raw_files,
         report.caught_up_files,
         report.caught_up_bytes,
         report.missing_files,
+        report.repointed_files,
         report.set_aside.as_deref().unwrap_or("nothing")
     ));
     Ok(report)
@@ -1241,5 +1320,114 @@ mod tests {
         )
         .unwrap();
         eprintln!("search go-ios: {} sessions", hits.results.len());
+    }
+
+    const CODEX_ID: &str = "019e0000-aaaa-7000-8000-00000000c0de";
+    const CODEX_REL: &str =
+        "codex/sessions/2026/05/29/rollout-2026-05-29T11-14-48-019e0000-aaaa-7000-8000-00000000c0de.jsonl";
+
+    /// A library holding one Codex session whose user message is longer than
+    /// the index keeps, so showing it in full reads the backup file itself.
+    fn codex_library(root: &Path) -> Lib {
+        let mut lib = Lib::new(root, "a");
+        let codex = root.join("a/.codex");
+        lib.env.roots.codex = Some(codex.clone());
+        let meta = format!(
+            r#"{{"timestamp":"2026-05-29T11:15:04Z","type":"session_meta","payload":{{"id":"{CODEX_ID}","cwd":"/Users/me/app","originator":"codex-tui","source":"cli"}}}}"#
+        );
+        let long = "retry ".repeat(4000);
+        let message = format!(
+            r#"{{"timestamp":"2026-05-29T11:15:06Z","type":"response_item","payload":{{"type":"message","role":"user","content":[{{"type":"input_text","text":"{long}the end"}}]}}}}"#
+        );
+        let path = codex.join(CODEX_REL.strip_prefix("codex/").unwrap());
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(&path, format!("{meta}\n{message}\n")).unwrap();
+        lib.sync();
+        lib
+    }
+
+    /// What the disk looks like when Codex compressed the source after the
+    /// day's snapshot: the next backup carried `X.jsonl.zst` and the duplicate
+    /// cleanup removed `X.jsonl`, which the snapshot still names.
+    fn replace_with_zst(folder: &Path, content: &[u8]) {
+        let plain = folder.join("raw").join(CODEX_REL);
+        fs::write(
+            folder.join("raw").join(format!("{CODEX_REL}.zst")),
+            zstd::encode_all(content, 3).unwrap(),
+        )
+        .unwrap();
+        fs::remove_file(plain).unwrap();
+    }
+
+    fn mirror_row(lib: &Lib) -> (String, bool, String) {
+        lib.conn()
+            .query_row(
+                "SELECT mirror_rel, is_compressed, source_path FROM files WHERE source='codex'",
+                [],
+                |r| Ok((r.get(0)?, r.get::<_, i64>(1)? != 0, r.get(2)?)),
+            )
+            .unwrap()
+    }
+
+    #[test]
+    fn a_snapshot_naming_a_file_the_disk_cleanup_replaced_points_to_the_replacement() {
+        let dir = tempfile::tempdir().unwrap();
+        let source = codex_library(dir.path());
+        let folder = dir.path().join("disk/AgentKB-backup");
+        backup_of(&source, &folder);
+        let content = fs::read(folder.join("raw").join(CODEX_REL)).unwrap();
+        replace_with_zst(&folder, &content);
+
+        let target = Lib::new(dir.path(), "b");
+        let report = run(&target.env, &folder).unwrap();
+        assert_eq!(report.missing_files, 0);
+        assert_eq!(report.repointed_files, 1);
+        let (mirror_rel, compressed, source_path) = mirror_row(&target);
+        assert_eq!(mirror_rel, format!("{CODEX_REL}.zst"));
+        assert!(compressed);
+        assert!(source_path.ends_with(".jsonl.zst"), "{source_path}");
+
+        let shown = crate::kb::search::show_in(
+            &target.env.data,
+            &crate::kb::search::ShowParams {
+                session: CODEX_ID.into(),
+                full: Some(true),
+                max_chars: Some(100_000),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert!(
+            shown.messages.iter().any(|m| m.text.ends_with("the end")),
+            "the whole message is read from the replacement"
+        );
+    }
+
+    #[test]
+    fn a_replacement_that_does_not_hold_the_rows_content_is_not_pointed_to() {
+        let dir = tempfile::tempdir().unwrap();
+        let source = codex_library(dir.path());
+        let folder = dir.path().join("disk/AgentKB-backup");
+        backup_of(&source, &folder);
+        let content = fs::read(folder.join("raw").join(CODEX_REL)).unwrap();
+        // Shorter than the cursor, and another beginning.
+        replace_with_zst(&folder, &content[..content.len() / 2]);
+        let mut other = content.clone();
+        other[10] ^= 1;
+        let target = Lib::new(dir.path(), "b");
+        let report = run(&target.env, &folder).unwrap();
+        assert_eq!((report.missing_files, report.repointed_files), (1, 0));
+        assert_eq!(
+            mirror_row(&target).0,
+            CODEX_REL,
+            "left as the snapshot had it"
+        );
+
+        let folder2 = dir.path().join("disk2/AgentKB-backup");
+        backup_of(&source, &folder2);
+        replace_with_zst(&folder2, &other);
+        let target2 = Lib::new(dir.path(), "c");
+        let report = run(&target2.env, &folder2).unwrap();
+        assert_eq!((report.missing_files, report.repointed_files), (1, 0));
     }
 }
