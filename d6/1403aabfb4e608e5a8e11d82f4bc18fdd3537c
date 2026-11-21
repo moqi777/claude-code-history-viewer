@@ -1,0 +1,138 @@
+src/i18n/locales/zh-TW/kb.json
+  s_671b822990bcae::t_d45c11e5610c57 533-549
+src-tauri/src/kb/merge.rs
+  s_671b822990bcae::t_a8d367ca594606 154-158,188,450-452
+  s_671b822990bcae::t_983b474711c348 486
+src/kb/branding.ts
+  s_671b822990bcae::t_93d272d1b47d16 5
+src/i18n/locales/zh-CN/kb.json
+  s_671b822990bcae::t_d45c11e5610c57 533-549
+src/i18n/locales/ja/kb.json
+  s_671b822990bcae::t_d45c11e5610c57 533-549
+src/kb/KbSettings.test.tsx
+  s_671b822990bcae::t_fd6b5152101485 39-47,60,291-335
+src-tauri/src/lib.rs
+  s_671b822990bcae::t_080d722d311331 202-203
+src-tauri/src/kb/platform/windows.rs
+  s_671b822990bcae::t_e7c821d26eb9cb 90-91,242-247
+src/kb/api.ts
+  s_671b822990bcae::t_b1d1c0b19a51d4 42-43,54-55
+src/kb/fixtures.ts
+  s_671b822990bcae::t_93d272d1b47d16 23
+src-tauri/src/kb/dedupe.rs
+  s_671b822990bcae::t_dfc538fff5ce9f 343
+  s_671b822990bcae::t_35517b869a5e9e 247
+  s_671b822990bcae::t_cec314b5052e99 1,3-18,34,50-72,76-119,126-129,132-133,142,146-167,169-174,182-184,194-195,198-232,234-240,344,357-360
+  s_671b822990bcae::t_bd7429b8134623 73-75,345-356
+src-tauri/src/kb/shrink.rs
+  s_671b822990bcae::t_bd7429b8134623 125-127,231-233,286-290,498,512-517
+  s_671b822990bcae::t_a596a58d01847b 79-84,87-94
+  s_671b822990bcae::t_62a82c7b656b7f 278-280
+  s_671b822990bcae::t_cf985c164fc20b 1-78,85-86,95-124,128-146,148-173,177-230,234-277,281-285,291-483,523-563
+  s_671b822990bcae::t_e0d0d7f8582cc5 174-176
+  s_671b822990bcae::t_622edd6764567c 147
+  s_671b822990bcae::t_0f9785260af911 484-497,499-511,518-522
+src-tauri/src/kb/fsutil.rs
+  s_671b822990bcae::t_35517b869a5e9e 77-105,107-144
+  s_671b822990bcae::t_bd7429b8134623 106
+src-tauri/src/kb/sync.rs
+  s_671b822990bcae::t_164b52b1750dca 135-140,287-302,308-309,466,557,560,675,726,799-821
+  s_671b822990bcae::t_fe6f7242ace2ba 88
+  s_671b822990bcae::t_622edd6764567c 286,304-305,1058
+  s_671b822990bcae::t_e7c821d26eb9cb 61-62
+src-tauri/src/commands/session/load.rs
+  s_671b822990bcae::t_f1d8df194d9cb2 2052-2053,2437-2438,2491-2492,2533-2534
+src-tauri/src/kb/import.rs
+  s_671b822990bcae::t_a8d367ca594606 810-813
+src-tauri/src/kb/backup.rs
+  s_671b822990bcae::t_a8d367ca594606 120-121,125
+  s_671b822990bcae::t_622edd6764567c 122,621
+src-tauri/src/kb/restore.rs
+  s_671b822990bcae::t_7d3f4370f1f7e5 539-540
+  s_671b822990bcae::t_dfc538fff5ce9f 474-477,483,487,491,494,498-503,506-507
+  s_671b822990bcae::t_622edd6764567c 763
+src-tauri/src/kb/shrink_tests.rs
+  s_671b822990bcae::t_0bf7621896d4d6 1-2,6-37,52-71,73-100,102-228,236-263,267-306,312-354,365-387,393-395,400-414,420-430,436,441-466,471-527,529-542,551-563,569-662,668-708,714
+  s_671b822990bcae::t_33379db0e5dd43 715-723,725-748,750-767,769-782,787,789-796,798,800-808,815
+  s_671b822990bcae::t_3461dda5029f72 38,45-51
+  s_671b822990bcae::t_bd7429b8134623 39-44,264-266,307-311,355-359,388-392,396-399,415-419,431-435,437-440,467-470,528,543-550,564-568,663-667,709-713,783-786,810-814
+  s_671b822990bcae::t_e0d0d7f8582cc5 229-235
+  s_671b822990bcae::t_388a8ef3ca73c8 749
+  s_671b822990bcae::t_178990c7e6a461 809
+  s_671b822990bcae::t_350a5f857c367b 3-5,72,101,360-364,724,768,788,797,799
+src-tauri/src/kb/mirror.rs
+  s_671b822990bcae::t_983b474711c348 380
+src-tauri/src/kb/search.rs
+  s_671b822990bcae::t_bd7429b8134623 1824-1826
+  s_671b822990bcae::t_9d9f329736ebf0 1794-1799,1811-1823,1827-1830
+src-tauri/src/commands/session/chain.rs
+  s_671b822990bcae::t_bd7429b8134623 392-395,398-402,404-407
+  s_671b822990bcae::t_fb9b1a8cd9d48b 377-391,396-397,403,408-409
+  s_671b822990bcae::t_cd0469d8753a3e 27-29,31-32,105-106,108,142,178
+  s_671b822990bcae::t_a19777b3f56c8a 17
+src-tauri/src/commands/session/stored.rs
+  s_671b822990bcae::t_c5cc9db010e9b2 1-24,26-71,75-141,147-163
+  s_671b822990bcae::t_622edd6764567c 25,72-74
+  s_671b822990bcae::t_bd7429b8134623 142-146
+src-tauri/src/kb/import_tests.rs
+  s_671b822990bcae::t_de68fc29a3fe8f 510,515
+  s_671b822990bcae::t_019f513df8127d 1142-1207
+src-tauri/src/kb/commands.rs
+  s_671b822990bcae::t_080d722d311331 181-199
+src/kb/KbSettings.tsx
+  s_671b822990bcae::t_f80bfd425a3bfa 18,22
+  s_671b822990bcae::t_d45c11e5610c57 88,172
+src/kb/KbShrinkField.tsx
+  s_671b822990bcae::t_523481807b9b4a 1-7,10-141
+  s_671b822990bcae::t_f80bfd425a3bfa 8-9
+src-tauri/src/kb/export.rs
+  s_671b822990bcae::t_bd7429b8134623 221-224
+src/i18n/locales/ko/kb.json
+  s_671b822990bcae::t_d45c11e5610c57 533-549
+src/kb/testkit.ts
+  s_671b822990bcae::t_fd6b5152101485 10-11
+src-tauri/src/kb/db.rs
+  s_671b822990bcae::t_f3394aca6a8e8c 169-173,311-319,325-338,355,360,362,432,436,438,441-442,462,474-475,490-491,572-573,582,590-602
+src-tauri/src/kb/cli.rs
+  s_671b822990bcae::t_0f9785260af911 19,40,580-591,593-606
+  s_671b822990bcae::t_c107810d95bf83 592
+src-tauri/src/kb/config.rs
+  s_671b822990bcae::t_62a82c7b656b7f 185-213,234,254
+  s_671b822990bcae::t_e7c821d26eb9cb 466
+src/kb/logic.ts
+  s_671b822990bcae::t_f80bfd425a3bfa 29-34
+  s_671b822990bcae::t_d03bffcc365358 1
+src/i18n/locales/en/kb.json
+  s_671b822990bcae::t_d45c11e5610c57 533-549
+src-tauri/src/commands/session/mod.rs
+  s_671b822990bcae::t_f1d8df194d9cb2 17,27
+src-tauri/src/kb/mod.rs
+  s_671b822990bcae::t_e7c821d26eb9cb 39
+  s_671b822990bcae::t_93d272d1b47d16 49
+  s_671b822990bcae::t_a596a58d01847b 77-78
+src-tauri/src/kb/digest/tests.rs
+  s_671b822990bcae::t_622edd6764567c 1018
+src-tauri/src/providers/codex.rs
+  s_671b822990bcae::t_38d96e88ae56e2 87-89,133-135,137-152,155,160
+  s_671b822990bcae::t_fb9b1a8cd9d48b 1990-2004,2010
+  s_671b822990bcae::t_622edd6764567c 136
+  s_671b822990bcae::t_bd7429b8134623 2005-2009
+src/kb/types.ts
+  s_671b822990bcae::t_b1d1c0b19a51d4 199-200,204-233
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.11",
+  "base_commit_sha": "d61403aabfb4e608e5a8e11d82f4bc18fdd3537c",
+  "prompts": {},
+  "sessions": {
+    "s_671b822990bcae": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e710b70a-de2e-4c86-a60f-e568a4b56ca7",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "moqing <moqing@tsign.cn>"
+    }
+  }
+}
