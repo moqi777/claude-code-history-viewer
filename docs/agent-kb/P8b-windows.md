@@ -54,3 +54,19 @@ Windows 原生 `cargo check --features windows-cli` 通过。核对了 SDK 中 `
 - 构建和校验记录为 `D:\AgentKB-build\p80\nsis-build.log` 和同目录的 `package-result.json`。真实文件占用测试使用的 release 主程序 SHA-256 为 `90FE08A95BEC93B6B5E573973BF34321E712E2A93B87F86CE1E968D54E63D8BF`。
 
 本次未运行安装包，未安装或升级 `D:\AgentKB`，未写真实 `kb.db`，未修改任务计划，未重启电脑。
+
+## Windows 真机覆盖升级（2026-11-22）
+
+经用户同意，22:31（北京时间）将 0.8.0 覆盖安装到原目录 `D:\AgentKB`。安装前核对安装包 SHA-256 为 `1A9075160D914624EE7CE112C5BF182E938B7F14739B0BB96EFD64737E2D7EB5`，没有 `AgentKB.exe` 或 `agentkb-cli.exe` 进程。用 Windows 非阻塞独占文件锁探测 `kb.lock`、`digest.lock`、`vectors\embed.lock`，三把锁均可取得并已立即释放。NSIS 以覆盖更新模式退出 0，注册的安装目录仍为 `D:\AgentKB`。
+
+0.8.0 的 `agentkb-cli.exe` 不提供 `--kb-sync`，该调用返回用法信息、退出 2，数据库版本和收集记录未变。随后使用同一安装目录的 `AgentKB.exe --kb-sync` 无界面收集一次。
+
+| 检查 | 实测结果 |
+| --- | --- |
+| 手动收集 | 22:31:44 至 22:31:56，`status=ok`、0 个错误、退出 0；`sync_runs.id=10182`，`trigger=cli`、`ok=1` |
+| 数据库与迁移备份 | `PRAGMA user_version` 从 5 升到 6；保留 `D:\AgentKB\kb.db.pre-v6-20261122T143144Z`（41,934,848 字节），只读检查确认备份仍为 v5 |
+| 旧备份压缩 | 300 个文件，失败 0、待处理 0、旧副本残留 0；247,850,442 → 62,622,726 字节，净省 **185,227,716 字节**（约 176.65 MiB） |
+| 搜索 | `agentkb-cli.exe --kb-search "手机连接电脑控制那个事" --limit 5` 退出 0，以 `normal` 模式返回 5 条结果 |
+| App 首页 | 打开安装版并留在知识库首页；通过 Windows UI Automation 确认窗口可见，页面有「立即收集」，版本栏显示 `AgentKB 0.8.0` |
+
+升级前和首页打开后导出的正式收集任务 XML 完全一致。未重启、未运行卸载器，也未手动删除文件；旧备份由本轮收集的压缩流程替换。安装、收集、搜索和首页核验记录保存在 `D:\AgentKB-build\p80\upgrade-*`。
