@@ -1,0 +1,21 @@
+docs/agent-kb/P9-team-sharing.md
+  s_d36650c874050e::t_4f920ea425d6ad 1-86
+docs/agent-kb/PLAN.md
+  ai_agent 67-68
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.11",
+  "base_commit_sha": "e613038bbb0b38a295a1d07f86405ed17af567cb",
+  "prompts": {},
+  "sessions": {
+    "s_d36650c874050e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b38f992d-ac43-419d-b65b-9a23bb2786a1",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "moqing <moqing@tsign.cn>"
+    }
+  }
+}
