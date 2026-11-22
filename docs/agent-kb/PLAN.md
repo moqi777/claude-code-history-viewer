@@ -64,7 +64,8 @@
 | 6.1 | 口语长句的排序小修 | ✅ 已验收并安装，见 `P6.1-acceptance.md` |
 | 6.2 | 搜索框打字被打断 | ✅ 已验收并安装 0.6.3，见 `P6.2-acceptance.md` |
 | 7 | Windows 版 | ✅ 已验收（Mac/Windows 均 0.7.6），见 `P7-acceptance.md`；重启一项按配置核对通过 |
-| **8** | **旧备份压缩存放** | 设计 `P8-design.md` 已过；P8a 重复备份已验收（0.6.4）；**P8b 压缩进行中**，见 `P8b-compress.md`（0.8.0） |
+| 8 | 旧备份压缩存放 | ✅ P8a（0.6.4）、P8b（0.8.0）已验收，Mac 和 Windows 均已安装，见 `P8a-acceptance.md`、`P8b-acceptance.md` |
+| **9** | **团队共享** | 方案稿 `P9-team-sharing.md`，待用户确认后拆 9a–9d |
 
 ### 第 4 期整理规则（已和用户确认，先记在这里）
 
