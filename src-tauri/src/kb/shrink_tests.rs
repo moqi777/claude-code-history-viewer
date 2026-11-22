@@ -172,11 +172,14 @@ impl Sb {
     }
 
     fn row(&self, source_path: &Path) -> FileRow {
-        let want = source_path.to_string_lossy();
+        let zst = source_path.with_extension("jsonl.zst");
         db::load_files(&self.conn())
             .unwrap()
             .into_iter()
-            .find(|r| r.source_path == want || r.source_path == format!("{want}.zst"))
+            .find(|r| {
+                let path = Path::new(&r.source_path);
+                path == source_path || path == zst
+            })
             .unwrap()
     }
 
@@ -801,8 +804,8 @@ fn the_disk_backup_follows_and_a_restore_finds_the_compressed_backup() {
     let row = target.row(&target.claude_file(S1));
     assert!(row.packed);
     assert_eq!(
-        row.source_path,
-        target.claude_file(S1).to_string_lossy(),
+        Path::new(&row.source_path),
+        target.claude_file(S1),
         "rehomed to the plain source name"
     );
     assert_eq!(target.show(S1), show_before);

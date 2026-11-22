@@ -9,6 +9,7 @@
 //! | `X.jsonl` | `X.jsonl.packed.zst` | we compressed the backup, removing the plain one failed or was cut short |
 //! | `X.jsonl.packed.zst` | `X.jsonl` | we unpacked it for new messages, same |
 //! | `X.jsonl.packed.zst` | `X.jsonl.zst` | Codex compressed the source after we had compressed the backup |
+//! | `X.jsonl.zst` | `X.jsonl` or `X.jsonl.packed.zst` | the local source is plain after restoring or unpacking a Codex rollout |
 //!
 //! The one left behind holds nothing the other does not: this module removes
 //! it, but only after proving that every byte of it is the start of (or all
@@ -94,6 +95,7 @@ fn twins_of(rel: &str) -> Vec<(String, Storage)> {
     let wanted: &[Storage] = match storage_of(rel) {
         Some((_, Storage::Plain)) => &[Storage::Codex, Storage::Packed],
         Some((_, Storage::Packed)) => &[Storage::Plain, Storage::Codex],
+        Some((_, Storage::Codex)) => &[Storage::Plain, Storage::Packed],
         _ => &[],
     };
     let Some((plain, _)) = storage_of(rel) else {
@@ -350,14 +352,20 @@ mod tests {
             names("a/b.jsonl.packed.zst"),
             ["a/b.jsonl", "a/b.jsonl.zst"]
         );
-        assert!(
-            names("a/b.jsonl.zst").is_empty(),
-            "the source's own storage is never left behind"
+        assert_eq!(
+            names("a/b.jsonl.zst"),
+            ["a/b.jsonl", "a/b.jsonl.packed.zst"]
         );
-        assert!(names("a/b.jsonl.prev-20260101T000000Z").is_empty());
-        assert!(names("a/b.jsonl.conflict-20260101T000000Z").is_empty());
-        assert!(names("a/b.jsonl.packed.zst.tmp-123").is_empty());
-        assert!(names("a/b.txt.packed.zst").is_empty());
+        assert_eq!(
+            names("a/b.jsonl.prev-20260101T000000Z"),
+            Vec::<String>::new()
+        );
+        assert_eq!(
+            names("a/b.jsonl.conflict-20260101T000000Z"),
+            Vec::<String>::new()
+        );
+        assert_eq!(names("a/b.jsonl.packed.zst.tmp-123"), Vec::<String>::new());
+        assert_eq!(names("a/b.txt.packed.zst"), Vec::<String>::new());
     }
 
     #[test]

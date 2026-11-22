@@ -24,6 +24,8 @@ pub const HEAD_BYTES: u64 = 4096;
 pub enum Decision {
     /// Size and mtime match the cursor; the file is not even opened.
     Unchanged,
+    /// The compressed mirror already has the source bytes; rebuild its index.
+    ReindexCompressed,
     New,
     /// Source grew in place; continue from this offset.
     Append {
@@ -51,10 +53,23 @@ pub fn decide(
     };
     let unchanged =
         u64::try_from(row.src_size).ok() == Some(seen.size) && row.src_mtime_ns == seen.mtime_ns;
+    // A restore can switch the row back to a local source whose stats still
+    // match the snapshot, but whose plain mirror no longer exists.
     if unchanged {
-        return Ok(Decision::Unchanged);
+        return Ok(if mirror.is_file() {
+            Decision::Unchanged
+        } else {
+            Decision::Rewrite
+        });
     }
     if seen.compressed {
+        if fs::metadata(mirror).is_ok_and(|meta| meta.len() == seen.size)
+            && is_prefix_of(mirror, src).map_err(|e| {
+                format!("cannot compare compressed mirror {}: {e}", mirror.display())
+            })?
+        {
+            return Ok(Decision::ReindexCompressed);
+        }
         return Ok(Decision::Rewrite);
     }
     let prior_size = u64::try_from(row.src_size).unwrap_or(0);
@@ -108,6 +123,7 @@ pub fn execute(
     let mut rotated = false;
     let from = match decision {
         Decision::Unchanged => return Err("execute called for an unchanged file".into()),
+        Decision::ReindexCompressed => 0,
         Decision::Append { from } => {
             // Crash recovery: anything past the cursor is an orphan of a run
             // that died before committing.
@@ -139,7 +155,9 @@ pub fn execute(
         }
     };
 
-    let (copied, longest, offset) = if seen.compressed {
+    let (copied, longest, offset) = if decision == Decision::ReindexCompressed {
+        (0, index_compressed(mirror, feed)?, seen.size)
+    } else if seen.compressed {
         copy_compressed(src, mirror, feed)?
     } else {
         append_plain(src, mirror, from, feed)?
@@ -340,6 +358,13 @@ fn copy_compressed(
         .map_err(|e| format!("cannot move {} into place: {e}", tmp.display()))?;
     sync_parent_dir(mirror);
 
+    Ok((copied, index_compressed(mirror, feed)?, copied))
+}
+
+fn index_compressed(
+    mirror: &Path,
+    feed: &mut dyn FnMut(&[u8]) -> Result<(), String>,
+) -> Result<u64, String> {
     let reader = File::open(mirror)
         .and_then(zstd::stream::Decoder::new)
         .map_err(|e| format!("cannot decompress {}: {e}", mirror.display()))?;
@@ -347,7 +372,7 @@ fn copy_compressed(
     if !tail.tail.is_empty() {
         feed(&tail.tail)?;
     }
-    Ok((copied, tail.longest_line, copied))
+    Ok(tail.longest_line)
 }
 
 #[cfg(test)]

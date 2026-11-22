@@ -1413,6 +1413,72 @@ mod tests {
     }
 
     #[test]
+    fn collecting_the_local_codex_source_after_restore_keeps_one_complete_backup() {
+        for local_compressed in [false, true] {
+            let dir = tempfile::tempdir().unwrap();
+            let source = codex_library(dir.path());
+            let folder = dir.path().join("disk/AgentKB-backup");
+            backup_of(&source, &folder);
+            let content = fs::read(folder.join("raw").join(CODEX_REL)).unwrap();
+            replace_with_zst(&folder, &content);
+            let compressed_rel = format!("{CODEX_REL}.zst");
+            let expected_rel = if local_compressed {
+                let codex = source.env.roots.codex.as_ref().unwrap();
+                let plain = codex.join(CODEX_REL.strip_prefix("codex/").unwrap());
+                fs::copy(
+                    folder.join("raw").join(&compressed_rel),
+                    plain.with_extension("jsonl.zst"),
+                )
+                .unwrap();
+                fs::remove_file(plain).unwrap();
+                &compressed_rel
+            } else {
+                // The original rollout still matches the snapshot's size and mtime.
+                CODEX_REL
+            };
+
+            let report = run(&source.env, &folder).unwrap();
+            assert_eq!((report.missing_files, report.repointed_files), (0, 1));
+            assert_eq!(mirror_row(&source).0, compressed_rel);
+
+            let summary = source.sync();
+            assert_eq!(summary.status, "ok", "{:?}", summary.errors);
+            let rows = db::load_files(&source.conn()).unwrap();
+            let [row] = rows.as_slice() else {
+                panic!("expected one file row, got {}", rows.len());
+            };
+            assert_eq!(row.mirror_rel, expected_rel);
+            assert_eq!(row.is_compressed, local_compressed);
+            let raw = source.env.data.raw();
+            let files: Vec<String> = fsutil::walk_files(&raw)
+                .into_iter()
+                .map(|(rel, _)| rel)
+                .collect();
+            assert_eq!(files, [expected_rel]);
+            let saved = fs::read(raw.join(expected_rel)).unwrap();
+            let saved = if local_compressed {
+                zstd::decode_all(saved.as_slice()).unwrap()
+            } else {
+                saved
+            };
+            assert_eq!(saved, content);
+
+            let shown = crate::kb::search::show_in(
+                &source.env.data,
+                &crate::kb::search::ShowParams {
+                    session: CODEX_ID.into(),
+                    full: Some(true),
+                    max_chars: Some(100_000),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+            let messages: Vec<&str> = shown.messages.iter().map(|m| m.text.as_str()).collect();
+            assert_eq!(messages, [format!("{}the end", "retry ".repeat(4000))]);
+        }
+    }
+
+    #[test]
     fn a_replacement_that_does_not_hold_the_rows_content_is_not_pointed_to() {
         let dir = tempfile::tempdir().unwrap();
         let source = codex_library(dir.path());
